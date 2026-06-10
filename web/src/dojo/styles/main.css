@@ -1,0 +1,31 @@
+:root {
+  color: var(--dojo-text-dark-brown);
+  background:
+    radial-gradient(circle at top, rgba(63, 107, 74, 0.14), transparent 35%),
+    linear-gradient(
+      180deg,
+      var(--dojo-bg-off-white) 0%,
+      var(--dojo-bg-warm-paper) 100%
+    );
+  font-family: Georgia, "Times New Roman", serif;
+  line-height: 1.5;
+  font-weight: 400;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+a {
+  color: inherit;
+}
+
+#app {
+  min-height: 100vh;
+}
