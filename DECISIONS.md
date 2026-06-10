@@ -69,3 +69,17 @@ Add GitHub Actions CI now and make it run the same `just` commands developers us
 ### Consequence
 
 Local and remote verification stay consistent, and changes to workflow commands should happen in one place instead of diverging between CI and development.
+
+## 2026-06-10 — Adopt self-contained ExecPlans for complex implementation work
+
+### Context
+
+The initial `agents/execplan.md` was too lightweight. It provided a simple planning checklist but did not capture enough context, validation, discoveries, or decision history for a stateless coding agent to safely resume complex work.
+
+### Decision
+
+Adopt a self-contained living ExecPlan workflow for non-trivial implementation tasks. Task-specific plans live under `plans/`, while the reusable skill definition lives in `agents/execplan.md`.
+
+### Consequence
+
+Complex work now has a durable task-local source of truth with progress, discoveries, decision log, validation, and recovery notes. This adds a small amount of process overhead, but only for work where the added structure reduces implementation risk. Durable architectural decisions must still be copied into `DECISIONS.md`.

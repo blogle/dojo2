@@ -42,6 +42,18 @@ Use `direnv + nix develop`. Do not rely on host-installed Python, Node, `uv`, `p
 - Before finishing, run lint, typecheck, tests, docs build, and container build when possible
 - Report any command not run or any failing command
 
+## ExecPlans
+
+Use an ExecPlan for non-trivial implementation work: multi-file features, schema changes, significant refactors, public API changes, persistent data changes, Nix/devshell/CI/tooling changes, architecture changes, or work that may span more than one focused coding session.
+
+ExecPlans are defined in `agents/execplan.md`.
+
+Task-specific plans live in `plans/YYYY-MM-DD-short-task-name.md`.
+
+An ExecPlan is a self-contained living implementation document. It must include purpose, context, progress, discoveries, decision log, concrete steps, validation, recovery notes, interfaces, and outcomes. Keep it updated as implementation proceeds.
+
+Do not use ExecPlans as vague TODO lists. They must be specific enough for a stateless agent or novice human to resume the task from the plan alone.
+
 ## Forbidden Actions
 
 - Do not use React
