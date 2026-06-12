@@ -32,17 +32,17 @@ test-web:
 lint: lint-api lint-web
 
 lint-api:
-	cd api && ruff check .
+	cd api && uv run python -m ruff check .
 
 lint-web:
 	cd web && pnpm lint
 
 format:
-	cd api && ruff format . && ruff check --fix .
+	cd api && uv run python -m ruff format . && uv run python -m ruff check --fix .
 	cd web && pnpm format
 
 format-check:
-	cd api && ruff format --check . && ruff check .
+	cd api && uv run python -m ruff format --check . && uv run python -m ruff check .
 	cd web && pnpm format:check
 
 typecheck:
@@ -59,4 +59,4 @@ clean:
 	rm -rf api/dist api/build web/dist docs/book .pytest_cache .mypy_cache .ruff_cache
 
 container:
-	nix build .#container
+	env -u LD_LIBRARY_PATH nix build .#container

@@ -1,13 +1,20 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 :root {
   color: var(--dojo-text-dark-brown);
   background:
-    radial-gradient(circle at top, rgba(63, 107, 74, 0.14), transparent 35%),
-    linear-gradient(
-      180deg,
-      var(--dojo-bg-off-white) 0%,
-      var(--dojo-bg-warm-paper) 100%
-    );
-  font-family: Georgia, "Times New Roman", serif;
+    linear-gradient(180deg, rgba(63, 107, 74, 0.08) 0%, transparent 20%),
+    repeating-linear-gradient(
+      90deg,
+      rgba(138, 118, 100, 0.08) 0,
+      rgba(138, 118, 100, 0.08) 1px,
+      transparent 1px,
+      transparent 28px
+    ),
+    var(--dojo-bg-off-white);
+  font-family: var(--dojo-ui-font);
   line-height: 1.5;
   font-weight: 400;
 }
@@ -20,6 +27,48 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  border-radius: 0;
+  border: 1px solid var(--dojo-border-brown);
+  background: var(--dojo-bg-off-white);
+  color: var(--dojo-text-dark-brown);
+  padding: 0.55rem 0.7rem;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:hover,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--dojo-green-dark);
+  outline-offset: 1px;
+}
+
+.field {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.field > span {
+  color: var(--dojo-text-muted-brown);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+}
+
+.toggle {
+  display: inline-flex;
+  gap: 0.5rem;
+  align-items: center;
 }
 
 a {

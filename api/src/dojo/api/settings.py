@@ -16,10 +16,7 @@ class Settings(BaseSettings):
     duckdb_path: str = Field(default=".local/dojo.duckdb", alias="DUCKDB_PATH")
     google_oauth_client_id: str = Field(default="", alias="GOOGLE_OAUTH_CLIENT_ID")
     google_oauth_client_secret: str = Field(default="", alias="GOOGLE_OAUTH_CLIENT_SECRET")
-    google_oauth_redirect_uri: str = Field(
-        default="http://localhost:8000/api/onboarding/google/callback",
-        alias="GOOGLE_OAUTH_REDIRECT_URI",
-    )
+    google_oauth_redirect_uri: str = Field(default="", alias="GOOGLE_OAUTH_REDIRECT_URI")
     google_oauth_scopes: str = Field(
         default="https://www.googleapis.com/auth/spreadsheets.readonly",
         alias="GOOGLE_OAUTH_SCOPES",
@@ -27,10 +24,19 @@ class Settings(BaseSettings):
     session_secret: str = Field(default="dev-only-change-me", alias="SESSION_SECRET")
     log_level: str = Field(default="debug", alias="LOG_LEVEL")
     cors_allowed_origins: str = Field(default="http://localhost:5173", alias="CORS_ALLOWED_ORIGINS")
+    dev_fixture_mode: bool = Field(default=False, alias="DEV_FIXTURE_MODE")
 
     @property
     def cors_origins(self) -> list[str]:
         return [origin.strip() for origin in self.cors_allowed_origins.split(",") if origin.strip()]
+
+    @property
+    def oauth_configured(self) -> bool:
+        return bool(
+            self.google_oauth_client_id
+            and self.google_oauth_client_secret
+            and self.google_oauth_redirect_uri
+        )
 
 
 @lru_cache(maxsize=1)

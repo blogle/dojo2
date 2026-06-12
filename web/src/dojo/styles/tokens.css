@@ -1,9 +1,17 @@
 :root {
   --dojo-bg-off-white: #f4f1ea;
   --dojo-bg-warm-paper: #ece5d8;
+  --dojo-bg-muted-sand: #d8cdbb;
   --dojo-text-dark-brown: #241c15;
   --dojo-text-soft-brown: #4a3728;
+  --dojo-text-muted-brown: #6b5848;
   --dojo-border-brown: #8a7664;
+  --dojo-border-tan: #c8b8a6;
   --dojo-green-muted: #3f6b4a;
   --dojo-green-dark: #2e4d36;
+  --dojo-green-pale: #dce8d8;
+  --dojo-brown-negative: #6f3f2a;
+  --dojo-brown-warning: #8a5a32;
+  --dojo-ui-font: "Segoe UI", "Helvetica Neue", sans-serif;
+  --dojo-mono-font: "SFMono-Regular", "Cascadia Code", monospace;
 }

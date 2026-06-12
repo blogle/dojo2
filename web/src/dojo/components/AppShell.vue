@@ -1,32 +1,39 @@
+<script setup lang="ts">
+import { onMounted } from "vue";
+
+import { useAppState } from "../state/app";
+import ErrorBanner from "./ErrorBanner.vue";
+import TopNav from "./TopNav.vue";
+
+const app = useAppState();
+
+onMounted(async () => {
+  if (!app.state.bootstrap) {
+    await app.initialize();
+  }
+});
+</script>
+
 <template>
   <main class="shell">
-    <section class="panel">
+    <div class="inner-shell">
+      <TopNav :ready="app.ready.value" />
+      <ErrorBanner v-if="app.state.error" :message="app.state.error" />
       <slot />
-    </section>
+    </div>
   </main>
 </template>
 
 <style scoped>
 .shell {
-  display: grid;
   min-height: 100vh;
-  padding: 2rem;
-  place-items: center;
+  padding: 1.5rem;
 }
 
-.panel {
-  width: min(100%, 44rem);
-  border: 1px solid var(--dojo-border-brown);
-  border-radius: 24px;
-  padding: clamp(1.5rem, 4vw, 3rem);
-  background: rgba(244, 241, 234, 0.88);
-  box-shadow: 0 24px 60px rgba(36, 28, 21, 0.12);
-  backdrop-filter: blur(6px);
-}
-
-@media (max-width: 640px) {
-  .shell {
-    padding: 1rem;
-  }
+.inner-shell {
+  max-width: 96rem;
+  margin: 0 auto;
+  display: grid;
+  gap: 1rem;
 }
 </style>

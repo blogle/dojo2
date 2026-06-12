@@ -16,6 +16,7 @@ def test_settings_load_from_environment(monkeypatch) -> None:
         "GOOGLE_OAUTH_SCOPES", "https://www.googleapis.com/auth/spreadsheets.readonly"
     )
     monkeypatch.setenv("SESSION_SECRET", "secret")
+    monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
 
     settings = Settings()
 
@@ -23,4 +24,9 @@ def test_settings_load_from_environment(monkeypatch) -> None:
     assert settings.duckdb_path == ".local/test.duckdb"
     assert settings.google_oauth_client_id == "client-id"
     assert settings.google_oauth_client_secret == "client-secret"
+    assert (
+        settings.google_oauth_redirect_uri == "http://localhost:8000/api/onboarding/google/callback"
+    )
     assert settings.session_secret == "secret"
+    assert settings.dev_fixture_mode is True
+    assert settings.oauth_configured is True

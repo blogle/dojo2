@@ -1,0 +1,118 @@
+from __future__ import annotations
+
+from importlib import reload
+from urllib.parse import parse_qs, urlparse
+
+from fastapi.testclient import TestClient
+
+import dojo.api.main as main_module
+import dojo.api.routes as routes_module
+from dojo.api.settings import get_settings
+
+
+def test_app_bootstrap_and_import_flow(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("DUCKDB_PATH", str(tmp_path / "api-test.duckdb"))
+    monkeypatch.setenv("SESSION_SECRET", "test-secret")
+    monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
+    monkeypatch.setenv(
+        "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
+    )
+    get_settings.cache_clear()
+    reload(main_module)
+
+    with TestClient(main_module.app) as client:
+        status = client.get("/api/app/status")
+        assert status.status_code == 200
+        assert status.json()["ready"] is False
+
+        imported = client.post(
+            "/api/import/google-sheet", json={"sheet_url_or_id": "fixture://default"}
+        )
+        assert imported.status_code == 200
+        assert imported.json()["ok"] is True
+
+        bootstrap = client.get("/api/bootstrap")
+        assert bootstrap.status_code == 200
+        assert bootstrap.json()["app_status"]["ready"] is True
+
+        budget = client.get("/api/budget", params={"month": "2026-02", "show_hidden": "true"})
+        assert budget.status_code == 200
+        assert budget.json()["available_to_budget_minor"] == 404000
+
+        transactions = client.get("/api/transactions", params={"show_hidden": "true", "limit": 100})
+        assert transactions.status_code == 200
+        assert len(transactions.json()["items"]) == 12
+
+
+def test_google_start_endpoint_reports_fixture_mode_without_oauth(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("DUCKDB_PATH", str(tmp_path / "api-test.duckdb"))
+    monkeypatch.setenv("SESSION_SECRET", "test-secret")
+    monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
+    monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_ID", "")
+    monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_SECRET", "")
+    monkeypatch.setenv("GOOGLE_OAUTH_REDIRECT_URI", "")
+    get_settings.cache_clear()
+    reload(main_module)
+
+    with TestClient(main_module.app) as client:
+        response = client.post("/api/onboarding/google/start")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["configured"] is False
+        assert payload["fixture_mode"] is True
+        assert payload["authorized"] is False
+
+
+def test_google_import_requires_session_oauth_token(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("DUCKDB_PATH", str(tmp_path / "api-test.duckdb"))
+    monkeypatch.setenv("SESSION_SECRET", "test-secret")
+    monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_ID", "client-id")
+    monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_SECRET", "client-secret")
+    monkeypatch.setenv(
+        "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
+    )
+    get_settings.cache_clear()
+    reload(main_module)
+
+    with TestClient(main_module.app) as client:
+        response = client.post(
+            "/api/import/google-sheet", json={"sheet_url_or_id": "sheet-123"}
+        )
+        assert response.status_code == 400
+        assert "Complete the OAuth step" in response.json()["detail"]
+
+
+def test_google_callback_stores_token_in_memory_and_updates_status(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("DUCKDB_PATH", str(tmp_path / "api-test.duckdb"))
+    monkeypatch.setenv("SESSION_SECRET", "test-secret")
+    monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_ID", "client-id")
+    monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_SECRET", "client-secret")
+    monkeypatch.setenv("FRONTEND_BASE_URL", "http://localhost:5173")
+    monkeypatch.setenv(
+        "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
+    )
+    get_settings.cache_clear()
+    reload(main_module)
+    monkeypatch.setattr(
+        routes_module,
+        "exchange_google_code",
+        lambda **_: {"access_token": "token-123", "token_type": "Bearer"},
+    )
+
+    with TestClient(main_module.app) as client:
+        start = client.post("/api/onboarding/google/start")
+        assert start.status_code == 200
+        auth_url = start.json()["auth_url"]
+        assert isinstance(auth_url, str)
+        state = parse_qs(urlparse(auth_url).query)["state"][0]
+
+        callback = client.get(
+            "/api/onboarding/google/callback",
+            params={"code": "abc", "state": state},
+        )
+        assert callback.status_code == 200
+        assert "dojo-google-oauth" in callback.text
+
+        status = client.get("/api/onboarding/google/status")
+        assert status.status_code == 200
+        assert status.json()["authorized"] is True

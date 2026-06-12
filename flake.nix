@@ -14,9 +14,13 @@
         };
         python = pkgs.python312;
         apiPython = python.withPackages (ps: [
+          ps.duckdb
           ps.fastapi
+          ps.httpx
+          ps.itsdangerous
           ps.pydantic
           ps.pydantic-settings
+          ps.pytz
           ps.uvicorn
         ]);
         apiSource = pkgs.runCommand "dojo-api-source" { } ''
@@ -45,6 +49,10 @@
             libffi
             zlib
             stdenv.cc.cc
+          ];
+          LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [
+            pkgs.stdenv.cc.cc
+            pkgs.zlib
           ];
         };
 
