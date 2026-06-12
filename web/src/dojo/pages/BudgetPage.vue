@@ -21,7 +21,6 @@ const metrics = computed(() => {
   return [
     { label: "Activity", value: formatMoneyMinor(summary.month_activity_minor) },
     { label: "Budgeted", value: formatMoneyMinor(summary.month_budgeted_minor) },
-    { label: "Carried over", value: formatMoneyMinor(summary.carried_over_minor) },
     { label: "Income", value: formatMoneyMinor(summary.reportable_income_minor) },
   ];
 });

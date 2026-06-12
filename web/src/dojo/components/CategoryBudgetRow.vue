@@ -20,7 +20,7 @@ const open = ref(false);
   <div class="budget-row">
     <div class="summary">
       <strong>{{ category.name }}</strong>
-      <span>{{ formatMoneyMinor(category.carried_over_minor) }}</span>
+      <span>{{ formatMoneyMinor(category.starting_available_minor) }}</span>
       <span>{{ formatMoneyMinor(category.month_budgeted_minor) }}</span>
       <span>{{ formatMoneyMinor(category.month_activity_minor) }}</span>
       <span class="available">{{ formatMoneyMinor(category.available_minor) }}</span>

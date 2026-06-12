@@ -12,7 +12,7 @@ function stubApi(ready: boolean): void {
     summary: {
       month_activity_minor: -7000,
       month_budgeted_minor: 18000,
-      carried_over_minor: 49000,
+      starting_available_minor: 49000,
       reportable_income_minor: 100000,
       spent_minor: 7000,
     },
@@ -24,6 +24,12 @@ function stubApi(ready: boolean): void {
         is_hidden: false,
         is_system: false,
         is_deletable: true,
+        totals: {
+          available_minor: 20000,
+          month_activity_minor: 0,
+          month_budgeted_minor: 10000,
+          starting_available_minor: 10000,
+        },
         categories: [
           {
             category_id: "cat-1",
@@ -40,7 +46,7 @@ function stubApi(ready: boolean): void {
             available_minor: 20000,
             month_activity_minor: 0,
             month_budgeted_minor: 10000,
-            carried_over_minor: 10000,
+            starting_available_minor: 10000,
           },
         ],
       },
@@ -122,6 +128,7 @@ describe("dojo app", () => {
       expect(wrapper.text()).toContain("Budget");
       expect(wrapper.text()).toContain("Available To Budget");
       expect(wrapper.text()).toContain("Grocery");
+      expect(wrapper.text()).not.toContain("Carried over");
     });
   });
 });

@@ -5,6 +5,7 @@ from datetime import date, datetime
 from typing import Any, cast
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
+from dojo.aggregate_validation import build_validation_report
 from dojo.constants import (
     ACCOUNT_CLASS_BUDGET,
     ACCOUNT_CLASS_TRACKING_BALANCE,
@@ -18,6 +19,7 @@ from dojo.constants import (
     STATUS_CLEARED,
     SYSTEM_ATB_BUCKET_ID,
     SYSTEM_CATEGORY_ATB,
+    SYSTEM_CATEGORY_BALANCE_ADJUSTMENT,
     SYSTEM_CATEGORY_STARTING_BALANCE,
     SYSTEM_CATEGORY_TRANSFER,
     SYSTEM_CREDIT_CARD_GROUP_ID,
@@ -127,17 +129,7 @@ class DojoService:
         }
 
     def default_budget_month(self) -> str:
-        row = self.db.fetch_one(
-            """
-            SELECT MAX(entry_date) AS latest_date FROM (
-                SELECT date AS entry_date FROM current_transactions
-                UNION ALL
-                SELECT date AS entry_date FROM current_allocations
-            )
-            """
-        )
-        latest_date = row["latest_date"] if row and row["latest_date"] else date.today()
-        return latest_date.strftime("%Y-%m")
+        return date.today().strftime("%Y-%m")
 
     def import_sheet_data(
         self,
@@ -454,7 +446,13 @@ class DojoService:
                         "name": valuation.raw_name,
                         "is_hidden": False,
                         "is_active": True,
-                        "metadata": json_dumps({"imported_from_net_worth": True}),
+                        "metadata": json_dumps(
+                            {
+                                "imported_from_net_worth": True,
+                                "net_worth_match_kind": valuation.match_kind,
+                                "net_worth_match_candidates": list(valuation.match_candidates),
+                            }
+                        ),
                         "valid_from": imported_at,
                         "valid_to": MAX_TS,
                         "created_at": imported_at,
@@ -475,7 +473,13 @@ class DojoService:
                     "effective_date": valuation.effective_date,
                     "amount_minor": valuation.amount_minor,
                     "notes": valuation.notes,
-                    "metadata": json_dumps({}),
+                    "metadata": json_dumps(
+                        {
+                            "normalized_name": valuation.normalized_name,
+                            "match_kind": valuation.match_kind,
+                            "match_candidates": list(valuation.match_candidates),
+                        }
+                    ),
                     "valid_from": imported_at,
                     "valid_to": MAX_TS,
                     "created_at": imported_at,
@@ -484,113 +488,7 @@ class DojoService:
             )
 
     def _validate_bundle(self, bundle: ParsedImportBundle) -> dict[str, Any]:
-        checks: list[dict[str, Any]] = []
-        hard_failures: list[dict[str, Any]] = []
-        warnings: list[dict[str, Any]] = []
-
-        if not bundle.expected:
-            warnings.append(
-                {
-                    "code": "missing_expected_snapshot",
-                    "message": "No expected parity snapshot was available; only structural validation ran.",
-                }
-            )
-        else:
-            snapshot = self.snapshot_for_validation(months=["2026-01", "2026-02"])
-            self._check_equal(
-                checks,
-                hard_failures,
-                "account_count",
-                snapshot["account_count"],
-                bundle.expected["account_count"],
-            )
-            self._check_equal(
-                checks,
-                hard_failures,
-                "category_group_count",
-                snapshot["category_group_count"],
-                bundle.expected["category_group_count"],
-            )
-            self._check_equal(
-                checks,
-                hard_failures,
-                "category_count",
-                snapshot["category_count"],
-                bundle.expected["category_count"],
-            )
-            self._check_equal(
-                checks,
-                hard_failures,
-                "net_worth_valuation_rows",
-                snapshot["net_worth_valuation_rows"],
-                bundle.expected["net_worth_valuation_rows"],
-            )
-            self._check_equal(
-                checks,
-                hard_failures,
-                "atb_available_minor",
-                snapshot["atb_available_minor"],
-                bundle.expected["atb_available_minor"],
-            )
-            self._check_equal(
-                checks,
-                hard_failures,
-                "account_balances",
-                snapshot["account_balances"],
-                bundle.expected["account_balances"],
-            )
-            self._check_equal(
-                checks,
-                hard_failures,
-                "category_available",
-                snapshot["category_available"],
-                bundle.expected["category_available"],
-            )
-            self._check_equal(
-                checks,
-                hard_failures,
-                "month_activity",
-                snapshot["month_activity"],
-                bundle.expected["month_activity"],
-            )
-            self._check_equal(
-                checks,
-                hard_failures,
-                "month_budgeted",
-                snapshot["month_budgeted"],
-                bundle.expected["month_budgeted"],
-            )
-            self._check_equal(
-                checks,
-                hard_failures,
-                "carried_over",
-                snapshot["carried_over"],
-                bundle.expected["carried_over"],
-            )
-            self._check_equal(
-                checks,
-                hard_failures,
-                "native_net_worth_minor",
-                snapshot["native_net_worth_minor"],
-                bundle.expected["native_net_worth_minor"],
-            )
-
-        return {
-            "passed": not hard_failures,
-            "checks": checks,
-            "hard_failures": hard_failures,
-            "warnings": warnings,
-            "summary": {
-                "accounts": len(self.list_accounts(show_hidden=True)),
-                "categories": len(
-                    self.list_categories(month=self.default_budget_month(), show_hidden=True)
-                ),
-                "transactions": len(self.list_transactions(limit=10_000, show_hidden=True)),
-                "allocations": len(self.db.fetch_all("SELECT * FROM current_allocations")),
-                "valuations": len(self.db.fetch_all("SELECT * FROM current_net_worth_valuations")),
-                "source_kind": bundle.source_kind,
-            },
-        }
+        return build_validation_report(self, bundle)
 
     def snapshot_for_validation(self, months: list[str]) -> dict[str, Any]:
         account_balances = {
@@ -610,7 +508,7 @@ class DojoService:
         }
         month_activity: dict[str, dict[str, int]] = {}
         month_budgeted: dict[str, dict[str, int]] = {}
-        carried_over: dict[str, dict[str, int]] = {}
+        starting_available: dict[str, dict[str, int]] = {}
         for month in months:
             categories = self.list_categories(month=month, show_hidden=True)
             month_activity[month] = {
@@ -619,8 +517,8 @@ class DojoService:
             month_budgeted[month] = {
                 category["name"]: category["month_budgeted_minor"] for category in categories
             }
-            carried_over[month] = {
-                category["name"]: category["carried_over_minor"] for category in categories
+            starting_available[month] = {
+                category["name"]: category["starting_available_minor"] for category in categories
             }
         return {
             "account_count": len(self.list_accounts(show_hidden=True)),
@@ -638,7 +536,7 @@ class DojoService:
             "category_available": category_available,
             "month_activity": month_activity,
             "month_budgeted": month_budgeted,
-            "carried_over": carried_over,
+            "starting_available": starting_available,
             "native_net_worth_minor": self.get_net_worth()["current_net_worth_minor"],
         }
 
@@ -769,7 +667,26 @@ class DojoService:
             ]
             if group["is_hidden"] and not show_hidden and not visible_categories:
                 continue
-            results.append(group | {"categories": visible_categories})
+            results.append(
+                group
+                | {
+                    "categories": visible_categories,
+                    "totals": {
+                        "available_minor": sum(
+                            category["available_minor"] for category in visible_categories
+                        ),
+                        "month_activity_minor": sum(
+                            category["month_activity_minor"] for category in visible_categories
+                        ),
+                        "month_budgeted_minor": sum(
+                            category["month_budgeted_minor"] for category in visible_categories
+                        ),
+                        "starting_available_minor": sum(
+                            category["starting_available_minor"] for category in visible_categories
+                        ),
+                    },
+                }
+            )
         return results
 
     def list_categories(self, *, month: str, show_hidden: bool) -> list[dict[str, Any]]:
@@ -802,7 +719,7 @@ class DojoService:
                     "month_budgeted_minor": self.compute_month_budgeted(
                         bucket_id, month_start, month_end
                     ),
-                    "carried_over_minor": self.compute_carried_over(
+                    "starting_available_minor": self.compute_carried_over(
                         category["category_id"], bucket_id, month_start
                     ),
                     "linked_account_id": settings.get(category["category_id"], {}).get(
@@ -837,11 +754,11 @@ class DojoService:
                 "month_budgeted_minor": sum(
                     category["month_budgeted_minor"] for category in visible_standard
                 ),
-                "carried_over_minor": sum(
-                    category["carried_over_minor"] for category in visible_standard
+                "starting_available_minor": sum(
+                    category["starting_available_minor"] for category in visible_standard
                 ),
                 "reportable_income_minor": self.compute_reportable_income(month_start, month_end),
-                "spent_minor": self.compute_spent(month_start, month_end),
+                "spent_minor": self.compute_spent(month_start, month_end, show_hidden=show_hidden),
             },
             "groups": self.list_category_groups(month=month, show_hidden=show_hidden),
         }
@@ -850,9 +767,12 @@ class DojoService:
         accounts = {
             row["account_id"]: row for row in self.db.fetch_all("SELECT * FROM current_accounts")
         }
-        valuations = self.db.fetch_all(
+        valuations = [
+            self._decode_json_fields(row, {"metadata"})
+            for row in self.db.fetch_all(
             "SELECT * FROM current_net_worth_valuations ORDER BY effective_date DESC, created_at DESC"
-        )
+            )
+        ]
         latest_valuation_by_account: dict[str, dict[str, Any]] = {}
         for valuation in valuations:
             account_id = valuation["account_id"] or valuation["raw_name"]
@@ -866,21 +786,45 @@ class DojoService:
                 total += amount
                 items.append(
                     account
-                    | {"net_worth_minor": amount, "source": "ledger", "ignored_import_value": False}
+                    | {
+                        "account_name": account["name"],
+                        "net_worth_minor": amount,
+                        "source": "ledger",
+                        "ignored_import_value": False,
+                        "ignored_reason": None,
+                        "match_candidates": [],
+                    }
                 )
 
         for valuation in latest_valuation_by_account.values():
             account_row = accounts.get(cast(str, valuation["account_id"]))
             if account_row is None:
                 continue
+            metadata = cast(dict[str, Any], valuation.get("metadata") or {})
+            account_name = account_row["name"] if account_row else valuation["raw_name"]
+            if metadata.get("match_kind") == "AMBIGUOUS_BUDGET_ACCOUNT":
+                items.append(
+                    valuation
+                    | {
+                        "account_name": account_name,
+                        "net_worth_minor": valuation["amount_minor"],
+                        "source": "imported_valuation",
+                        "ignored_import_value": True,
+                        "ignored_reason": "ambiguous_budget_duplicate",
+                        "match_candidates": metadata.get("match_candidates", []),
+                    }
+                )
+                continue
             if account_row["account_class"] == ACCOUNT_CLASS_BUDGET:
                 items.append(
                     valuation
                     | {
-                        "account_name": account_row["name"],
+                        "account_name": account_name,
                         "net_worth_minor": valuation["amount_minor"],
                         "source": "imported_valuation",
                         "ignored_import_value": True,
+                        "ignored_reason": "duplicate_budget_account",
+                        "match_candidates": metadata.get("match_candidates", []),
                     }
                 )
                 continue
@@ -888,10 +832,12 @@ class DojoService:
             items.append(
                 valuation
                 | {
-                    "account_name": account_row["name"],
+                    "account_name": account_name,
                     "net_worth_minor": valuation["amount_minor"],
                     "source": "imported_valuation",
                     "ignored_import_value": False,
+                    "ignored_reason": None,
+                    "match_candidates": metadata.get("match_candidates", []),
                 }
             )
         return {"current_net_worth_minor": total, "items": items}
@@ -1236,14 +1182,25 @@ class DojoService:
             SELECT t.amount_minor, t.system_category
             FROM current_transactions t
             JOIN current_accounts a ON a.account_id = t.account_id
-            WHERE a.account_class = ? AND t.system_category IN (?, ?)
+            WHERE a.account_class = ? AND t.system_category IN (?, ?, ?)
             """,
-            (ACCOUNT_CLASS_BUDGET, SYSTEM_CATEGORY_ATB, SYSTEM_CATEGORY_STARTING_BALANCE),
+            (
+                ACCOUNT_CLASS_BUDGET,
+                SYSTEM_CATEGORY_ATB,
+                SYSTEM_CATEGORY_STARTING_BALANCE,
+                SYSTEM_CATEGORY_BALANCE_ADJUSTMENT,
+            ),
         )
         allocations = self.db.fetch_all(
             "SELECT from_bucket_id, to_bucket_id, amount_minor FROM current_allocations"
         )
-        total = int(sum(int(transaction["amount_minor"]) for transaction in transactions))
+        total = 0
+        for transaction in transactions:
+            if transaction["system_category"] == SYSTEM_CATEGORY_STARTING_BALANCE:
+                if transaction["amount_minor"] > 0:
+                    total += int(transaction["amount_minor"])
+                continue
+            total += int(transaction["amount_minor"])
         for allocation in allocations:
             if allocation["to_bucket_id"] == str(SYSTEM_ATB_BUCKET_ID):
                 total += allocation["amount_minor"]
@@ -1330,7 +1287,7 @@ class DojoService:
             if transaction["amount_minor"] > 0 and month_start <= transaction["date"] <= month_end
         )
 
-    def compute_spent(self, month_start: date, month_end: date) -> int:
+    def compute_spent(self, month_start: date, month_end: date, *, show_hidden: bool) -> int:
         categories = {
             row["category_id"]: row for row in self.db.fetch_all("SELECT * FROM current_categories")
         }
@@ -1342,6 +1299,8 @@ class DojoService:
         for transaction in transactions:
             category = categories[transaction["category_id"]]
             if category["category_kind"] != CATEGORY_KIND_STANDARD:
+                continue
+            if category["is_hidden"] and not show_hidden:
                 continue
             if not month_start <= transaction["date"] <= month_end:
                 continue

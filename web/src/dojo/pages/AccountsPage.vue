@@ -2,6 +2,7 @@
 import AccountDetailPanel from "../components/AccountDetailPanel.vue";
 import AccountEditor from "../components/AccountEditor.vue";
 import AccountList from "../components/AccountList.vue";
+import HiddenEntitiesToggle from "../components/HiddenEntitiesToggle.vue";
 import PageHeader from "../components/PageHeader.vue";
 import Panel from "../components/Panel.vue";
 import { useAppState } from "../state/app";
@@ -12,6 +13,9 @@ const app = useAppState();
 <template>
   <div class="page-grid">
     <PageHeader title="Accounts" subtitle="Track balances, hidden entities, and credit card liabilities." />
+    <div class="toolbar">
+      <HiddenEntitiesToggle :model-value="app.state.showHidden" @update:model-value="app.setShowHidden($event)" />
+    </div>
     <Panel><AccountEditor @submit="app.saveAccount($event)" /></Panel>
     <AccountList :accounts="app.state.accounts" />
     <Panel>
@@ -30,5 +34,10 @@ const app = useAppState();
 .page-grid {
   display: grid;
   gap: 1rem;
+}
+
+.toolbar {
+  display: flex;
+  justify-content: flex-end;
 }
 </style>

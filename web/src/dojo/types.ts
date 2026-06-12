@@ -50,7 +50,7 @@ export type Category = {
   available_minor: number;
   month_activity_minor: number;
   month_budgeted_minor: number;
-  carried_over_minor: number;
+  starting_available_minor: number;
   linked_account_id?: string | null;
 };
 
@@ -61,6 +61,12 @@ export type CategoryGroup = {
   is_hidden: boolean;
   is_system: boolean;
   is_deletable: boolean;
+  totals: {
+    available_minor: number;
+    month_activity_minor: number;
+    month_budgeted_minor: number;
+    starting_available_minor: number;
+  };
   categories: Category[];
 };
 
@@ -70,7 +76,7 @@ export type BudgetResponse = {
   summary: {
     month_activity_minor: number;
     month_budgeted_minor: number;
-    carried_over_minor: number;
+    starting_available_minor: number;
     reportable_income_minor: number;
     spent_minor: number;
   };
@@ -94,6 +100,8 @@ export type NetWorthItem = {
   net_worth_minor: number;
   source: string;
   ignored_import_value: boolean;
+  ignored_reason?: string | null;
+  match_candidates?: string[];
 };
 
 export type NetWorthResponse = {
@@ -105,8 +113,34 @@ export type ImportResult = {
   ok: boolean;
   validation_report: {
     passed: boolean;
-    checks: Array<{ label: string; actual: unknown; expected: unknown; passed: boolean }>;
-    hard_failures: Array<{ label: string; actual: unknown; expected: unknown; passed: boolean }>;
+    checks: Array<{
+      label: string;
+      entity_type: string;
+      entity_name: string;
+      month: string | null;
+      expected_value: unknown;
+      actual_value: unknown;
+      expected_minor: number | null;
+      actual_minor: number | null;
+      absolute_delta_minor: number | null;
+      passed: boolean;
+      source_reference: string[];
+      notes: string;
+    }>;
+    hard_failures: Array<{
+      label: string;
+      entity_type: string;
+      entity_name: string;
+      month: string | null;
+      expected_value: unknown;
+      actual_value: unknown;
+      expected_minor: number | null;
+      actual_minor: number | null;
+      absolute_delta_minor: number | null;
+      passed: boolean;
+      source_reference: string[];
+      notes: string;
+    }>;
     warnings: Array<{ code: string; message: string }>;
     summary: Record<string, unknown>;
   };

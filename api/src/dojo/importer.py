@@ -458,7 +458,10 @@ class ParsedAllocation:
 class ParsedValuation:
     valuation_id: str
     raw_name: str
+    normalized_name: str
     account_name: str | None
+    match_kind: str
+    match_candidates: tuple[str, ...]
     effective_date: date
     amount_minor: int
     notes: str
@@ -1264,7 +1267,16 @@ def parse_net_worth_named_ranges(
         ),
     )
     account_names = {account.name for account in accounts}
+    account_names_by_normalized: dict[str, list[str]] = {}
+    for account in accounts:
+        normalized_account_name = normalize_financial_entity_name(account.name)
+        account_names_by_normalized.setdefault(normalized_account_name, []).append(account.name)
     debt_names = access.optional_name_set("config.net_worth_debts")
+    normalized_debt_names = {
+        normalize_financial_entity_name(name)
+        for name in debt_names
+        if normalize_financial_entity_name(name)
+    }
 
     records: list[ParsedValuation] = []
     for offset, row in enumerate(rows, start=1):
@@ -1280,14 +1292,33 @@ def parse_net_worth_named_ranges(
         amount_minor = parse_money_value(amount_raw)
         if amount_minor is None:
             raise ValueError(f"Net worth row {offset} contains an invalid amount")
-        if raw_name in debt_names and amount_minor > 0:
+        normalized_name = normalize_financial_entity_name(raw_name)
+        if (raw_name in debt_names or normalized_name in normalized_debt_names) and amount_minor > 0:
             amount_minor = -amount_minor
+
+        account_name: str | None = None
+        match_kind = "TRACKING_ONLY"
+        match_candidates: tuple[str, ...] = ()
+        if raw_name in account_names:
+            account_name = raw_name
+            match_kind = "EXACT_BUDGET_ACCOUNT"
+        else:
+            normalized_candidates = account_names_by_normalized.get(normalized_name, [])
+            if len(normalized_candidates) == 1:
+                account_name = normalized_candidates[0]
+                match_kind = "NORMALIZED_BUDGET_ACCOUNT"
+            elif len(normalized_candidates) > 1:
+                match_kind = "AMBIGUOUS_BUDGET_ACCOUNT"
+                match_candidates = tuple(sorted(normalized_candidates))
 
         records.append(
             ParsedValuation(
                 valuation_id=_stable_id("valuation", f"{date_raw}:{raw_name}:{offset}"),
                 raw_name=raw_name,
-                account_name=raw_name if raw_name in account_names else None,
+                normalized_name=normalized_name,
+                account_name=account_name,
+                match_kind=match_kind,
+                match_candidates=match_candidates,
                 effective_date=parse_date_value(date_raw),
                 amount_minor=amount_minor,
                 notes=row["notes"].strip(),
@@ -1369,6 +1400,10 @@ def normalize_category_reference_name(raw_name: str) -> str:
     return raw_name.strip().rstrip("\\/").casefold()
 
 
+def normalize_financial_entity_name(raw_name: str) -> str:
+    return "".join(character for character in raw_name.casefold() if character.isalnum())
+
+
 def _none_if_blank(raw: str) -> str | None:
     value = raw.strip()
     return value or None
@@ -1415,6 +1450,7 @@ __all__ = [
     "extract_sheet_id",
     "fixture_bundle",
     "map_system_category",
+    "normalize_financial_entity_name",
     "normalize_named_range_name",
     "parse_configuration_accounts",
     "parse_configuration_categories_and_groups",

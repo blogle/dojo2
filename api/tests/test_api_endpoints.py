@@ -37,11 +37,63 @@ def test_app_bootstrap_and_import_flow(monkeypatch, tmp_path) -> None:
 
         budget = client.get("/api/budget", params={"month": "2026-02", "show_hidden": "true"})
         assert budget.status_code == 200
-        assert budget.json()["available_to_budget_minor"] == 404000
+        assert budget.json()["available_to_budget_minor"] == 424000
+        assert budget.json()["groups"][0]["totals"]["available_minor"] == 26000
 
         transactions = client.get("/api/transactions", params={"show_hidden": "true", "limit": 100})
         assert transactions.status_code == 200
         assert len(transactions.json()["items"]) == 12
+
+
+def test_budget_accounts_and_net_worth_endpoints_return_validated_aggregates(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("DUCKDB_PATH", str(tmp_path / "api-test.duckdb"))
+    monkeypatch.setenv("SESSION_SECRET", "test-secret")
+    monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
+    monkeypatch.setenv(
+        "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
+    )
+    get_settings.cache_clear()
+    reload(main_module)
+
+    with TestClient(main_module.app) as client:
+        imported = client.post(
+            "/api/import/google-sheet", json={"sheet_url_or_id": "fixture://default"}
+        )
+        assert imported.status_code == 200
+        assert imported.json()["validation_report"]["passed"] is True
+
+        budget_visible = client.get("/api/budget", params={"month": "2026-01"})
+        assert budget_visible.status_code == 200
+        assert budget_visible.json()["summary"]["spent_minor"] == 15000
+        assert budget_visible.json()["groups"][0]["totals"]["month_budgeted_minor"] == 25000
+        assert budget_visible.json()["groups"][0]["totals"]["starting_available_minor"] == 0
+
+        budget_hidden = client.get(
+            "/api/budget", params={"month": "2026-01", "show_hidden": "true"}
+        )
+        assert budget_hidden.status_code == 200
+        assert budget_hidden.json()["summary"]["spent_minor"] == 19000
+
+        accounts = client.get("/api/accounts", params={"show_hidden": "true"})
+        assert accounts.status_code == 200
+        reserve_card = next(
+            account for account in accounts.json()["items"] if account["name"] == "Reserve Card"
+        )
+        assert reserve_card["actual_balance_minor"] == -20000
+        assert reserve_card["display_balance_minor"] == 20000
+
+        net_worth = client.get("/api/net-worth")
+        assert net_worth.status_code == 200
+        assert net_worth.json()["current_net_worth_minor"] == 49469000
+        assert all(item.get("account_name") for item in net_worth.json()["items"])
+        checking_ignored = next(
+            item
+            for item in net_worth.json()["items"]
+            if item.get("account_name") == "Checking"
+            and item.get("source") == "imported_valuation"
+        )
+        assert checking_ignored["ignored_import_value"] is True
+        assert checking_ignored["ignored_reason"] == "duplicate_budget_account"
 
 
 def test_google_start_endpoint_reports_fixture_mode_without_oauth(monkeypatch, tmp_path) -> None:

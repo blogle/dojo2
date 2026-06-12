@@ -32,10 +32,19 @@ from dojo.importer import (
     zip_named_range_rows,
 )
 from dojo.money import parse_signed_amount
+from dojo.service import DojoService
 
 
 def copy_named_ranges() -> dict[str, list[list[str]]]:
     return {key: [row[:] for row in value] for key, value in DEFAULT_FIXTURE["named_ranges"].items()}
+
+
+def replace_range_values(
+    named_ranges: dict[str, list[list[str]]], range_name: str, mapping: dict[str, str]
+) -> None:
+    for row in named_ranges[range_name]:
+        if row and row[0] in mapping:
+            row[0] = mapping[row[0]]
 
 
 def test_extract_sheet_id_from_url() -> None:
@@ -264,6 +273,74 @@ def test_transaction_parser_skips_pending_staging_row_with_amount_but_no_account
 
     assert len(transactions) == 11
     assert all(transaction.memo != "Pending imported row" for transaction in transactions)
+
+
+def test_net_worth_duplicate_matching_normalizes_names(service: DojoService) -> None:
+    named_ranges = copy_named_ranges()
+    account_mapping = {"Checking": "Checking Account"}
+    replace_range_values(named_ranges, "cfg_Accounts", account_mapping)
+    replace_range_values(named_ranges, "UserDefAccounts", account_mapping)
+    replace_range_values(named_ranges, "trx_Accounts", account_mapping)
+    replace_range_values(named_ranges, "ntw_Categories", {"Checking": "  💰 checking account  "})
+
+    result = service.import_sheet_data(
+        source="fixture://normalized-net-worth",
+        source_kind="google_sheets",
+        spreadsheet_title="Normalized Net Worth",
+        named_ranges=named_ranges,
+        available_named_ranges=list(named_ranges.keys()),
+    )
+
+    assert result["ok"] is True
+    net_worth = service.get_net_worth()
+    duplicate_entry = next(
+        item
+        for item in net_worth["items"]
+        if item.get("account_name") == "Checking Account"
+        and item.get("source") == "imported_valuation"
+    )
+    assert duplicate_entry["ignored_import_value"] is True
+    assert net_worth["current_net_worth_minor"] == 49469000
+
+
+def test_net_worth_rows_are_always_labeled(service: DojoService) -> None:
+    result = service.import_sheet_data(source="fixture://default", source_kind="fixture")
+    assert result["ok"] is True
+
+    net_worth = service.get_net_worth()
+    assert all(item.get("account_name") for item in net_worth["items"])
+
+
+def test_ambiguous_normalized_net_worth_duplicate_fails_validation(service: DojoService) -> None:
+    named_ranges = copy_named_ranges()
+    account_mapping = {
+        "Checking": "Checking A",
+        "Wallet": "Checking-A",
+    }
+    for range_name in ("cfg_Accounts", "UserDefAccounts", "trx_Accounts", "HiddenAccounts"):
+        replace_range_values(named_ranges, range_name, account_mapping)
+    replace_range_values(
+        named_ranges,
+        "ntw_Categories",
+        {
+            "Checking": "CheckingA",
+            "Wallet": "Checking-A",
+        },
+    )
+
+    result = service.import_sheet_data(
+        source="fixture://ambiguous-net-worth",
+        source_kind="google_sheets",
+        spreadsheet_title="Ambiguous Net Worth",
+        named_ranges=named_ranges,
+        available_named_ranges=list(named_ranges.keys()),
+    )
+
+    assert result["ok"] is False
+    assert any(
+        check["label"] == "net_worth.ambiguous_duplicate_count"
+        for check in result["validation_report"]["hard_failures"]
+    )
 
 
 def test_amount_bearing_transaction_with_blank_category_imports_as_uncategorized() -> None:

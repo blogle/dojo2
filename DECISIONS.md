@@ -223,3 +223,89 @@ Skip zero-dollar allocation rows during import while continuing to reject negati
 ### Consequence
 
 No-op allocation artifacts no longer block live imports, and dojo still rejects allocation rows that would change balances ambiguously or incorrectly.
+
+## 2026-06-12 — Validate aggregates with a structured parity report
+
+### Context
+
+The original MVP import validation compared only a coarse fixture snapshot. That was enough to smoke-test the first import pass, but not enough to audit every aggregate value shown in the UI or to diagnose disagreements precisely.
+
+### Decision
+
+Add a first-class aggregate validation harness that compares source-sheet-derived expectations against persisted dojo aggregates and emits structured checks with labels, entity identity, month, source references, expected values, actual values, cent deltas, pass/fail state, and notes.
+
+### Consequence
+
+Aggregate correctness becomes directly testable in backend automation, import diagnostics, and developer reruns against fixture or saved real-sheet fetch dumps. Validation failures now point to a specific aggregate instead of a broad snapshot mismatch.
+
+## 2026-06-12 — Derive budget-account net worth from the ledger, not duplicated imported valuation rows
+
+### Context
+
+Aspire net-worth reporting can contain duplicated valuation rows for budget accounts that are already represented in the transaction ledger. Counting those rows directly would double-count or override dojo's native account-balance source of truth.
+
+### Decision
+
+Compute budget-account net worth from imported budget-account balances in the ledger. Preserve imported valuation rows for those same budget accounts only as diagnostic items flagged `ignored_import_value = true`, and exclude them from the current net-worth total.
+
+### Consequence
+
+dojo's current net worth stays native and non-duplicative, while developers can still inspect the imported Aspire valuation rows during validation and UI review.
+
+## 2026-06-12 — Hidden entities must not affect default visible aggregate totals
+
+### Context
+
+The budget UI showed visible-only category rows, but one of the summary aggregates still counted hidden-category spending. That made the displayed totals internally inconsistent.
+
+### Decision
+
+Treat hidden-account and hidden-category visibility as part of aggregate correctness. Any visible-only aggregate surface must exclude hidden entities unless the UI explicitly toggles them on.
+
+### Consequence
+
+Budget summaries, account lists, and other default visible totals now align with the entities currently shown on screen, reducing the risk of misleading aggregate numbers.
+
+## 2026-06-12 — Match Aspire ATB semantics exactly, including starting-balance treatment
+
+### Context
+
+The real workbook exposes the ATB source directly: `Dashboard!J3` renders `Calculations!B59`. dojo's earlier ATB shortcut summed signed ATB and starting-balance transactions plus ATB allocations, which incorrectly subtracted liability starting-balance outflows.
+
+### Decision
+
+Match Aspire's ATB formula semantics exactly. Count ATB inflows and outflows, starting-balance inflows only, balance-adjustment inflows and outflows on budget accounts, and transfers into and out of the ATB bucket.
+
+### Consequence
+
+ATB now matches the source sheet on the deterministic fixture and on the saved live-sheet dump, and credit-card starting debt no longer incorrectly reduces the displayed amount available to budget.
+
+The backend default budget month also now follows the current calendar month, matching Aspire's dashboard behavior instead of anchoring itself to the latest imported ledger row.
+
+## 2026-06-12 — Use normalized duplicate detection for net-worth snapshots and fail ambiguous matches
+
+### Context
+
+Some imported net-worth snapshot categories refer to budget accounts with exact names, while others may differ only by emoji, spacing, punctuation, or case. Exact-name matching alone misses legitimate duplicates, but aggressive silent matching can also create false positives.
+
+### Decision
+
+Detect budget-account versus net-worth-snapshot duplicates in two stages: exact match first, then normalized-name match that strips decorative characters and compares case-insensitively. If exactly one budget account matches, treat the imported valuation as a duplicate diagnostic row and exclude it from native net worth. If multiple budget accounts match the same normalized snapshot name, mark it as an ambiguous duplicate, ignore it in the native total, and fail validation.
+
+### Consequence
+
+dojo avoids silent double-counting while still catching duplicate reporting that is not byte-for-byte identical. Ambiguous cases now become explicit validation failures instead of hidden inflation in the net-worth total.
+
+## 2026-06-12 — Replace the user-facing `Carried over` label with `Starting Available`
+
+### Context
+
+The category-level formula itself was correct, but the `Carried over` label was not clear to users and the top-level budget summary displayed an aggregate that Aspire does not show in a directly reconcilable way.
+
+### Decision
+
+Keep the underlying prior-month-available formula, but present it as `Starting Available` on category and group tables. Remove the top-level budget summary metric for that value instead of showing an unexplained carryforward total.
+
+### Consequence
+
+Every displayed budget aggregate is now more directly reconcilable to either Aspire or dojo's own month formula: `available = starting available + budgeted + activity` for standard categories.

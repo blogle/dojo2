@@ -301,7 +301,7 @@ DEFAULT_FIXTURE = {
             "Wallet": {"actual": 15000, "pending": 0, "cleared": 15000},
             "Reserve Card": {"actual": -20000, "pending": 0, "cleared": -20000},
         },
-        "atb_available_minor": 404000,
+        "atb_available_minor": 424000,
         "category_available": {
             "Grocery": 20000,
             "Utilities": 24000,
@@ -336,7 +336,7 @@ DEFAULT_FIXTURE = {
                 "Reserve Card Payment": 0,
             },
         },
-        "carried_over": {
+        "starting_available": {
             "2026-01": {
                 "Grocery": 0,
                 "Utilities": 0,

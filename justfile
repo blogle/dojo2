@@ -55,6 +55,12 @@ docs:
 docs-serve:
 	cd docs && mdbook serve
 
+validate-aggregates-fixture:
+	cd api && uv run python -m dojo.validation_cli --fixture
+
+validate-aggregates-dump dump:
+	cd api && uv run python -m dojo.validation_cli --fetch-dump {{dump}}
+
 clean:
 	rm -rf api/dist api/build web/dist docs/book .pytest_cache .mypy_cache .ruff_cache
 

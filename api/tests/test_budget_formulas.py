@@ -22,7 +22,7 @@ def test_fixture_snapshot_matches_expected(imported_service: DojoService) -> Non
     assert snapshot["category_available"] == expected["category_available"]
     assert snapshot["month_activity"] == expected["month_activity"]
     assert snapshot["month_budgeted"] == expected["month_budgeted"]
-    assert snapshot["carried_over"] == expected["carried_over"]
+    assert snapshot["starting_available"] == expected["starting_available"]
     assert snapshot["native_net_worth_minor"] == expected["native_net_worth_minor"]
 
 
@@ -32,6 +32,12 @@ def test_credit_card_payment_category_behavior(imported_service: DojoService) ->
         category for category in categories if category["name"] == "Reserve Card Payment"
     )
     assert payment_category["available_minor"] == 15000
+
+
+def test_available_to_budget_ignores_liability_starting_balance_outflows(
+    imported_service: DojoService,
+) -> None:
+    assert imported_service.compute_available_to_budget() == 424000
 
 
 def test_hidden_categories_and_accounts_are_preserved(imported_service: DojoService) -> None:

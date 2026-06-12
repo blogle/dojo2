@@ -43,7 +43,7 @@ export const sampleCategories: Category[] = [
     available_minor: 20000,
     month_activity_minor: -5000,
     month_budgeted_minor: 10000,
-    carried_over_minor: 15000,
+    starting_available_minor: 15000,
   },
   {
     category_id: "cat-2",
@@ -60,7 +60,7 @@ export const sampleCategories: Category[] = [
     available_minor: 5000,
     month_activity_minor: 0,
     month_budgeted_minor: 5000,
-    carried_over_minor: 0,
+    starting_available_minor: 0,
   },
   {
     category_id: "cat-3",
@@ -77,7 +77,7 @@ export const sampleCategories: Category[] = [
     available_minor: 15000,
     month_activity_minor: 0,
     month_budgeted_minor: 15000,
-    carried_over_minor: 0,
+    starting_available_minor: 0,
   },
 ];
 
@@ -88,6 +88,12 @@ export const sampleGroup: CategoryGroup = {
   is_hidden: false,
   is_system: false,
   is_deletable: true,
+  totals: {
+    available_minor: 25000,
+    month_activity_minor: -5000,
+    month_budgeted_minor: 15000,
+    starting_available_minor: 15000,
+  },
   categories: [sampleCategories[0], sampleCategories[1]],
 };
 
