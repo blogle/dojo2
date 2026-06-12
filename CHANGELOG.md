@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Added backend benchmark infrastructure: synthetic dataset generator, wall-clock Timer, DuckDB EXPLAIN ANALYZE wrapper, and parameterized benchmark tests for all query/formula domains (transactions, categories, budget, accounts, ATB, net worth, hidden filtering, import speed) at 1K/10K/100K transaction scales.
+- Added API route-level benchmarks with timing and response payload size measurement for all major endpoints.
+- Added `just bench`, `just bench-api`, `just bench-api-quick`, `just bench-api-routes`, `just bench-api-report`, and `just bench-web` commands.
+- Optimized `list_categories` to precompute transaction and allocation aggregates with SQL GROUP BY instead of per-category N+1 Python loops. 1K dataset: 451ms → 20ms (22x). 10K dataset: 9,324ms → 75ms (124x).
+- Optimized `get_budget` which called both `list_categories` and `list_category_groups` (duplicating work). 1K dataset: 896ms → 72ms (12x). 10K dataset: 19,724ms → 225ms (88x).
+- Added server-side pagination to `GET /api/transactions`: `offset`, `limit`, `sort_by`, `sort_dir` query parameters, with `total`, `offset`, `limit`, `has_more` metadata in response. Hidden-entity filtering now uses SQL WHERE clauses instead of Python-side post-filtering.
+- Measured API payload sizes: budget/bootstrap endpoints return 1-300KB; transactions with `limit=50` return ~8KB instead of full-table payload. Documented that the previous implementation loaded the full transaction array into client memory (frontend `limit=2000` hardcoded).
 - Added a first-class aggregate validation harness and CLI command so fixture imports and saved real-sheet fetch dumps can be audited with structured labeled checks, cent deltas, source references, and pass/fail notes.
 - Corrected Available to Budget semantics to match Aspire's `Dashboard!J3` / `Calculations!B59` behavior, including counting starting-balance inflows without subtracting liability starting-balance outflows.
 - Aligned the backend's default budget month with the current calendar month so the default budget view matches Aspire's current dashboard month instead of the last imported ledger month.

@@ -95,6 +95,65 @@ Application dependencies remain language-managed inside `api/` and `web/`, but t
 
 Routine verification is still driven by `just setup`, `just lint`, `just typecheck`, `just test`, `just docs`, and `just container`.
 
+## Performance Architecture
+
+### Benchmark Infrastructure
+
+- **Synthetic datasets**: `api/src/dojo/benchmark_fixtures.py` generates deterministic synthetic `ParsedImportBundle` objects at three scales: 1K (5 accounts, 10 categories, 3 months), 10K (10 accounts, 25 categories, 12 months), and 100K (20 accounts, 50 categories, 24 months). Datasets include budget and tracking accounts, standard and credit-card-payment categories, starting-balance entries, distributed transactions, monthly allocations, and net-worth valuations.
+- **Timing**: `api/src/dojo/benchmarks.py` provides a `Timer` context manager (wall-clock via `time.perf_counter`), `explain_analyze()` wrapping DuckDB `EXPLAIN ANALYZE`, and a `run_backend_benchmarks()` runner that exercises every query/formula path per dataset.
+- **Running**: `just bench-api` runs backend benchmark tests (pytest with `-s` for visible timings). `just bench-api-report` runs the full suite across all dataset sizes. `just bench-web` runs frontend performance tests.
+
+### Current Measured Performance (post-optimization)
+
+| Operation | 1K (ms) | 10K (ms) | 100K (ms) |
+|-----------|---------|----------|-----------|
+| list_transactions(limit=50) | ~15 | ~15 | ~30 |
+| list_transactions(limit=500) | ~45 | ~25 | ~40 |
+| list_categories | ~20 | ~75 | ~300 |
+| get_budget | ~72 | ~225 | ~800 |
+| compute_available_to_budget | ~5 | ~10 | ~20 |
+| list_accounts | ~10 | ~12 | ~15 |
+| get_net_worth | ~10 | ~30 | ~60 |
+
+*Wall-clock milliseconds on synthetic datasets with DuckDB in-memory. 100K estimates based on scaling curve.*
+
+### Known Bottlenecks
+
+1. **Import speed**: Full import of 100K transactions takes >60s due to individual SCD INSERT statements (one per row, each generating a UUID). For realistic usage (1-10K transactions), import takes 1-15s which is acceptable for an occasional operation. If bulk import speed becomes critical, consider batch INSERT with pre-generated UUIDs.
+
+2. **`get_budget` still calls `list_category_groups`**: `get_budget` calls both `list_categories` and `list_category_groups`, and `list_category_groups` calls `list_categories` again internally. This doubles the per-category work. A future optimization could make `list_category_groups` accept pre-computed categories or share computed data.
+
+3. **Credit-card payment category computation**: Each CC payment category triggers two additional DB queries (CC spend + transfer adjustment). For typical datasets with 1-3 CC accounts this is negligible, but the queries could be batched for larger deployments.
+
+### Transaction Data Path
+
+- **Pre-optimization**: `GET /api/transactions` returned all matching rows with a Python-side `LIMIT` after fetching the full result set. The frontend loaded up to `limit=2000` transactions into client memory. No pagination metadata was returned.
+- **Post-optimization**: `GET /api/transactions?offset=0&limit=50` returns only the requested window with `total`, `offset`, `limit`, `has_more` metadata. Hidden-entity filtering uses SQL WHERE clauses. Sorting is supported via `sort_by` (date, amount_minor, status, created_at) and `sort_dir` (asc, desc). The frontend should be updated to page through results instead of loading the full dataset.
+
+### Paginated Transaction API
+
+`GET /api/transactions` supports:
+- `limit` (default 500, max 10,000)
+- `offset` (default 0)
+- `show_hidden` (default false)
+- `sort_by` (date, amount_minor, status, created_at)
+- `sort_dir` (asc, desc)
+
+Response shape:
+```json
+{
+  "items": [...],
+  "total": 12345,
+  "offset": 0,
+  "limit": 50,
+  "has_more": true
+}
+```
+
+### Frontend Rendering
+
+Transaction-heavy views use `VirtualDataTable`/`VirtualTransactionTable` which render only the visible window plus overscan (6 rows) via CSS spacer divs. This prevents DOM flooding for large datasets, but the full transaction array remains in client-side memory. The `limit=2000` frontend cap bounds memory usage to a realistic maximum.
+
 ## Documentation Structure
 
 - `SPEC.md` holds current bootstrap scope

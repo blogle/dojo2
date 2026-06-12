@@ -26,7 +26,10 @@ Bootstrap the `dojo` repository with:
 - App status endpoint exists at `GET /api/app/status`
 - Frontend renders `dojo`, shows skeleton status text, and checks API reachability
 - Required root docs and `agents/` files exist and stay aligned with code
-- `just setup`, `just build`, `just lint`, `just format-check`, `just typecheck`, `just test`, `just docs`, and `just container` work in the Nix shell or fail with a documented reason
+- `just setup`, `just build`, `just lint`, `just format-check`, `just typecheck`, `just test`, `just docs`, `just container`, `just bench-api` work in the Nix shell or fail with a documented reason
+- `GET /api/transactions` supports pagination (`offset`, `limit`, `sort_by`, `sort_dir`) and returns `total`/`has_more` metadata
+- Transaction list API responses are bounded to a single page instead of the full dataset
+- Backend benchmark tests exist and are runnable via `just bench-api`
 
 ## Aggregate Correctness Criteria
 

@@ -61,6 +61,25 @@ validate-aggregates-fixture:
 validate-aggregates-dump dump:
 	cd api && uv run python -m dojo.validation_cli --fetch-dump {{dump}}
 
+# --- Benchmarks ---
+
+bench: bench-api bench-web
+
+bench-api:
+	cd api && uv run python -m pytest tests/test_benchmarks.py -v --tb=short -s -k "not test_full_backend_benchmark_suite"
+
+bench-api-quick:
+	cd api && uv run python -m pytest tests/test_benchmarks.py::TestBackendBenchmarks -v --tb=short -s -k "not test_full_backend_benchmark"
+
+bench-api-routes:
+	cd api && uv run python -m pytest tests/test_benchmarks.py::TestApiBenchmarks -v --tb=short -s
+
+bench-api-report:
+	cd api && uv run python -m dojo.benchmarks
+
+bench-web:
+	cd web && pnpm vitest run tests/ --reporter=verbose
+
 clean:
 	rm -rf api/dist api/build web/dist docs/book .pytest_cache .mypy_cache .ruff_cache
 

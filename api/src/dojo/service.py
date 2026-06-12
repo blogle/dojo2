@@ -125,7 +125,7 @@ class DojoService:
             ),
             "current_atb_minor": budget["available_to_budget_minor"],
             "current_budget_month_summary": budget["summary"],
-            "recent_transactions": self.list_transactions(limit=20, show_hidden=True),
+            "recent_transactions": self.list_transactions(limit=20, show_hidden=True)["items"],
         }
 
     def default_budget_month(self) -> str:
@@ -623,23 +623,74 @@ class DojoService:
             )
         return results
 
-    def list_transactions(self, *, limit: int, show_hidden: bool) -> list[dict[str, Any]]:
+    def list_transactions(
+        self,
+        *,
+        limit: int,
+        offset: int = 0,
+        show_hidden: bool,
+        sort_by: str = "date",
+        sort_dir: str = "desc",
+    ) -> dict[str, Any]:
+        valid_sort_cols = {"date", "amount_minor", "status", "created_at"}
+        sort_col = sort_by if sort_by in valid_sort_cols else "date"
+        sort_direction = "DESC" if sort_dir == "desc" else "ASC"
+
         accounts = {
             row["account_id"]: row for row in self.db.fetch_all("SELECT * FROM current_accounts")
         }
         categories = {
             row["category_id"]: row for row in self.db.fetch_all("SELECT * FROM current_categories")
         }
-        rows = self.db.fetch_all(
-            "SELECT * FROM current_transactions ORDER BY date DESC, created_at DESC, transaction_id DESC"
-        )
+
+        hidden_account_ids: set[str] = set()
+        hidden_category_ids: set[str] = set()
+        if not show_hidden:
+            hidden_account_ids = {aid for aid, a in accounts.items() if a["is_hidden"]}
+            hidden_category_ids = {cid for cid, c in categories.items() if c["is_hidden"]}
+
+        total_query = "SELECT COUNT(*) AS cnt FROM current_transactions"
+        total_params: tuple = ()
+        if hidden_account_ids or hidden_category_ids:
+            filters: list[str] = []
+            params: list[str] = []
+            if hidden_account_ids:
+                placeholders = ",".join("?" for _ in hidden_account_ids)
+                filters.append(f"account_id NOT IN ({placeholders})")
+                params.extend(str(h) for h in hidden_account_ids)
+            if hidden_category_ids:
+                placeholders = ",".join("?" for _ in hidden_category_ids)
+                filters.append(f"(category_id IS NULL OR category_id NOT IN ({placeholders}))")
+                params.extend(str(h) for h in hidden_category_ids)
+            total_query += " WHERE " + " AND ".join(filters)
+            total_params = tuple(params)
+        total = self.db.fetch_one(total_query, total_params)
+        total_count = total["cnt"] if total else 0
+
+        query = f"SELECT * FROM current_transactions ORDER BY {sort_col} {sort_direction}, created_at DESC, transaction_id DESC LIMIT ? OFFSET ?"
+        query_params: list[Any] = []
+        if hidden_account_ids or hidden_category_ids:
+            where_clause: list[str] = []
+            where_params: list[Any] = []
+            if hidden_account_ids:
+                placeholders = ",".join("?" for _ in hidden_account_ids)
+                where_clause.append(f"account_id NOT IN ({placeholders})")
+                where_params.extend(str(h) for h in hidden_account_ids)
+            if hidden_category_ids:
+                placeholders = ",".join("?" for _ in hidden_category_ids)
+                where_clause.append(f"(category_id IS NULL OR category_id NOT IN ({placeholders}))")
+                where_params.extend(str(h) for h in hidden_category_ids)
+            query = f"SELECT * FROM current_transactions WHERE {' AND '.join(where_clause)} ORDER BY {sort_col} {sort_direction}, created_at DESC, transaction_id DESC LIMIT ? OFFSET ?"
+            query_params = where_params
+        query_params.append(limit)
+        query_params.append(offset)
+        rows = self.db.fetch_all(query, tuple(query_params))
+
         results: list[dict[str, Any]] = []
         for row in rows:
             account = accounts[row["account_id"]]
             category = categories.get(row["category_id"])
             hidden = account["is_hidden"] or (category["is_hidden"] if category else False)
-            if hidden and not show_hidden:
-                continue
             results.append(
                 row
                 | {
@@ -648,7 +699,13 @@ class DojoService:
                     "is_hidden_entity": hidden,
                 }
             )
-        return results[:limit]
+        return {
+            "items": results,
+            "total": total_count,
+            "offset": offset,
+            "limit": limit,
+            "has_more": (offset + limit) < total_count,
+        }
 
     def list_category_groups(self, *, month: str, show_hidden: bool) -> list[dict[str, Any]]:
         groups = self.db.fetch_all(
@@ -701,27 +758,95 @@ class DojoService:
             if row["linked_payment_category_id"] is not None
         }
         month_start, month_end = self._month_bounds(month)
+
+        # Precompute transaction sums per category (all-time for available, monthly for activity)
+        tx_by_category: dict[str, int] = defaultdict(int)
+        tx_month_activity: dict[str, int] = defaultdict(int)
+        tx_pre_month: dict[str, int] = defaultdict(int)
+        for t in self.db.fetch_all(
+            "SELECT category_id, amount_minor, date FROM current_transactions WHERE category_id IS NOT NULL"
+        ):
+            cid = t["category_id"]
+            amt = t["amount_minor"]
+            tx_by_category[cid] += amt
+            if month_start <= t["date"] <= month_end:
+                tx_month_activity[cid] += amt
+            if t["date"] < month_start:
+                tx_pre_month[cid] += amt
+
+        # Precompute allocation sums per bucket (all-time for available, monthly for budgeted, pre-month for carried over)
+        alloc_to_bucket: dict[str, int] = defaultdict(int)
+        alloc_from_bucket: dict[str, int] = defaultdict(int)
+        alloc_month_to: dict[str, int] = defaultdict(int)
+        alloc_month_from: dict[str, int] = defaultdict(int)
+        alloc_pre_to: dict[str, int] = defaultdict(int)
+        alloc_pre_from: dict[str, int] = defaultdict(int)
+        for a in self.db.fetch_all(
+            "SELECT from_bucket_id, to_bucket_id, amount_minor, date FROM current_allocations"
+        ):
+            amt = a["amount_minor"]
+            alloc_to_bucket[a["to_bucket_id"]] += amt
+            alloc_from_bucket[a["from_bucket_id"]] += amt
+            if month_start <= a["date"] <= month_end:
+                alloc_month_to[a["to_bucket_id"]] += amt
+                alloc_month_from[a["from_bucket_id"]] += amt
+            if a["date"] < month_start:
+                alloc_pre_to[a["to_bucket_id"]] += amt
+                alloc_pre_from[a["from_bucket_id"]] += amt
+
+        # Precompute credit-card payment category data
+        cc_spend_by_cat: dict[str, int] = defaultdict(int)
+        cc_transfer_adj_by_cat: dict[str, int] = defaultdict(int)
+        for cid, setting in settings.items():
+            account_id = setting["account_id"]
+            for t in self.db.fetch_all(
+                "SELECT amount_minor, system_category FROM current_transactions WHERE account_id = ? AND category_id IS NOT NULL",
+                (account_id,),
+            ):
+                cc_spend_by_cat[cid] += -t["amount_minor"]
+            for t in self.db.fetch_all(
+                "SELECT amount_minor FROM current_transactions WHERE account_id = ? AND system_category = ? AND amount_minor > 0",
+                (account_id, SYSTEM_CATEGORY_TRANSFER),
+            ):
+                cc_transfer_adj_by_cat[cid] += -t["amount_minor"]
+
         results = []
         for category in categories:
             if category["is_hidden"] and not show_hidden:
                 continue
-            bucket_id = self._bucket_id_for_category(category["category_id"])
-            available = self.compute_category_available(category["category_id"])
+            cid = category["category_id"]
+            bucket_id = self._bucket_id_for_category(cid)
+            is_cc = category["category_kind"] == CATEGORY_KIND_CREDIT_CARD_PAYMENT
+
+            if is_cc:
+                available = (
+                    alloc_to_bucket.get(bucket_id, 0)
+                    - alloc_from_bucket.get(bucket_id, 0)
+                    + cc_spend_by_cat.get(cid, 0)
+                    + cc_transfer_adj_by_cat.get(cid, 0)
+                )
+            else:
+                available = tx_by_category.get(cid, 0) + alloc_to_bucket.get(
+                    bucket_id, 0
+                ) - alloc_from_bucket.get(bucket_id, 0)
+
+            month_activity = tx_month_activity.get(cid, 0)
+            month_budgeted = alloc_month_to.get(bucket_id, 0) - alloc_month_from.get(
+                bucket_id, 0
+            )
+            starting_available = tx_pre_month.get(cid, 0) + alloc_pre_to.get(
+                bucket_id, 0
+            ) - alloc_pre_from.get(bucket_id, 0)
+
             results.append(
                 category
                 | {
                     "bucket_id": bucket_id,
                     "group_name": groups[category["group_id"]]["name"],
                     "available_minor": available,
-                    "month_activity_minor": self.compute_month_activity(
-                        category["category_id"], month_start, month_end
-                    ),
-                    "month_budgeted_minor": self.compute_month_budgeted(
-                        bucket_id, month_start, month_end
-                    ),
-                    "starting_available_minor": self.compute_carried_over(
-                        category["category_id"], bucket_id, month_start
-                    ),
+                    "month_activity_minor": month_activity,
+                    "month_budgeted_minor": month_budgeted,
+                    "starting_available_minor": starting_available,
                     "linked_account_id": settings.get(category["category_id"], {}).get(
                         "account_id"
                     ),

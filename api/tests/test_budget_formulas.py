@@ -73,7 +73,7 @@ def test_status_toggle_changes_pending_and_cleared_without_changing_actual(
 ) -> None:
     transaction = next(
         row
-        for row in imported_service.list_transactions(limit=100, show_hidden=True)
+        for row in imported_service.list_transactions(limit=100, show_hidden=True)["items"]
         if row["memo"] == "Hidden category spend"
     )
     before = next(

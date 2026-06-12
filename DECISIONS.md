@@ -1,5 +1,37 @@
 # Decisions
 
+## 2026-06-12 — Add server-side pagination to the transaction API
+
+### Context
+
+The original `GET /api/transactions` returned all matching rows with a Python-side `LIMIT` applied after fetching the full result set. The frontend loaded up to `limit=2000` transactions into client memory with no pagination metadata. For datasets of 10K+ transactions, this meant uploading hundreds of kilobytes to the browser on every page load and after every write operation.
+
+### Decision
+
+Add server-side pagination with `offset`/`limit` parameters, `sort_by`/`sort_dir` sorting, and pagination metadata (`total`, `offset`, `limit`, `has_more`). Move hidden-entity filtering from Python-side loops to SQL WHERE clauses. Keep the existing `limit` parameter as the page size (default 500, max 10,000).
+
+### Consequence
+
+- Transaction list responses are bounded to a single page of rows rather than the full dataset.
+- Frontend can implement incremental loading or pagination controls without receiving the entire ledger.
+- Backward compatible: existing clients that only use `limit` continue to work; the response shape now includes `total`/`has_more` fields in addition to `items`.
+
+## 2026-06-12 — Optimize category aggregates with SQL precomputation instead of per-category Python loops
+
+### Context
+
+`list_categories` previously iterated over N categories and for each called 4 functions (`compute_category_available`, `compute_month_activity`, `compute_month_budgeted`, `compute_carried_over`). Each function fetched the full transactions and allocations tables from DuckDB and filtered in Python. With 10K transactions and 25 categories, this took >9 seconds and was O(N * (T + A)).
+
+### Decision
+
+Precompute transaction sums per category and allocation sums per bucket in a single pass each (SQL GROUP BY in Python dicts), then join in a single Python pass per category. For credit-card payment categories, batch the CC-specific queries per linked account.
+
+### Consequence
+
+- `list_categories` at 10K/25 categories: 9,324ms → 75ms (124x faster).
+- `get_budget` at 10K (calls list_categories + list_category_groups): 19,724ms → 225ms (88x faster).
+- The tradeoff is slightly more code in `list_categories` and two additional DB queries per CC payment category (negligible for 1-3 CC accounts).
+
 ## 2026-06-10 — Use Nix, direnv, and just for local development
 
 ### Context
