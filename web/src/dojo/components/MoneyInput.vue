@@ -6,7 +6,9 @@ import { formatMoneyMinor, parseMoneyInput } from "../lib/money";
 const props = defineProps<{ modelValue: number | null; label?: string }>();
 const emit = defineEmits<{ "update:modelValue": [value: number | null] }>();
 
-const rawValue = ref(props.modelValue === null ? "" : formatMoneyMinor(props.modelValue));
+const rawValue = ref(
+  props.modelValue === null ? "" : formatMoneyMinor(props.modelValue),
+);
 
 watch(
   () => props.modelValue,
@@ -26,8 +28,15 @@ function handleInput(event: Event): void {
 <template>
   <label class="field">
     <span v-if="label">{{ label }}</span>
-    <input :value="rawValue" inputmode="decimal" type="text" @input="handleInput" />
-    <small v-if="rawValue && parsed === null">Enter a signed dollar amount.</small>
+    <input
+      :value="rawValue"
+      inputmode="decimal"
+      type="text"
+      @input="handleInput"
+    />
+    <small v-if="rawValue && parsed === null"
+      >Enter a signed dollar amount.</small
+    >
   </label>
 </template>
 

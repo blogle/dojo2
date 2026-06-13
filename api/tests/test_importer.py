@@ -36,7 +36,9 @@ from dojo.service import DojoService
 
 
 def copy_named_ranges() -> dict[str, list[list[str]]]:
-    return {key: [row[:] for row in value] for key, value in DEFAULT_FIXTURE["named_ranges"].items()}
+    return {
+        key: [row[:] for row in value] for key, value in DEFAULT_FIXTURE["named_ranges"].items()
+    }
 
 
 def replace_range_values(
@@ -153,7 +155,10 @@ def test_transaction_row_zipping_and_break_row_skipping() -> None:
     access = build_named_range_access(DEFAULT_FIXTURE["named_ranges"])
     transactions = parse_transactions_named_ranges(access)
     assert len(transactions) == 12
-    assert all(transaction.memo != "" or transaction.category_name is not None for transaction in transactions)
+    assert all(
+        transaction.memo != "" or transaction.category_name is not None
+        for transaction in transactions
+    )
 
 
 def test_transaction_row_classification_distinguishes_real_blank_break_and_helper_rows() -> None:
@@ -258,7 +263,9 @@ def test_transaction_parser_skips_reconciliation_and_helper_rows_without_amounts
     assert all(transaction.memo != "Helper text" for transaction in transactions)
 
 
-def test_transaction_parser_skips_pending_staging_row_with_amount_but_no_account_or_category() -> None:
+def test_transaction_parser_skips_pending_staging_row_with_amount_but_no_account_or_category() -> (
+    None
+):
     named_ranges = copy_named_ranges()
     named_ranges["trx_Dates"][1] = ["2026-01-15"]
     named_ranges["trx_Outflows"][1] = [""]
@@ -372,7 +379,9 @@ def test_signed_money_conversion_from_named_ranges() -> None:
 def test_named_range_import_extracts_hidden_entities() -> None:
     bundle = fixture_bundle()
     assert any(account.name == "Wallet" and account.is_hidden for account in bundle.accounts)
-    assert any(category.name == "Secret Stash" and category.is_hidden for category in bundle.categories)
+    assert any(
+        category.name == "Secret Stash" and category.is_hidden for category in bundle.categories
+    )
     assert any(group.name == "Credit Card Payments" and group.is_system for group in bundle.groups)
 
 
@@ -400,9 +409,7 @@ def test_configuration_block_drives_membership_and_order_not_flat_vectors() -> N
     named_ranges["UserDefAmounts"] = column(["", "$150.00", "$300.00", "$100.00"])
     named_ranges["UserDefGoals"] = column(["", "Monthly", "", ""])
     named_ranges["UserDefLinkedAccounts"] = column(["Reserve Card", "", "", ""])
-    named_ranges["UserDefCategoryGroupNames"] = column(
-        ["Wrong A", "Wrong B", "Wrong C", "Wrong D"]
-    )
+    named_ranges["UserDefCategoryGroupNames"] = column(["Wrong A", "Wrong B", "Wrong C", "Wrong D"])
 
     access = build_named_range_access(named_ranges)
     categories, groups = parse_configuration_categories_and_groups(access)
@@ -445,9 +452,9 @@ def test_configuration_block_parsing_does_not_depend_on_fixture_category_names()
         "Category Beta",
         "Card Payment Alpha",
     ]
-    assert next(category for category in categories if category.name == "Card Payment Alpha").category_kind == (
-        "CREDIT_CARD_PAYMENT"
-    )
+    assert next(
+        category for category in categories if category.name == "Card Payment Alpha"
+    ).category_kind == ("CREDIT_CARD_PAYMENT")
     assert next(group for group in groups if group.name == "Payment Group").is_system is True
 
 
@@ -483,11 +490,15 @@ def test_transaction_category_reference_is_canonicalized_to_visible_category_nam
         source_kind="fixture",
     )
 
-    grocery_transaction = next(transaction for transaction in bundle.transactions if transaction.memo == "Groceries")
+    grocery_transaction = next(
+        transaction for transaction in bundle.transactions if transaction.memo == "Groceries"
+    )
     assert grocery_transaction.category_name == "Grocery"
 
 
-def test_hidden_legacy_transaction_category_is_synthesized_when_missing_from_visible_config() -> None:
+def test_hidden_legacy_transaction_category_is_synthesized_when_missing_from_visible_config() -> (
+    None
+):
     named_ranges = copy_named_ranges()
     named_ranges["trx_Categories"][3] = ["Legacy Hidden"]
     named_ranges["HiddenCategories"] = column(["Secret Stash", "Legacy Hidden"])
@@ -499,8 +510,12 @@ def test_hidden_legacy_transaction_category_is_synthesized_when_missing_from_vis
         source_kind="fixture",
     )
 
-    legacy_category = next(category for category in bundle.categories if category.name == "Legacy Hidden")
-    legacy_group = next(group for group in bundle.groups if group.name == "Imported Hidden Categories")
+    legacy_category = next(
+        category for category in bundle.categories if category.name == "Legacy Hidden"
+    )
+    legacy_group = next(
+        group for group in bundle.groups if group.name == "Imported Hidden Categories"
+    )
     assert legacy_category.group_name == legacy_group.name
     assert legacy_category.is_hidden is True
     assert legacy_category.is_active is False

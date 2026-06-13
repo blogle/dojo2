@@ -20,7 +20,9 @@ function handleSubmit(): void {
 <template>
   <form class="editor" @submit.prevent="handleSubmit">
     <h3>Add account</h3>
-    <label class="field"><span>Name</span><input v-model="form.name" type="text" /></label>
+    <label class="field"
+      ><span>Name</span><input v-model="form.name" type="text"
+    /></label>
     <label class="field">
       <span>Class</span>
       <select v-model="form.account_class">
@@ -37,9 +39,18 @@ function handleSubmit(): void {
         <option value="CREDIT_CARD">Credit card</option>
       </select>
     </label>
-    <label class="toggle"><input v-model="form.is_hidden" type="checkbox" />Hidden</label>
-    <label class="toggle"><input v-model="form.is_active" type="checkbox" />Active</label>
-    <label class="toggle" v-if="form.budget_account_type === 'CREDIT_CARD'"><input v-model="form.display_liability_positive" type="checkbox" />Display liability as positive</label>
+    <label class="toggle"
+      ><input v-model="form.is_hidden" type="checkbox" />Hidden</label
+    >
+    <label class="toggle"
+      ><input v-model="form.is_active" type="checkbox" />Active</label
+    >
+    <label class="toggle" v-if="form.budget_account_type === 'CREDIT_CARD'"
+      ><input
+        v-model="form.display_liability_positive"
+        type="checkbox"
+      />Display liability as positive</label
+    >
     <button type="submit">Save account</button>
   </form>
 </template>

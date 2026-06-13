@@ -4,5 +4,7 @@ const emit = defineEmits<{ confirm: [] }>();
 </script>
 
 <template>
-  <button type="button" :disabled="loading" @click="emit('confirm')">Import now</button>
+  <button type="button" :disabled="loading" @click="emit('confirm')">
+    Import now
+  </button>
 </template>

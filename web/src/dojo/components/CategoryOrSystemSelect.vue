@@ -19,7 +19,9 @@ const emit = defineEmits<{
 }>();
 
 const visibleCategories = computed(() =>
-  props.categories.filter((category) => props.showHidden || !category.is_hidden),
+  props.categories.filter(
+    (category) => props.showHidden || !category.is_hidden,
+  ),
 );
 
 const systemOptions = [
@@ -33,14 +35,33 @@ const systemOptions = [
 <template>
   <div class="field-stack">
     <label class="toggle">
-      <input :checked="useSystemCategory" type="checkbox" @change="emit('update:useSystemCategory', ($event.target as HTMLInputElement).checked)" />
+      <input
+        :checked="useSystemCategory"
+        type="checkbox"
+        @change="
+          emit(
+            'update:useSystemCategory',
+            ($event.target as HTMLInputElement).checked,
+          )
+        "
+      />
       <span>System transaction</span>
     </label>
     <label v-if="useSystemCategory" class="field">
       <span>System category</span>
-      <select :value="systemCategory" @change="emit('update:systemCategory', ($event.target as HTMLSelectElement).value)">
+      <select
+        :value="systemCategory"
+        @change="
+          emit(
+            'update:systemCategory',
+            ($event.target as HTMLSelectElement).value,
+          )
+        "
+      >
         <option value="">Select system category</option>
-        <option v-for="option in systemOptions" :key="option" :value="option">{{ option }}</option>
+        <option v-for="option in systemOptions" :key="option" :value="option">
+          {{ option }}
+        </option>
       </select>
     </label>
     <CategorySelect

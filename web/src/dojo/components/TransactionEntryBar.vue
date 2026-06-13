@@ -13,7 +13,19 @@ const props = defineProps<{
   editingTransaction?: Transaction | null;
 }>();
 
-const emit = defineEmits<{ submit: [payload: { date: string; account_id: string; amount_minor: number; category_id: string | null; system_category: string | null; status: "PENDING" | "CLEARED"; memo: string }] }>();
+const emit = defineEmits<{
+  submit: [
+    payload: {
+      date: string;
+      account_id: string;
+      amount_minor: number;
+      category_id: string | null;
+      system_category: string | null;
+      status: "PENDING" | "CLEARED";
+      memo: string;
+    },
+  ];
+}>();
 
 const form = reactive({
   date: new Date().toISOString().slice(0, 10),
@@ -53,7 +65,9 @@ function handleSubmit(): void {
     account_id: form.account_id,
     amount_minor: form.amount_minor,
     category_id: form.useSystemCategory ? null : form.category_id || null,
-    system_category: form.useSystemCategory ? form.system_category || null : null,
+    system_category: form.useSystemCategory
+      ? form.system_category || null
+      : null,
     status: form.status,
     memo: form.memo,
   });
@@ -89,7 +103,9 @@ function handleSubmit(): void {
       <span>Memo</span>
       <input v-model="form.memo" type="text" />
     </label>
-    <button type="submit">{{ editingTransaction ? "Save transaction" : "Add transaction" }}</button>
+    <button type="submit">
+      {{ editingTransaction ? "Save transaction" : "Add transaction" }}
+    </button>
   </form>
 </template>
 

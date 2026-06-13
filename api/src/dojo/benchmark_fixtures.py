@@ -190,9 +190,7 @@ def build_synthetic_dataset(config: SyntheticDatasetConfig) -> ParsedImportBundl
                     if is_cc
                     else (BUDGET_ACCOUNT_TYPE_DEPOSIT if is_budget else None)
                 ),
-                linked_payment_category_name=(
-                    "Credit Card Payment" if is_cc else None
-                ),
+                linked_payment_category_name=("Credit Card Payment" if is_cc else None),
                 display_liability_positive=is_cc,
             )
         )
@@ -221,8 +219,7 @@ def build_synthetic_dataset(config: SyntheticDatasetConfig) -> ParsedImportBundl
     # Distribute transactions across months
     tx_per_month = max(
         1,
-        (config.num_transactions - len(budget_account_indices))
-        // config.num_months,
+        (config.num_transactions - len(budget_account_indices)) // config.num_months,
     )
     remaining = config.num_transactions - len(budget_account_indices)
 
@@ -274,9 +271,7 @@ def build_synthetic_dataset(config: SyntheticDatasetConfig) -> ParsedImportBundl
         for _ in range(config.num_allocations_per_month):
             day = rng.randint(1, dim)
             from_name = rng.choice(category_bucket_names)
-            to_name = rng.choice(
-                [n for n in category_bucket_names if n != from_name]
-            )
+            to_name = rng.choice([n for n in category_bucket_names if n != from_name])
             allocations.append(
                 ParsedAllocation(
                     allocation_id=str(uuid4()),
@@ -324,14 +319,10 @@ def build_synthetic_dataset(config: SyntheticDatasetConfig) -> ParsedImportBundl
 def describe_dataset(bundle: ParsedImportBundle) -> dict[str, Any]:
     accounts_by_class: dict[str, int] = {}
     for a in bundle.accounts:
-        accounts_by_class[a.account_class] = (
-            accounts_by_class.get(a.account_class, 0) + 1
-        )
+        accounts_by_class[a.account_class] = accounts_by_class.get(a.account_class, 0) + 1
     categories_by_kind: dict[str, int] = {}
     for c in bundle.categories:
-        categories_by_kind[c.category_kind] = (
-            categories_by_kind.get(c.category_kind, 0) + 1
-        )
+        categories_by_kind[c.category_kind] = categories_by_kind.get(c.category_kind, 0) + 1
     months: set[str] = set()
     for t in bundle.transactions:
         months.add(t.date.strftime("%Y-%m"))

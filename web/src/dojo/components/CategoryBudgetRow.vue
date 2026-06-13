@@ -11,7 +11,21 @@ defineProps<{
   month: string;
 }>();
 
-const emit = defineEmits<{ submitAllocation: [payload: { date: string; amount_minor: number; memo: string; from_bucket_id: string; to_bucket_id: string; path: "/api/allocations/fund" | "/api/allocations/move" | "/api/allocations/return-to-atb" }] }>();
+const emit = defineEmits<{
+  submitAllocation: [
+    payload: {
+      date: string;
+      amount_minor: number;
+      memo: string;
+      from_bucket_id: string;
+      to_bucket_id: string;
+      path:
+        | "/api/allocations/fund"
+        | "/api/allocations/move"
+        | "/api/allocations/return-to-atb";
+    },
+  ];
+}>();
 
 const open = ref(false);
 </script>
@@ -23,10 +37,18 @@ const open = ref(false);
       <span>{{ formatMoneyMinor(category.starting_available_minor) }}</span>
       <span>{{ formatMoneyMinor(category.month_budgeted_minor) }}</span>
       <span>{{ formatMoneyMinor(category.month_activity_minor) }}</span>
-      <span class="available">{{ formatMoneyMinor(category.available_minor) }}</span>
+      <span class="available">{{
+        formatMoneyMinor(category.available_minor)
+      }}</span>
       <button type="button" @click="open = !open">Allocate</button>
     </div>
-    <AllocationPopover v-if="open" :categories="categories" :category="category" :month="month" @submit="emit('submitAllocation', $event)" />
+    <AllocationPopover
+      v-if="open"
+      :categories="categories"
+      :category="category"
+      :month="month"
+      @submit="emit('submitAllocation', $event)"
+    />
   </div>
 </template>
 

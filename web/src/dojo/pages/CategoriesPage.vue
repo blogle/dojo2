@@ -21,10 +21,19 @@ function updateSortOrder(category: Category, sortOrder: number): void {
 
 <template>
   <div class="page-grid">
-    <PageHeader title="Categories" subtitle="Manage groups, categories, order, and hidden state." />
+    <PageHeader
+      title="Categories"
+      subtitle="Manage groups, categories, order, and hidden state."
+    />
     <div class="editor-grid">
-      <Panel><CategoryGroupEditor @submit="app.saveCategoryGroup($event)" /></Panel>
-      <Panel><CategoryEditor :groups="app.state.categoryGroups" @submit="app.saveCategory($event)" /></Panel>
+      <Panel
+        ><CategoryGroupEditor @submit="app.saveCategoryGroup($event)"
+      /></Panel>
+      <Panel
+        ><CategoryEditor
+          :groups="app.state.categoryGroups"
+          @submit="app.saveCategory($event)"
+      /></Panel>
     </div>
     <Panel>
       <table class="category-table">
@@ -37,11 +46,24 @@ function updateSortOrder(category: Category, sortOrder: number): void {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="category in app.state.categories" :key="category.category_id">
+          <tr
+            v-for="category in app.state.categories"
+            :key="category.category_id"
+          >
             <td>{{ category.group_name }}</td>
             <td>{{ category.name }}</td>
-            <td><CategoryReorderControl :sort-order="category.sort_order" @update="updateSortOrder(category, $event)" /></td>
-            <td><CategoryVisibilityToggle :hidden="category.is_hidden" @toggle="toggleVisibility(category, $event)" /></td>
+            <td>
+              <CategoryReorderControl
+                :sort-order="category.sort_order"
+                @update="updateSortOrder(category, $event)"
+              />
+            </td>
+            <td>
+              <CategoryVisibilityToggle
+                :hidden="category.is_hidden"
+                @toggle="toggleVisibility(category, $event)"
+              />
+            </td>
           </tr>
         </tbody>
       </table>

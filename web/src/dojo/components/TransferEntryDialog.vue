@@ -6,7 +6,18 @@ import AccountSelect from "./AccountSelect.vue";
 import MoneyInput from "./MoneyInput.vue";
 
 defineProps<{ accounts: Account[] }>();
-const emit = defineEmits<{ submit: [payload: { date: string; from_account_id: string; to_account_id: string; amount_minor: number; status: "PENDING" | "CLEARED"; memo: string }] }>();
+const emit = defineEmits<{
+  submit: [
+    payload: {
+      date: string;
+      from_account_id: string;
+      to_account_id: string;
+      amount_minor: number;
+      status: "PENDING" | "CLEARED";
+      memo: string;
+    },
+  ];
+}>();
 
 const form = reactive({
   date: new Date().toISOString().slice(0, 10),
@@ -18,7 +29,11 @@ const form = reactive({
 });
 
 function handleSubmit(): void {
-  if (!form.from_account_id || !form.to_account_id || form.amount_minor === null) {
+  if (
+    !form.from_account_id ||
+    !form.to_account_id ||
+    form.amount_minor === null
+  ) {
     return;
   }
   emit("submit", {

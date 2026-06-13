@@ -4,5 +4,7 @@ const emit = defineEmits<{ toggle: [value: boolean] }>();
 </script>
 
 <template>
-  <button type="button" @click="emit('toggle', !hidden)">{{ hidden ? "Show" : "Hide" }}</button>
+  <button type="button" @click="emit('toggle', !hidden)">
+    {{ hidden ? "Show" : "Hide" }}
+  </button>
 </template>

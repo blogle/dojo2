@@ -80,10 +80,14 @@ def build_validation_report(service: Any, bundle: ParsedImportBundle) -> dict[st
     actual_categories = _actual_category_snapshots(service, months)
     actual_group_names = [
         row["name"]
-        for row in service.db.fetch_all("SELECT * FROM current_category_groups ORDER BY sort_order, name")
+        for row in service.db.fetch_all(
+            "SELECT * FROM current_category_groups ORDER BY sort_order, name"
+        )
     ]
     actual_group_totals = _category_group_totals(actual_group_names, actual_categories, months)
-    actual_budget_summaries = _actual_budget_summaries(service, actual_categories, actual_atb, months, show_hidden=False)
+    actual_budget_summaries = _actual_budget_summaries(
+        service, actual_categories, actual_atb, months, show_hidden=False
+    )
     actual_budget_summaries_hidden = _actual_budget_summaries(
         service, actual_categories, actual_atb, months, show_hidden=True
     )
@@ -107,7 +111,9 @@ def build_validation_report(service: Any, bundle: ParsedImportBundle) -> dict[st
                 entity_type="account",
                 entity_name=account.name,
                 expected_minor=expected[field],
-                actual_minor=actual[f"{field}_balance_minor"] if field != "display" else actual["display_balance_minor"],
+                actual_minor=actual[f"{field}_balance_minor"]
+                if field != "display"
+                else actual["display_balance_minor"],
                 source_reference=ACCOUNT_RANGE_REFS,
                 notes=notes,
             )
@@ -155,8 +161,16 @@ def build_validation_report(service: Any, bundle: ParsedImportBundle) -> dict[st
                     "Starting available balance for the selected month before current-month budgeted movement and activity.",
                 ),
             ):
-                expected_minor = getattr(expected_category, field)[month] if isinstance(getattr(expected_category, field), dict) else getattr(expected_category, field)
-                actual_minor = getattr(actual_category, field)[month] if isinstance(getattr(actual_category, field), dict) else getattr(actual_category, field)
+                expected_minor = (
+                    getattr(expected_category, field)[month]
+                    if isinstance(getattr(expected_category, field), dict)
+                    else getattr(expected_category, field)
+                )
+                actual_minor = (
+                    getattr(actual_category, field)[month]
+                    if isinstance(getattr(actual_category, field), dict)
+                    else getattr(actual_category, field)
+                )
                 _append_money_check(
                     checks,
                     label=f"category.{field.removesuffix('_minor')}",
@@ -224,9 +238,18 @@ def build_validation_report(service: Any, bundle: ParsedImportBundle) -> dict[st
                     notes=note,
                 )
             for field, note in (
-                ("available", "Visible group available total derived from visible categories in the group."),
-                ("month_activity", "Visible group month activity total derived from visible categories in the group."),
-                ("month_budgeted", "Visible group month budgeted total derived from visible categories in the group."),
+                (
+                    "available",
+                    "Visible group available total derived from visible categories in the group.",
+                ),
+                (
+                    "month_activity",
+                    "Visible group month activity total derived from visible categories in the group.",
+                ),
+                (
+                    "month_budgeted",
+                    "Visible group month budgeted total derived from visible categories in the group.",
+                ),
                 (
                     "starting_available",
                     "Visible group starting-available total derived from visible categories in the group.",
@@ -254,7 +277,13 @@ def build_validation_report(service: Any, bundle: ParsedImportBundle) -> dict[st
             actual_minor=actual_atb,
             source_reference=ACCOUNT_RANGE_REFS
             + ALLOCATION_RANGE_REFS
-            + ["Dashboard!J3", "Calculations!B59", "v_AtoB", "v_StartingBalance", "v_BalanceAdjustment"],
+            + [
+                "Dashboard!J3",
+                "Calculations!B59",
+                "v_AtoB",
+                "v_StartingBalance",
+                "v_BalanceAdjustment",
+            ],
             notes="Imported and derived unallocated money available to assign to categories. Aspire renders this on Dashboard!J3 from Calculations!B59.",
         )
         for field in (
@@ -288,9 +317,13 @@ def build_validation_report(service: Any, bundle: ParsedImportBundle) -> dict[st
             )
 
     visible_expected_total = sum(
-        values["actual"] for name, values in expected_accounts.items() if not _account_hidden(bundle, name)
+        values["actual"]
+        for name, values in expected_accounts.items()
+        if not _account_hidden(bundle, name)
     )
-    visible_actual_total = sum(account["actual_balance_minor"] for account in actual_accounts_visible.values())
+    visible_actual_total = sum(
+        account["actual_balance_minor"] for account in actual_accounts_visible.values()
+    )
     _append_money_check(
         checks,
         label="accounts.visible_total",
@@ -333,9 +366,7 @@ def build_validation_report(service: Any, bundle: ParsedImportBundle) -> dict[st
 
     for account_name, expected_minor in expected_net_worth["ledger_budget_accounts"].items():
         item = next(
-            row
-            for row in actual_net_worth_items[account_name]
-            if row.get("source") == "ledger"
+            row for row in actual_net_worth_items[account_name] if row.get("source") == "ledger"
         )
         _append_money_check(
             checks,
@@ -433,11 +464,15 @@ def _collect_months(bundle: ParsedImportBundle) -> list[str]:
     return sorted(months)
 
 
-def _actual_category_snapshots(service: Any, months: list[str]) -> dict[str, SourceCategorySnapshot]:
+def _actual_category_snapshots(
+    service: Any, months: list[str]
+) -> dict[str, SourceCategorySnapshot]:
     categories = service.db.fetch_all("SELECT * FROM current_categories ORDER BY sort_order, name")
     groups = {
         row["group_id"]: row
-        for row in service.db.fetch_all("SELECT * FROM current_category_groups ORDER BY sort_order, name")
+        for row in service.db.fetch_all(
+            "SELECT * FROM current_category_groups ORDER BY sort_order, name"
+        )
     }
     accounts = {
         row["account_id"]: row for row in service.db.fetch_all("SELECT * FROM current_accounts")
@@ -466,7 +501,8 @@ def _actual_category_snapshots(service: Any, months: list[str]) -> dict[str, Sou
     for allocation in allocations:
         from_name = (
             "Available to budget"
-            if allocation["from_bucket_id"] == service._bucket_id_from_name("Available to budget", {})
+            if allocation["from_bucket_id"]
+            == service._bucket_id_from_name("Available to budget", {})
             else category_name_by_bucket_id[allocation["from_bucket_id"]]
         )
         to_name = (
@@ -536,7 +572,9 @@ def _actual_category_snapshots(service: Any, months: list[str]) -> dict[str, Sou
             is_hidden=category["is_hidden"],
             linked_account_name=linked_account_name,
             available_minor=available_minor,
-            month_activity_minor={month: activity_by_month[category_name].get(month, 0) for month in months},
+            month_activity_minor={
+                month: activity_by_month[category_name].get(month, 0) for month in months
+            },
             month_budgeted_minor=budgeted_by_month,
             starting_available_minor=starting_by_month,
         )
@@ -563,11 +601,15 @@ def _category_group_totals(
             month_totals[group_name] = {
                 "available_minor": sum(item.available_minor for item in visible_categories),
                 "available_with_hidden_minor": sum(item.available_minor for item in all_categories),
-                "month_activity_minor": sum(item.month_activity_minor[month] for item in visible_categories),
+                "month_activity_minor": sum(
+                    item.month_activity_minor[month] for item in visible_categories
+                ),
                 "month_activity_with_hidden_minor": sum(
                     item.month_activity_minor[month] for item in all_categories
                 ),
-                "month_budgeted_minor": sum(item.month_budgeted_minor[month] for item in visible_categories),
+                "month_budgeted_minor": sum(
+                    item.month_budgeted_minor[month] for item in visible_categories
+                ),
                 "month_budgeted_with_hidden_minor": sum(
                     item.month_budgeted_minor[month] for item in all_categories
                 ),
@@ -601,7 +643,8 @@ def _actual_budget_summaries(
         visible = [
             category
             for category in categories.values()
-            if category.category_kind == CATEGORY_KIND_STANDARD and (show_hidden or not category.is_hidden)
+            if category.category_kind == CATEGORY_KIND_STANDARD
+            and (show_hidden or not category.is_hidden)
         ]
         spent_minor = 0
         refunds_minor = 0
@@ -626,8 +669,12 @@ def _actual_budget_summaries(
             else:
                 refunds_minor += transaction["amount_minor"]
         summaries[month] = {
-            "month_activity_minor": sum(category.month_activity_minor[month] for category in visible),
-            "month_budgeted_minor": sum(category.month_budgeted_minor[month] for category in visible),
+            "month_activity_minor": sum(
+                category.month_activity_minor[month] for category in visible
+            ),
+            "month_budgeted_minor": sum(
+                category.month_budgeted_minor[month] for category in visible
+            ),
             "starting_available_minor": sum(
                 category.starting_available_minor[month] for category in visible
             ),
@@ -747,7 +794,9 @@ def _expected_category_snapshots(
             is_hidden=category.is_hidden,
             linked_account_name=category.linked_account_name,
             available_minor=available_minor,
-            month_activity_minor={month: activity_by_month[category.name].get(month, 0) for month in months},
+            month_activity_minor={
+                month: activity_by_month[category.name].get(month, 0) for month in months
+            },
             month_budgeted_minor=budgeted_by_month,
             starting_available_minor=carried_by_month,
         )
@@ -775,11 +824,15 @@ def _expected_group_totals(
             month_totals[group_name] = {
                 "available_minor": sum(item.available_minor for item in visible_categories),
                 "available_with_hidden_minor": sum(item.available_minor for item in all_categories),
-                "month_activity_minor": sum(item.month_activity_minor[month] for item in visible_categories),
+                "month_activity_minor": sum(
+                    item.month_activity_minor[month] for item in visible_categories
+                ),
                 "month_activity_with_hidden_minor": sum(
                     item.month_activity_minor[month] for item in all_categories
                 ),
-                "month_budgeted_minor": sum(item.month_budgeted_minor[month] for item in visible_categories),
+                "month_budgeted_minor": sum(
+                    item.month_budgeted_minor[month] for item in visible_categories
+                ),
                 "month_budgeted_with_hidden_minor": sum(
                     item.month_budgeted_minor[month] for item in all_categories
                 ),
@@ -807,13 +860,18 @@ def _expected_budget_summaries(
         visible = [
             category
             for category in categories.values()
-            if category.category_kind == CATEGORY_KIND_STANDARD and (show_hidden or not category.is_hidden)
+            if category.category_kind == CATEGORY_KIND_STANDARD
+            and (show_hidden or not category.is_hidden)
         ]
         spent_minor = 0
         refunds_minor = 0
         summaries[month] = {
-            "month_activity_minor": sum(category.month_activity_minor[month] for category in visible),
-            "month_budgeted_minor": sum(category.month_budgeted_minor[month] for category in visible),
+            "month_activity_minor": sum(
+                category.month_activity_minor[month] for category in visible
+            ),
+            "month_budgeted_minor": sum(
+                category.month_budgeted_minor[month] for category in visible
+            ),
             "starting_available_minor": sum(
                 category.starting_available_minor[month] for category in visible
             ),

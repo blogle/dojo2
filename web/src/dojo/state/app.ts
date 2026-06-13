@@ -148,7 +148,9 @@ async function loadMoreTransactions(): Promise<void> {
 async function loadPreviousTransactions(): Promise<void> {
   if (state.transactionOffset === 0) return;
   await withLoading(async () => {
-    await fetchTransactionPage(Math.max(0, state.transactionOffset - PAGE_SIZE));
+    await fetchTransactionPage(
+      Math.max(0, state.transactionOffset - PAGE_SIZE),
+    );
   });
 }
 
@@ -170,7 +172,12 @@ async function initialize(): Promise<void> {
   await withLoading(async () => {
     await refreshBootstrap();
     if (state.appStatus?.ready) {
-      await Promise.all([refreshBudget(), refreshTransactions(), refreshAccounts(), refreshNetWorth()]);
+      await Promise.all([
+        refreshBudget(),
+        refreshTransactions(),
+        refreshAccounts(),
+        refreshNetWorth(),
+      ]);
       return;
     }
     state.onboardingInfo = await fetchGoogleOnboardingStatus();
@@ -192,10 +199,18 @@ async function beginGoogleOnboarding(): Promise<void> {
       return;
     }
 
-    const apiOrigin = new URL(import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000").origin;
-    const popup = window.open(onboarding.auth_url, "dojo-google-oauth", "width=560,height=720");
+    const apiOrigin = new URL(
+      import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000",
+    ).origin;
+    const popup = window.open(
+      onboarding.auth_url,
+      "dojo-google-oauth",
+      "width=560,height=720",
+    );
     if (!popup) {
-      throw new Error("Popup was blocked. Allow popups for this site and try again.");
+      throw new Error(
+        "Popup was blocked. Allow popups for this site and try again.",
+      );
     }
     const popupWindow = popup;
 
@@ -208,7 +223,11 @@ async function beginGoogleOnboarding(): Promise<void> {
         finished = true;
         window.clearInterval(timer);
         window.removeEventListener("message", handleMessage);
-        reject(new Error("Google OAuth window was closed before access was granted."));
+        reject(
+          new Error(
+            "Google OAuth window was closed before access was granted.",
+          ),
+        );
       }, 250);
 
       function cleanup(): void {
@@ -251,7 +270,13 @@ async function setMonth(month: string): Promise<void> {
 async function setShowHidden(value: boolean): Promise<void> {
   state.showHidden = value;
   await withLoading(async () => {
-    await Promise.all([refreshBudget(), refreshTransactions(), refreshAccounts(), refreshCategories(), refreshNetWorth()]);
+    await Promise.all([
+      refreshBudget(),
+      refreshTransactions(),
+      refreshAccounts(),
+      refreshCategories(),
+      refreshNetWorth(),
+    ]);
   });
 }
 
@@ -261,7 +286,10 @@ async function submitAllocation(payload: {
   memo: string;
   from_bucket_id: string;
   to_bucket_id: string;
-  path: "/api/allocations/fund" | "/api/allocations/move" | "/api/allocations/return-to-atb";
+  path:
+    | "/api/allocations/fund"
+    | "/api/allocations/move"
+    | "/api/allocations/return-to-atb";
 }): Promise<void> {
   await withSaving(async () => {
     await createAllocation(payload, payload.path);
@@ -277,18 +305,30 @@ async function submitTransaction(payload: TransactionPayload): Promise<void> {
     } else {
       await createTransaction(payload);
     }
-    await Promise.all([refreshTransactions(), refreshAccounts(), refreshBudget(), refreshNetWorth()]);
+    await Promise.all([
+      refreshTransactions(),
+      refreshAccounts(),
+      refreshBudget(),
+      refreshNetWorth(),
+    ]);
   });
 }
 
 async function removeTransaction(transactionId: string): Promise<void> {
   await withSaving(async () => {
     await deleteTransaction(transactionId);
-    await Promise.all([refreshTransactions(), refreshAccounts(), refreshBudget(), refreshNetWorth()]);
+    await Promise.all([
+      refreshTransactions(),
+      refreshAccounts(),
+      refreshBudget(),
+      refreshNetWorth(),
+    ]);
   });
 }
 
-async function toggleTransactionStatus(transaction: Transaction): Promise<void> {
+async function toggleTransactionStatus(
+  transaction: Transaction,
+): Promise<void> {
   await submitTransaction({
     date: transaction.date,
     account_id: transaction.account_id,
@@ -310,11 +350,19 @@ async function submitTransfer(payload: {
 }): Promise<void> {
   await withSaving(async () => {
     await createTransfer(payload);
-    await Promise.all([refreshTransactions(), refreshAccounts(), refreshBudget(), refreshNetWorth()]);
+    await Promise.all([
+      refreshTransactions(),
+      refreshAccounts(),
+      refreshBudget(),
+      refreshNetWorth(),
+    ]);
   });
 }
 
-async function saveAccount(payload: Record<string, unknown>, accountId?: string): Promise<void> {
+async function saveAccount(
+  payload: Record<string, unknown>,
+  accountId?: string,
+): Promise<void> {
   await withSaving(async () => {
     if (accountId) {
       await updateAccount(accountId, payload);
@@ -325,7 +373,10 @@ async function saveAccount(payload: Record<string, unknown>, accountId?: string)
   });
 }
 
-async function saveCategoryGroup(payload: Record<string, unknown>, groupId?: string): Promise<void> {
+async function saveCategoryGroup(
+  payload: Record<string, unknown>,
+  groupId?: string,
+): Promise<void> {
   await withSaving(async () => {
     if (groupId) {
       await updateCategoryGroup(groupId, payload);
@@ -336,7 +387,10 @@ async function saveCategoryGroup(payload: Record<string, unknown>, groupId?: str
   });
 }
 
-async function saveCategory(payload: Record<string, unknown>, categoryId?: string): Promise<void> {
+async function saveCategory(
+  payload: Record<string, unknown>,
+  categoryId?: string,
+): Promise<void> {
   await withSaving(async () => {
     if (categoryId) {
       await updateCategory(categoryId, payload);

@@ -12,7 +12,9 @@ import type {
   TransactionPayload,
 } from "../types";
 
-const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000").replace(/\/$/, "");
+const apiBaseUrl = (
+  import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000"
+).replace(/\/$/, "");
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${apiBaseUrl}${path}`, {
@@ -49,8 +51,14 @@ export async function fetchBootstrap(): Promise<BootstrapResponse> {
   return request<BootstrapResponse>("/api/bootstrap");
 }
 
-export async function fetchBudget(month: string, showHidden: boolean): Promise<BudgetResponse> {
-  const params = new URLSearchParams({ month, show_hidden: String(showHidden) });
+export async function fetchBudget(
+  month: string,
+  showHidden: boolean,
+): Promise<BudgetResponse> {
+  const params = new URLSearchParams({
+    month,
+    show_hidden: String(showHidden),
+  });
   return request<BudgetResponse>(`/api/budget?${params.toString()}`);
 }
 
@@ -79,15 +87,23 @@ export async function fetchTransactionsPage(
 
 export async function fetchAccounts(showHidden: boolean): Promise<Account[]> {
   const params = new URLSearchParams({ show_hidden: String(showHidden) });
-  const response = await request<{ items: Account[] }>(`/api/accounts?${params.toString()}`);
+  const response = await request<{ items: Account[] }>(
+    `/api/accounts?${params.toString()}`,
+  );
   return response.items;
 }
 
-export async function fetchCategories(month: string, showHidden: boolean): Promise<{
+export async function fetchCategories(
+  month: string,
+  showHidden: boolean,
+): Promise<{
   groups: CategoryGroup[];
   items: Category[];
 }> {
-  const params = new URLSearchParams({ month, show_hidden: String(showHidden) });
+  const params = new URLSearchParams({
+    month,
+    show_hidden: String(showHidden),
+  });
   return request(`/api/categories?${params.toString()}`);
 }
 
@@ -96,35 +112,53 @@ export async function fetchNetWorth(): Promise<NetWorthResponse> {
 }
 
 export async function startGoogleOnboarding(): Promise<GoogleOnboardingStatus> {
-  return request<GoogleOnboardingStatus>("/api/onboarding/google/start", { method: "POST" });
+  return request<GoogleOnboardingStatus>("/api/onboarding/google/start", {
+    method: "POST",
+  });
 }
 
 export async function fetchGoogleOnboardingStatus(): Promise<GoogleOnboardingStatus> {
   return request<GoogleOnboardingStatus>("/api/onboarding/google/status");
 }
 
-export async function importGoogleSheet(sheetUrlOrId: string): Promise<ImportResult> {
+export async function importGoogleSheet(
+  sheetUrlOrId: string,
+): Promise<ImportResult> {
   return request<ImportResult>("/api/import/google-sheet", {
     method: "POST",
     body: JSON.stringify({ sheet_url_or_id: sheetUrlOrId }),
   });
 }
 
-export async function createAllocation(payload: {
-  date: string;
-  amount_minor: number;
-  memo: string;
-  from_bucket_id: string;
-  to_bucket_id: string;
-}, path: "/api/allocations/fund" | "/api/allocations/move" | "/api/allocations/return-to-atb"): Promise<void> {
+export async function createAllocation(
+  payload: {
+    date: string;
+    amount_minor: number;
+    memo: string;
+    from_bucket_id: string;
+    to_bucket_id: string;
+  },
+  path:
+    | "/api/allocations/fund"
+    | "/api/allocations/move"
+    | "/api/allocations/return-to-atb",
+): Promise<void> {
   await request(path, { method: "POST", body: JSON.stringify(payload) });
 }
 
-export async function createTransaction(payload: TransactionPayload): Promise<void> {
-  await request("/api/transactions", { method: "POST", body: JSON.stringify(payload) });
+export async function createTransaction(
+  payload: TransactionPayload,
+): Promise<void> {
+  await request("/api/transactions", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
-export async function updateTransaction(transactionId: string, payload: TransactionPayload): Promise<void> {
+export async function updateTransaction(
+  transactionId: string,
+  payload: TransactionPayload,
+): Promise<void> {
   await request(`/api/transactions/${transactionId}`, {
     method: "PUT",
     body: JSON.stringify(payload),
@@ -143,29 +177,65 @@ export async function createTransfer(payload: {
   status: "PENDING" | "CLEARED";
   memo: string;
 }): Promise<void> {
-  await request("/api/transfers", { method: "POST", body: JSON.stringify(payload) });
+  await request("/api/transfers", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
-export async function createAccount(payload: Record<string, unknown>): Promise<void> {
-  await request("/api/accounts", { method: "POST", body: JSON.stringify(payload) });
+export async function createAccount(
+  payload: Record<string, unknown>,
+): Promise<void> {
+  await request("/api/accounts", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
-export async function updateAccount(accountId: string, payload: Record<string, unknown>): Promise<void> {
-  await request(`/api/accounts/${accountId}`, { method: "PUT", body: JSON.stringify(payload) });
+export async function updateAccount(
+  accountId: string,
+  payload: Record<string, unknown>,
+): Promise<void> {
+  await request(`/api/accounts/${accountId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
 }
 
-export async function createCategoryGroup(payload: Record<string, unknown>): Promise<void> {
-  await request("/api/category-groups", { method: "POST", body: JSON.stringify(payload) });
+export async function createCategoryGroup(
+  payload: Record<string, unknown>,
+): Promise<void> {
+  await request("/api/category-groups", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
-export async function updateCategoryGroup(groupId: string, payload: Record<string, unknown>): Promise<void> {
-  await request(`/api/category-groups/${groupId}`, { method: "PUT", body: JSON.stringify(payload) });
+export async function updateCategoryGroup(
+  groupId: string,
+  payload: Record<string, unknown>,
+): Promise<void> {
+  await request(`/api/category-groups/${groupId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
 }
 
-export async function createCategory(payload: Record<string, unknown>): Promise<void> {
-  await request("/api/categories", { method: "POST", body: JSON.stringify(payload) });
+export async function createCategory(
+  payload: Record<string, unknown>,
+): Promise<void> {
+  await request("/api/categories", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
-export async function updateCategory(categoryId: string, payload: Record<string, unknown>): Promise<void> {
-  await request(`/api/categories/${categoryId}`, { method: "PUT", body: JSON.stringify(payload) });
+export async function updateCategory(
+  categoryId: string,
+  payload: Record<string, unknown>,
+): Promise<void> {
+  await request(`/api/categories/${categoryId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
 }

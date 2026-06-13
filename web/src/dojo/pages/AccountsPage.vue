@@ -12,9 +12,15 @@ const app = useAppState();
 
 <template>
   <div class="page-grid">
-    <PageHeader title="Accounts" subtitle="Track balances, hidden entities, and credit card liabilities." />
+    <PageHeader
+      title="Accounts"
+      subtitle="Track balances, hidden entities, and credit card liabilities."
+    />
     <div class="toolbar">
-      <HiddenEntitiesToggle :model-value="app.state.showHidden" @update:model-value="app.setShowHidden($event)" />
+      <HiddenEntitiesToggle
+        :model-value="app.state.showHidden"
+        @update:model-value="app.setShowHidden($event)"
+      />
     </div>
     <Panel><AccountEditor @submit="app.saveAccount($event)" /></Panel>
     <AccountList :accounts="app.state.accounts" />

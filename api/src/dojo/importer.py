@@ -693,7 +693,9 @@ def validate_required_named_ranges(
     required_ranges: tuple[str, ...] = REQUIRED_NAMED_RANGES,
 ) -> None:
     missing = sorted(
-        logical_name for logical_name in required_ranges if logical_name not in discovered_named_ranges
+        logical_name
+        for logical_name in required_ranges
+        if logical_name not in discovered_named_ranges
     )
     if missing:
         raise ValueError(f"Missing required named ranges: {', '.join(missing)}")
@@ -743,7 +745,9 @@ def read_column_vector(contract: NamedRangeContractEntry, matrix: NamedRangeMatr
     return [row[0] if row else "" for row in validated]
 
 
-def read_table_block(contract: NamedRangeContractEntry, matrix: NamedRangeMatrix) -> NamedRangeMatrix:
+def read_table_block(
+    contract: NamedRangeContractEntry, matrix: NamedRangeMatrix
+) -> NamedRangeMatrix:
     return validate_named_range_shape(contract, matrix)
 
 
@@ -797,8 +801,7 @@ def validate_compatible_lengths(table_name: str, columns: dict[str, list[str]]) 
 def zip_named_range_rows(table_name: str, columns: dict[str, list[str]]) -> list[dict[str, str]]:
     row_count = validate_compatible_lengths(table_name, columns)
     normalized_columns = {
-        name: values + [""] * (row_count - len(values))
-        for name, values in columns.items()
+        name: values + [""] * (row_count - len(values)) for name, values in columns.items()
     }
     column_names = list(columns.keys())
     return [
@@ -915,13 +918,17 @@ def parse_configuration_categories_and_groups(
         if category_kind is None:
             raise ValueError(f"Unsupported configuration row symbol {symbol!r} on row {offset}")
         if current_group_name is None:
-            raise ValueError(f"Configuration row {offset} defines category {name!r} before any group row")
+            raise ValueError(
+                f"Configuration row {offset} defines category {name!r} before any group row"
+            )
         if not name:
             raise ValueError(f"Configuration row {offset} is missing the category name")
 
         metadata = category_metadata_by_name.get(name)
         if metadata is None:
-            raise ValueError(f"Category {name} is present in r_ConfigurationData but missing metadata")
+            raise ValueError(
+                f"Category {name} is present in r_ConfigurationData but missing metadata"
+            )
 
         linked_account_name = _none_if_blank(metadata.get("linked_account", ""))
         if category_kind == CATEGORY_KIND_CREDIT_CARD_PAYMENT:
@@ -963,12 +970,12 @@ def parse_configuration_accounts(
         access.require_vector("transactions.account"),
     )
     if not ordered_account_names:
-        raise ValueError("No account names were discovered from configuration or transaction ranges")
+        raise ValueError(
+            "No account names were discovered from configuration or transaction ranges"
+        )
 
     credit_name_set = {
-        value.strip()
-        for value in [*credit_accounts, *explicit_credit_accounts]
-        if value.strip()
+        value.strip() for value in [*credit_accounts, *explicit_credit_accounts] if value.strip()
     }
     payment_category_by_account = {
         category.linked_account_name: category.name
@@ -1077,7 +1084,9 @@ def reconcile_category_references(
     groups: list[ParsedGroup],
     transactions: list[ParsedTransaction],
     allocations: list[ParsedAllocation],
-) -> tuple[list[ParsedCategory], list[ParsedGroup], list[ParsedTransaction], list[ParsedAllocation]]:
+) -> tuple[
+    list[ParsedCategory], list[ParsedGroup], list[ParsedTransaction], list[ParsedAllocation]
+]:
     canonical_by_normalized = {
         normalize_category_reference_name(category.name): category.name for category in categories
     }
@@ -1116,7 +1125,9 @@ def reconcile_category_references(
             referenced_names.add(allocation.to_name)
 
     known_category_names = {category.name for category in categories}
-    missing_category_names = sorted(name for name in referenced_names if name not in known_category_names)
+    missing_category_names = sorted(
+        name for name in referenced_names if name not in known_category_names
+    )
     if not missing_category_names:
         return categories, groups, transactions, allocations
 
@@ -1133,7 +1144,9 @@ def reconcile_category_references(
             )
         )
 
-    next_sort_order = (max((category.sort_order for category in categories), default=0) // 10 + 1) * 10
+    next_sort_order = (
+        max((category.sort_order for category in categories), default=0) // 10 + 1
+    ) * 10
     for name in missing_category_names:
         categories.append(
             ParsedCategory(
@@ -1186,11 +1199,13 @@ def classify_transaction_row(row: dict[str, str], labels: ScalarLabelSet) -> Tra
         STATUS_CLEARED,
         STATUS_PENDING,
     }
-    has_system_category = bool(category_raw and map_system_category(category_raw, labels) is not None)
+    has_system_category = bool(
+        category_raw and map_system_category(category_raw, labels) is not None
+    )
     has_known_status = status_raw in known_status_values
-    has_reconciliation_signals = any(
-        [date_raw, account_name, category_raw, status_raw]
-    ) and (bool(date_raw) or has_known_status or has_system_category)
+    has_reconciliation_signals = any([date_raw, account_name, category_raw, status_raw]) and (
+        bool(date_raw) or has_known_status or has_system_category
+    )
     if has_reconciliation_signals:
         return TransactionRowKind.RECONCILIATION_ROW
     if memo or any([date_raw, account_name, category_raw, status_raw]):
@@ -1293,7 +1308,9 @@ def parse_net_worth_named_ranges(
         if amount_minor is None:
             raise ValueError(f"Net worth row {offset} contains an invalid amount")
         normalized_name = normalize_financial_entity_name(raw_name)
-        if (raw_name in debt_names or normalized_name in normalized_debt_names) and amount_minor > 0:
+        if (
+            raw_name in debt_names or normalized_name in normalized_debt_names
+        ) and amount_minor > 0:
             amount_minor = -amount_minor
 
         account_name: str | None = None

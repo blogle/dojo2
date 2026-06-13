@@ -26,14 +26,31 @@ const authorized = computed(() => Boolean(props.onboardingInfo?.authorized));
   <div class="onboarding-screen">
     <Panel>
       <h1>Dojo onboarding</h1>
-      <p>Import the copied spreadsheet once, validate the numbers to the penny, then budget locally in DuckDB.</p>
+      <p>
+        Import the copied spreadsheet once, validate the numbers to the penny,
+        then budget locally in DuckDB.
+      </p>
     </Panel>
     <Panel>
-      <GoogleAccessStep :authorized="authorized" :configured="configured" :fixture-mode="fixtureMode" :loading="loading" @begin="emit('beginGoogle')" />
+      <GoogleAccessStep
+        :authorized="authorized"
+        :configured="configured"
+        :fixture-mode="fixtureMode"
+        :loading="loading"
+        @begin="emit('beginGoogle')"
+      />
       <SheetIdInput v-model="sheetInput" />
-      <ImportPreview title="Copy of Finances 2.0" :summary="importResult?.validation_report.summary ?? null" />
-      <ImportConfirmStep :loading="loading" @confirm="emit('importSheet', sheetInput)" />
-      <ImportValidationReport :report="importResult?.validation_report ?? null" />
+      <ImportPreview
+        title="Copy of Finances 2.0"
+        :summary="importResult?.validation_report.summary ?? null"
+      />
+      <ImportConfirmStep
+        :loading="loading"
+        @confirm="emit('importSheet', sheetInput)"
+      />
+      <ImportValidationReport
+        :report="importResult?.validation_report ?? null"
+      />
     </Panel>
   </div>
 </template>

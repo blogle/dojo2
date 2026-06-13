@@ -11,21 +11,30 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  submit: [payload: {
-    date: string;
-    amount_minor: number;
-    memo: string;
-    from_bucket_id: string;
-    to_bucket_id: string;
-    path: "/api/allocations/fund" | "/api/allocations/move" | "/api/allocations/return-to-atb";
-  }];
+  submit: [
+    payload: {
+      date: string;
+      amount_minor: number;
+      memo: string;
+      from_bucket_id: string;
+      to_bucket_id: string;
+      path:
+        | "/api/allocations/fund"
+        | "/api/allocations/move"
+        | "/api/allocations/return-to-atb";
+    },
+  ];
 }>();
 
 const mode = ref<"fund" | "move" | "return">("fund");
 const amountMinor = ref<number | null>(null);
 const targetCategoryId = ref("");
 
-const destinationOptions = computed(() => props.categories.filter((category) => category.category_id !== props.category.category_id));
+const destinationOptions = computed(() =>
+  props.categories.filter(
+    (category) => category.category_id !== props.category.category_id,
+  ),
+);
 
 function handleSubmit(): void {
   if (amountMinor.value === null || amountMinor.value <= 0) {
@@ -35,12 +44,17 @@ function handleSubmit(): void {
     date: `${props.month}-01`,
     amount_minor: amountMinor.value,
     memo: `${mode.value} ${props.category.name}`,
-    from_bucket_id: mode.value === "fund" ? "00000000-0000-0000-0000-00000000a7b0" : props.category.bucket_id,
+    from_bucket_id:
+      mode.value === "fund"
+        ? "00000000-0000-0000-0000-00000000a7b0"
+        : props.category.bucket_id,
     to_bucket_id:
       mode.value === "fund"
         ? props.category.bucket_id
         : mode.value === "move"
-          ? destinationOptions.value.find((category) => category.category_id === targetCategoryId.value)?.bucket_id ?? ""
+          ? (destinationOptions.value.find(
+              (category) => category.category_id === targetCategoryId.value,
+            )?.bucket_id ?? "")
           : "00000000-0000-0000-0000-00000000a7b0",
     path:
       mode.value === "fund"
@@ -65,7 +79,11 @@ function handleSubmit(): void {
       <span>To category</span>
       <select v-model="targetCategoryId">
         <option value="">Select category</option>
-        <option v-for="category in destinationOptions" :key="category.category_id" :value="category.category_id">
+        <option
+          v-for="category in destinationOptions"
+          :key="category.category_id"
+          :value="category.category_id"
+        >
           {{ category.name }}
         </option>
       </select>

@@ -9,7 +9,21 @@ defineProps<{
   allCategories: CategoryGroup["categories"];
 }>();
 
-const emit = defineEmits<{ submitAllocation: [payload: { date: string; amount_minor: number; memo: string; from_bucket_id: string; to_bucket_id: string; path: "/api/allocations/fund" | "/api/allocations/move" | "/api/allocations/return-to-atb" }] }>();
+const emit = defineEmits<{
+  submitAllocation: [
+    payload: {
+      date: string;
+      amount_minor: number;
+      memo: string;
+      from_bucket_id: string;
+      to_bucket_id: string;
+      path:
+        | "/api/allocations/fund"
+        | "/api/allocations/move"
+        | "/api/allocations/return-to-atb";
+    },
+  ];
+}>();
 </script>
 
 <template>
@@ -45,7 +59,9 @@ const emit = defineEmits<{ submitAllocation: [payload: { date: string; amount_mi
       <span>{{ formatMoneyMinor(group.totals.starting_available_minor) }}</span>
       <span>{{ formatMoneyMinor(group.totals.month_budgeted_minor) }}</span>
       <span>{{ formatMoneyMinor(group.totals.month_activity_minor) }}</span>
-      <span class="available">{{ formatMoneyMinor(group.totals.available_minor) }}</span>
+      <span class="available">{{
+        formatMoneyMinor(group.totals.available_minor)
+      }}</span>
       <span></span>
     </div>
   </section>

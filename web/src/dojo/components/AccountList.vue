@@ -7,7 +7,11 @@ defineProps<{ accounts: Account[] }>();
 
 <template>
   <div class="account-list">
-    <AccountBalanceCard v-for="account in accounts" :key="account.account_id" :account="account" />
+    <AccountBalanceCard
+      v-for="account in accounts"
+      :key="account.account_id"
+      :account="account"
+    />
   </div>
 </template>
 

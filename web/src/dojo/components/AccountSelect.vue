@@ -11,9 +11,18 @@ const emit = defineEmits<{ "update:modelValue": [value: string] }>();
 <template>
   <label class="field">
     <span>Account</span>
-    <select :value="modelValue" @change="emit('update:modelValue', ($event.target as HTMLSelectElement).value)">
+    <select
+      :value="modelValue"
+      @change="
+        emit('update:modelValue', ($event.target as HTMLSelectElement).value)
+      "
+    >
       <option value="">Select account</option>
-      <option v-for="account in accounts" :key="account.account_id" :value="account.account_id">
+      <option
+        v-for="account in accounts"
+        :key="account.account_id"
+        :value="account.account_id"
+      >
         {{ account.name }}
       </option>
     </select>

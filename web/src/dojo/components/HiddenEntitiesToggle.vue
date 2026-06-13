@@ -5,7 +5,13 @@ const emit = defineEmits<{ "update:modelValue": [value: boolean] }>();
 
 <template>
   <label class="toggle">
-    <input :checked="modelValue" type="checkbox" @change="emit('update:modelValue', ($event.target as HTMLInputElement).checked)" />
+    <input
+      :checked="modelValue"
+      type="checkbox"
+      @change="
+        emit('update:modelValue', ($event.target as HTMLInputElement).checked)
+      "
+    />
     <span>Show hidden</span>
   </label>
 </template>

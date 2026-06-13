@@ -17,12 +17,22 @@ const props = withDefaults(
 
 const scrollTop = ref(0);
 
-const startIndex = computed(() => Math.max(0, Math.floor(scrollTop.value / props.rowHeight) - props.overscan));
-const visibleCount = computed(() => Math.ceil(props.viewportHeight / props.rowHeight) + props.overscan * 2);
-const endIndex = computed(() => Math.min(props.items.length, startIndex.value + visibleCount.value));
-const visibleItems = computed(() => props.items.slice(startIndex.value, endIndex.value));
+const startIndex = computed(() =>
+  Math.max(0, Math.floor(scrollTop.value / props.rowHeight) - props.overscan),
+);
+const visibleCount = computed(
+  () => Math.ceil(props.viewportHeight / props.rowHeight) + props.overscan * 2,
+);
+const endIndex = computed(() =>
+  Math.min(props.items.length, startIndex.value + visibleCount.value),
+);
+const visibleItems = computed(() =>
+  props.items.slice(startIndex.value, endIndex.value),
+);
 const topPadding = computed(() => startIndex.value * props.rowHeight);
-const bottomPadding = computed(() => Math.max(0, (props.items.length - endIndex.value) * props.rowHeight));
+const bottomPadding = computed(() =>
+  Math.max(0, (props.items.length - endIndex.value) * props.rowHeight),
+);
 
 function handleScroll(event: Event): void {
   scrollTop.value = (event.target as HTMLElement).scrollTop;
@@ -30,7 +40,11 @@ function handleScroll(event: Event): void {
 </script>
 
 <template>
-  <div class="virtual-table" :style="{ height: `${viewportHeight}px` }" @scroll="handleScroll">
+  <div
+    class="virtual-table"
+    :style="{ height: `${viewportHeight}px` }"
+    @scroll="handleScroll"
+  >
     <div :style="{ height: `${topPadding}px` }" />
     <slot :items="visibleItems" :start-index="startIndex" />
     <div :style="{ height: `${bottomPadding}px` }" />

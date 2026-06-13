@@ -19,21 +19,41 @@ const metrics = computed(() => {
     return [];
   }
   return [
-    { label: "Activity", value: formatMoneyMinor(summary.month_activity_minor) },
-    { label: "Budgeted", value: formatMoneyMinor(summary.month_budgeted_minor) },
-    { label: "Income", value: formatMoneyMinor(summary.reportable_income_minor) },
+    {
+      label: "Activity",
+      value: formatMoneyMinor(summary.month_activity_minor),
+    },
+    {
+      label: "Budgeted",
+      value: formatMoneyMinor(summary.month_budgeted_minor),
+    },
+    {
+      label: "Income",
+      value: formatMoneyMinor(summary.reportable_income_minor),
+    },
   ];
 });
 </script>
 
 <template>
   <div class="page-grid">
-    <PageHeader title="Budget" subtitle="Fund from ATB, move money, and preserve rollover.">
-      <BudgetMonthSelector :model-value="app.state.month" @update:model-value="app.setMonth($event)" />
+    <PageHeader
+      title="Budget"
+      subtitle="Fund from ATB, move money, and preserve rollover."
+    >
+      <BudgetMonthSelector
+        :model-value="app.state.month"
+        @update:model-value="app.setMonth($event)"
+      />
     </PageHeader>
     <div class="toolbar">
-      <AvailableToBudgetCard :amount-minor="app.state.budget?.available_to_budget_minor ?? 0" />
-      <HiddenEntitiesToggle :model-value="app.state.showHidden" @update:model-value="app.setShowHidden($event)" />
+      <AvailableToBudgetCard
+        :amount-minor="app.state.budget?.available_to_budget_minor ?? 0"
+      />
+      <HiddenEntitiesToggle
+        :model-value="app.state.showHidden"
+        @update:model-value="app.setShowHidden($event)"
+      />
     </div>
     <MetricStrip :items="metrics" />
     <LoadingSkeleton v-if="app.state.loading && !app.state.budget" />

@@ -10,11 +10,27 @@ const props = defineProps<{
   transactions: Transaction[];
 }>();
 
-const emit = defineEmits<{ edit: [transaction: Transaction]; remove: [transactionId: string]; toggleStatus: [transaction: Transaction] }>();
+const emit = defineEmits<{
+  edit: [transaction: Transaction];
+  remove: [transactionId: string];
+  toggleStatus: [transaction: Transaction];
+}>();
 
 const selectedAccountId = ref("");
-const selectedAccount = computed(() => props.accounts.find((account) => account.account_id === selectedAccountId.value) ?? props.accounts[0] ?? null);
-const accountTransactions = computed(() => props.transactions.filter((transaction) => transaction.account_id === selectedAccount.value?.account_id));
+const selectedAccount = computed(
+  () =>
+    props.accounts.find(
+      (account) => account.account_id === selectedAccountId.value,
+    ) ??
+    props.accounts[0] ??
+    null,
+);
+const accountTransactions = computed(() =>
+  props.transactions.filter(
+    (transaction) =>
+      transaction.account_id === selectedAccount.value?.account_id,
+  ),
+);
 </script>
 
 <template>
@@ -22,7 +38,13 @@ const accountTransactions = computed(() => props.transactions.filter((transactio
     <label class="field">
       <span>Account detail</span>
       <select v-model="selectedAccountId">
-        <option v-for="account in accounts" :key="account.account_id" :value="account.account_id">{{ account.name }}</option>
+        <option
+          v-for="account in accounts"
+          :key="account.account_id"
+          :value="account.account_id"
+        >
+          {{ account.name }}
+        </option>
       </select>
     </label>
     <EmptyState v-if="!selectedAccount" message="No account selected." />

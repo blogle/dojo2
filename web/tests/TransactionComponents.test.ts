@@ -4,7 +4,11 @@ import { describe, expect, it } from "vitest";
 import TransactionEntryBar from "../src/dojo/components/TransactionEntryBar.vue";
 import TransactionStatusToggle from "../src/dojo/components/TransactionStatusToggle.vue";
 import VirtualTransactionTable from "../src/dojo/components/VirtualTransactionTable.vue";
-import { sampleAccounts, sampleCategories, sampleTransactions } from "./helpers";
+import {
+  sampleAccounts,
+  sampleCategories,
+  sampleTransactions,
+} from "./helpers";
 
 describe("transaction components", () => {
   it("submits a valid transaction payload", async () => {
@@ -33,7 +37,9 @@ describe("transaction components", () => {
   });
 
   it("emits status toggle", async () => {
-    const wrapper = mount(TransactionStatusToggle, { props: { status: "PENDING" } });
+    const wrapper = mount(TransactionStatusToggle, {
+      props: { status: "PENDING" },
+    });
     await wrapper.get("button").trigger("click");
     expect(wrapper.emitted("toggle")).toHaveLength(1);
   });

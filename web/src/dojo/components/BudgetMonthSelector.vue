@@ -6,7 +6,13 @@ const emit = defineEmits<{ "update:modelValue": [value: string] }>();
 <template>
   <label class="field">
     <span>Month</span>
-    <input :value="modelValue" type="month" @input="emit('update:modelValue', ($event.target as HTMLInputElement).value)" />
+    <input
+      :value="modelValue"
+      type="month"
+      @input="
+        emit('update:modelValue', ($event.target as HTMLInputElement).value)
+      "
+    />
   </label>
 </template>
 

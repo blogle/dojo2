@@ -255,9 +255,7 @@ DEFAULT_FIXTURE = {
         "UserDefCategories": column(
             ["Grocery", "Utilities", "Secret Stash", "Reserve Card Payment"]
         ),
-        "UserDefCategoryGroupNames": column(
-            ["Living", "Bills", "Living", "Credit Card Payments"]
-        ),
+        "UserDefCategoryGroupNames": column(["Living", "Bills", "Living", "Credit Card Payments"]),
         "UserDefAmounts": column(["$300.00", "$150.00", "$100.00", ""]),
         "UserDefGoals": column(["", "Monthly", "", ""]),
         "UserDefLinkedAccounts": column(["", "", "", "Reserve Card"]),

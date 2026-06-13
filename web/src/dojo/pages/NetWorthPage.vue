@@ -9,10 +9,15 @@ const app = useAppState();
 
 <template>
   <div class="page-grid">
-    <PageHeader title="Net Worth" subtitle="Current net worth includes hidden accounts. Budget accounts come from the ledger; duplicated imported budget valuations are listed but ignored in the total." />
+    <PageHeader
+      title="Net Worth"
+      subtitle="Current net worth includes hidden accounts. Budget accounts come from the ledger; duplicated imported budget valuations are listed but ignored in the total."
+    />
     <Panel>
       <p class="eyebrow">Current net worth</p>
-      <h2>{{ formatMoneyMinor(app.state.netWorth?.current_net_worth_minor ?? 0) }}</h2>
+      <h2>
+        {{ formatMoneyMinor(app.state.netWorth?.current_net_worth_minor ?? 0) }}
+      </h2>
     </Panel>
     <Panel>
       <table class="net-worth-table">
@@ -25,16 +30,21 @@ const app = useAppState();
           </tr>
         </thead>
         <tbody>
-          <tr v-for="item in app.state.netWorth?.items ?? []" :key="`${item.account_name}-${item.source}`">
+          <tr
+            v-for="item in app.state.netWorth?.items ?? []"
+            :key="`${item.account_name}-${item.source}`"
+          >
             <td>{{ item.account_name }}</td>
             <td>
-              {{ item.source === "ledger"
-                ? "Ledger balance"
-                : item.ignored_reason === "ambiguous_budget_duplicate"
-                  ? "Imported valuation (ambiguous duplicate, ignored)"
-                  : item.ignored_import_value
-                    ? "Imported valuation (ignored in total)"
-                    : "Imported valuation" }}
+              {{
+                item.source === "ledger"
+                  ? "Ledger balance"
+                  : item.ignored_reason === "ambiguous_budget_duplicate"
+                    ? "Imported valuation (ambiguous duplicate, ignored)"
+                    : item.ignored_import_value
+                      ? "Imported valuation (ignored in total)"
+                      : "Imported valuation"
+              }}
             </td>
             <td>{{ formatMoneyMinor(item.net_worth_minor) }}</td>
             <td>{{ item.ignored_import_value ? "yes" : "no" }}</td>

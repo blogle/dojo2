@@ -42,9 +42,9 @@ def test_import_validation_report_is_structured_and_passing(service: DojoService
 
 
 def test_validation_report_tracks_hidden_budget_summary_semantics(service: DojoService) -> None:
-    report = service.import_sheet_data(
-        source="fixture://default", source_kind="fixture"
-    )["validation_report"]
+    report = service.import_sheet_data(source="fixture://default", source_kind="fixture")[
+        "validation_report"
+    ]
 
     visible_spent = _find_check(report["checks"], "budget.summary.spent", "2026-01", "2026-01")
     hidden_spent = _find_check(
@@ -63,16 +63,14 @@ def test_validation_report_tracks_hidden_budget_summary_semantics(service: DojoS
 
 
 def test_validation_report_documents_ignored_budget_net_worth_values(service: DojoService) -> None:
-    report = service.import_sheet_data(
-        source="fixture://default", source_kind="fixture"
-    )["validation_report"]
+    report = service.import_sheet_data(source="fixture://default", source_kind="fixture")[
+        "validation_report"
+    ]
 
     ignored_value = _find_check(
         report["checks"], "net_worth.ignored_budget_import_value", "Checking"
     )
-    ignored_flag = _find_check(
-        report["checks"], "net_worth.ignored_budget_import_flag", "Checking"
-    )
+    ignored_flag = _find_check(report["checks"], "net_worth.ignored_budget_import_flag", "Checking")
     native_total = _find_check(report["checks"], "net_worth.total", "current")
 
     assert ignored_value["expected_minor"] == 474000
@@ -83,9 +81,9 @@ def test_validation_report_documents_ignored_budget_net_worth_values(service: Do
 
 
 def test_validation_report_requires_labeled_ledger_net_worth_rows(service: DojoService) -> None:
-    report = service.import_sheet_data(
-        source="fixture://default", source_kind="fixture"
-    )["validation_report"]
+    report = service.import_sheet_data(source="fixture://default", source_kind="fixture")[
+        "validation_report"
+    ]
 
     labels_present = _find_check(report["checks"], "net_worth.ledger_labels_present", "ledger_rows")
     assert labels_present["expected_value"] == labels_present["actual_value"]

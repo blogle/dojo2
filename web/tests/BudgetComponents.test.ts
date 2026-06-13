@@ -14,10 +14,16 @@ import { sampleAccounts, sampleCategories, sampleGroup } from "./helpers";
 describe("budget components", () => {
   it("renders categories in order", () => {
     const wrapper = mount(CategoryGroupPanel, {
-      props: { group: sampleGroup, month: "2026-02", allCategories: sampleCategories },
+      props: {
+        group: sampleGroup,
+        month: "2026-02",
+        allCategories: sampleCategories,
+      },
     });
 
-    expect(wrapper.text().indexOf("Grocery")).toBeLessThan(wrapper.text().indexOf("Hidden stash"));
+    expect(wrapper.text().indexOf("Grocery")).toBeLessThan(
+      wrapper.text().indexOf("Hidden stash"),
+    );
     expect(wrapper.text()).toContain("Group Total");
     expect(wrapper.text()).toContain("Starting available");
     expect(wrapper.text()).not.toContain("Carried over");
@@ -26,7 +32,11 @@ describe("budget components", () => {
 
   it("opens allocation popover from category row", async () => {
     const wrapper = mount(CategoryBudgetRow, {
-      props: { category: sampleCategories[0], categories: sampleCategories, month: "2026-02" },
+      props: {
+        category: sampleCategories[0],
+        categories: sampleCategories,
+        month: "2026-02",
+      },
     });
 
     expect(wrapper.findComponent(AllocationPopover).exists()).toBe(false);
@@ -36,10 +46,15 @@ describe("budget components", () => {
 
   it("submits fund, move, and return actions", async () => {
     const wrapper = mount(AllocationPopover, {
-      props: { category: sampleCategories[0], categories: sampleCategories, month: "2026-02" },
+      props: {
+        category: sampleCategories[0],
+        categories: sampleCategories,
+        month: "2026-02",
+      },
     });
     const buttons = () => wrapper.findAll("button");
-    const emissions = () => (wrapper.emitted("submit") ?? []) as Array<Array<{ path: string }>>;
+    const emissions = () =>
+      (wrapper.emitted("submit") ?? []) as Array<Array<{ path: string }>>;
 
     await buttons()[0].trigger("click");
     await wrapper.get('input[type="text"]').setValue("$10.00");
@@ -57,7 +72,9 @@ describe("budget components", () => {
   });
 
   it("reveals hidden toggle state", async () => {
-    const wrapper = mount(HiddenEntitiesToggle, { props: { modelValue: false } });
+    const wrapper = mount(HiddenEntitiesToggle, {
+      props: { modelValue: false },
+    });
     await wrapper.get('input[type="checkbox"]').setValue(true);
     expect(wrapper.emitted("update:modelValue")?.[0]).toEqual([true]);
   });
@@ -66,9 +83,22 @@ describe("budget components", () => {
     const wrapper = mount(ImportValidationReport, {
       props: {
         report: {
-          hard_failures: [{ label: "ATB mismatch", entity_name: "2026-02", absolute_delta_minor: 100 }],
+          hard_failures: [
+            {
+              label: "ATB mismatch",
+              entity_name: "2026-02",
+              absolute_delta_minor: 100,
+            },
+          ],
           warnings: [{ message: "No live credentials" }],
-          checks: [{ label: "accounts", entity_name: "Checking", passed: true, absolute_delta_minor: 0 }],
+          checks: [
+            {
+              label: "accounts",
+              entity_name: "Checking",
+              passed: true,
+              absolute_delta_minor: 0,
+            },
+          ],
         },
       },
     });

@@ -164,11 +164,12 @@ def _rectangularize_values(
         expected_columns = max((len(row) for row in normalized), default=0)
 
     rectangular = [
-        row[:expected_columns] + [""] * max(0, expected_columns - len(row))
-        for row in normalized
+        row[:expected_columns] + [""] * max(0, expected_columns - len(row)) for row in normalized
     ]
     if len(rectangular) < expected_rows:
-        rectangular.extend([[""] * expected_columns for _ in range(expected_rows - len(rectangular))])
+        rectangular.extend(
+            [[""] * expected_columns for _ in range(expected_rows - len(rectangular))]
+        )
     if not rectangular and expected_rows > 0:
         rectangular = [[""] * expected_columns for _ in range(expected_rows)]
     if expected_columns == 0 and rectangular:

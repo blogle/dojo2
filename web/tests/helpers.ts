@@ -1,4 +1,9 @@
-import type { Account, Category, CategoryGroup, Transaction } from "../src/dojo/types";
+import type {
+  Account,
+  Category,
+  CategoryGroup,
+  Transaction,
+} from "../src/dojo/types";
 
 export const sampleAccounts: Account[] = [
   {
@@ -97,16 +102,19 @@ export const sampleGroup: CategoryGroup = {
   categories: [sampleCategories[0], sampleCategories[1]],
 };
 
-export const sampleTransactions: Transaction[] = Array.from({ length: 120 }, (_, index) => ({
-  transaction_id: `tx-${index}`,
-  date: "2026-02-03",
-  account_id: "account-1",
-  account_name: "Checking",
-  amount_minor: -100 - index,
-  category_id: "cat-1",
-  category_name: "Grocery",
-  system_category: null,
-  status: index % 2 === 0 ? "CLEARED" : "PENDING",
-  memo: `memo-${index}`,
-  is_hidden_entity: false,
-}));
+export const sampleTransactions: Transaction[] = Array.from(
+  { length: 120 },
+  (_, index) => ({
+    transaction_id: `tx-${index}`,
+    date: "2026-02-03",
+    account_id: "account-1",
+    account_name: "Checking",
+    amount_minor: -100 - index,
+    category_id: "cat-1",
+    category_name: "Grocery",
+    system_category: null,
+    status: index % 2 === 0 ? "CLEARED" : "PENDING",
+    memo: `memo-${index}`,
+    is_hidden_entity: false,
+  }),
+);

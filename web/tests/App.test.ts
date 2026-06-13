@@ -57,13 +57,30 @@ function stubApi(ready: boolean): void {
     "fetch",
     vi.fn(async (input: string) => {
       if (input.includes("/api/app/status")) {
-        return { ok: true, json: async () => ({ app: "dojo", ready, mode: ready ? "ready" : "onboarding", needs_onboarding: !ready, latest_import_batch: null, latest_import_run: null }) };
+        return {
+          ok: true,
+          json: async () => ({
+            app: "dojo",
+            ready,
+            mode: ready ? "ready" : "onboarding",
+            needs_onboarding: !ready,
+            latest_import_batch: null,
+            latest_import_run: null,
+          }),
+        };
       }
       if (input.includes("/api/bootstrap")) {
         return {
           ok: true,
           json: async () => ({
-            app_status: { app: "dojo", ready, mode: ready ? "ready" : "onboarding", needs_onboarding: !ready, latest_import_batch: null, latest_import_run: null },
+            app_status: {
+              app: "dojo",
+              ready,
+              mode: ready ? "ready" : "onboarding",
+              needs_onboarding: !ready,
+              latest_import_batch: null,
+              latest_import_run: null,
+            },
             import_status: null,
             default_budget_month: "2026-02",
           }),
@@ -73,16 +90,34 @@ function stubApi(ready: boolean): void {
         return { ok: true, json: async () => budgetResponse };
       }
       if (input.includes("/api/transactions")) {
-        return { ok: true, json: async () => ({ items: [], total: 0, offset: 0, limit: 100, has_more: false }) };
+        return {
+          ok: true,
+          json: async () => ({
+            items: [],
+            total: 0,
+            offset: 0,
+            limit: 100,
+            has_more: false,
+          }),
+        };
       }
       if (input.includes("/api/accounts")) {
         return { ok: true, json: async () => ({ items: [] }) };
       }
       if (input.includes("/api/net-worth")) {
-        return { ok: true, json: async () => ({ current_net_worth_minor: 0, items: [] }) };
+        return {
+          ok: true,
+          json: async () => ({ current_net_worth_minor: 0, items: [] }),
+        };
       }
       if (input.includes("/api/categories")) {
-        return { ok: true, json: async () => ({ groups: budgetResponse.groups, items: budgetResponse.groups[0].categories }) };
+        return {
+          ok: true,
+          json: async () => ({
+            groups: budgetResponse.groups,
+            items: budgetResponse.groups[0].categories,
+          }),
+        };
       }
       return { ok: true, json: async () => ({}) };
     }),

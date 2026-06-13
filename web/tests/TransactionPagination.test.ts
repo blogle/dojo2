@@ -61,6 +61,8 @@ describe("transaction pagination state", () => {
     expect(secondUrl.searchParams.get("limit")).toBe("100");
     expect(app.state.transactions).toHaveLength(100);
     expect(app.state.transactions[0]?.transaction_id).toBe("tx-100");
-    expect(app.state.transactions[app.state.transactions.length - 1]?.transaction_id).toBe("tx-199");
+    expect(
+      app.state.transactions[app.state.transactions.length - 1]?.transaction_id,
+    ).toBe("tx-199");
   });
 });

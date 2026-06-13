@@ -26,7 +26,11 @@ const emit = defineEmits<{
       <span>Status</span>
       <span>Actions</span>
     </header>
-    <VirtualDataTable :items="transactions" :row-height="50" :viewport-height="420">
+    <VirtualDataTable
+      :items="transactions"
+      :row-height="50"
+      :viewport-height="420"
+    >
       <template #default="slotProps">
         <div
           v-for="transaction in slotProps.items"
@@ -36,13 +40,27 @@ const emit = defineEmits<{
         >
           <span>{{ transaction.date }}</span>
           <span>{{ transaction.account_name }}</span>
-          <span>{{ transaction.category_name ?? transaction.system_category }}</span>
+          <span>{{
+            transaction.category_name ?? transaction.system_category
+          }}</span>
           <span>{{ transaction.memo }}</span>
-          <span class="money">{{ formatMoneyMinor(transaction.amount_minor) }}</span>
-          <TransactionStatusToggle :status="transaction.status" @toggle="emit('toggleStatus', transaction)" />
+          <span class="money">{{
+            formatMoneyMinor(transaction.amount_minor)
+          }}</span>
+          <TransactionStatusToggle
+            :status="transaction.status"
+            @toggle="emit('toggleStatus', transaction)"
+          />
           <span class="actions">
-            <button type="button" @click="emit('edit', transaction)">Edit</button>
-            <button type="button" @click="emit('remove', transaction.transaction_id)">Delete</button>
+            <button type="button" @click="emit('edit', transaction)">
+              Edit
+            </button>
+            <button
+              type="button"
+              @click="emit('remove', transaction.transaction_id)"
+            >
+              Delete
+            </button>
           </span>
         </div>
       </template>
