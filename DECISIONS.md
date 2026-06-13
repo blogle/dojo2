@@ -32,6 +32,53 @@ Precompute transaction sums per category and allocation sums per bucket in a sin
 - `get_budget` at 10K (calls list_categories + list_category_groups): 19,724ms → 225ms (88x faster).
 - The tradeoff is slightly more code in `list_categories` and two additional DB queries per CC payment category (negligible for 1-3 CC accounts).
 
+## 2026-06-12 — Keep the transaction table bounded to one server-driven page plus DOM virtualization
+
+### Context
+
+The backend pagination work removed full-ledger API responses, but the frontend still accumulated fetched pages into one growing reactive array. That kept DOM nodes bounded because of virtualization, but client memory still trended toward a shadow copy of the ledger.
+
+### Decision
+
+Keep the existing focused `VirtualDataTable` windowing component, but make the transaction page itself server-driven and page-bounded. The frontend now requests `limit=100` pages from `/api/transactions`, keeps only the current page in state, and uses previous/next controls instead of append-only client paging.
+
+### Consequence
+
+- Initial transaction render stays bounded in both API payload and client state.
+- DOM rendering remains bounded by the existing virtualization layer.
+- Ordering semantics stay server-side (`sort_by=date&sort_dir=desc` in the current UI path), so partial pages are not re-sorted client-side.
+
+## 2026-06-12 — Keep bootstrap app-shell sized and exclude full validation reports
+
+### Context
+
+The previous bootstrap path returned large entity arrays and the most recent full import validation report. On the fixture dataset that pushed `GET /api/bootstrap` to roughly 249 KB even though the frontend immediately fetched the real budget, transactions, accounts, and net-worth payloads separately.
+
+### Decision
+
+Treat bootstrap as an app-shell payload only. Return `app_status`, `import_status`, and `default_budget_month`, and strip `validation_report` from bootstrap and status-path import-run summaries.
+
+### Consequence
+
+- Fixture bootstrap shrank to about 2.3 KB.
+- Startup no longer duplicates a large validation-report payload on the status/bootstrap path.
+- The frontend relies on follow-up endpoint fetches for budget, accounts, transactions, and net worth once the app is known to be ready.
+
+## 2026-06-12 — Batch full-import SCD writes per table before considering deeper import rewrites
+
+### Context
+
+Import profiling showed that even after transaction and allocation batching, row-wise inserts for category groups, accounts, categories, buckets, settings, and valuations still added material latency. The dominant phases were still write-heavy, but the remaining row-by-row calls were easy measured overhead.
+
+### Decision
+
+Prepare row dictionaries in memory and batch insert every import table that participates in the initial full-load path. Keep SCD2 validity semantics unchanged and keep the optimization limited to the existing initial-load import flow instead of introducing temp-table diffing or caching.
+
+### Consequence
+
+- The 10K synthetic import profile moved from roughly 12s down to roughly 9.5s, with the remaining dominant phases now clearly visible as transaction writes and post-import aggregate snapshot work.
+- The import path stays readable and history-preserving, while leaving room for a future temp-table or COPY-style bulk-load path if import volume grows.
+
 ## 2026-06-10 — Use Nix, direnv, and just for local development
 
 ### Context
@@ -327,6 +374,62 @@ Detect budget-account versus net-worth-snapshot duplicates in two stages: exact 
 ### Consequence
 
 dojo avoids silent double-counting while still catching duplicate reporting that is not byte-for-byte identical. Ambiguous cases now become explicit validation failures instead of hidden inflation in the net-worth total.
+
+## 2026-06-12 — Pass pre-computed categories to `list_category_groups` to eliminate double computation
+
+### Context
+
+`get_budget` called `list_categories` for budget data, then called `list_category_groups` which called `list_categories` again internally. This doubled all per-category work (transaction sum aggregation, allocation bucket aggregation, credit-card payment calculation).
+
+### Decision
+
+Add an optional `precomputed_categories` parameter to `list_category_groups`. When `get_budget` has already computed categories, it passes them directly instead of letting `list_category_groups` recompute them.
+
+### Consequence
+
+Eliminates the double-call overhead. No change to the public API. The `list_category_groups` method signature is extended but backward-compatible (defaults to computing categories if none provided).
+
+## 2026-06-12 — Batch INSERT transactions and allocations during import
+
+### Context
+
+`_insert_bundle` called `insert_version` once per row, each generating a UUID and issuing a separate INSERT statement. For 10K transactions, this meant 10K individual INSERTs plus allocation INSERTs inside a single DuckDB transaction. Pytest profiling showed this was the dominant import cost (~42s for 10K).
+
+### Decision
+
+Add `batch_insert_versions` that pre-generates UUID row_ids and issues multi-row VALUES INSERTs in batches of 500 rows. Apply this to the two bulk entity types: transactions and allocations. Keep individual inserts for small entity tables (accounts, categories, groups).
+
+### Consequence
+
+10K import improved from ~42.5s to ~29.3s (1.45x). The approach keeps SCD2 validity semantics intact because all rows in a batch share the same `valid_from`/`valid_to` timestamps. For larger datasets, further gains would require COPY FROM or removing per-row UUID generation.
+
+## 2026-06-12 — Slim bootstrap endpoint by removing the full `get_budget` call
+
+### Context
+
+The `GET /api/bootstrap` endpoint called `get_budget` which did all budget computation (transaction aggregation, allocation bucketing, ATB calculation) — but the frontend's `initialize()` immediately called `refreshBudget()` afterwards, which called `get_budget` a second time. Every field from bootstrap's budget response was overwritten within milliseconds. The bootstrap budget call was pure waste.
+
+### Decision
+
+Replace the `get_budget` call in `get_bootstrap` with direct SQL queries for entity records only (groups, categories) with zeroed-out budget fields. The `current_atb_minor` and `current_budget_month_summary` fields are set to zero defaults since they are overwritten by the subsequent `refreshBudget()` call. The bootstrap response is still returned (the frontend uses it as an initialization sentinel).
+
+### Consequence
+
+Bootstrap latency dropped from ~225ms to ~99ms on 10K datasets. Payload size reduced significantly (budget fields are zeroed, not computed). The frontend sees exactly the same user experience because `state.bootstrap` is checked only for truthiness, and the remaining fields (accounts, categories, groups) are immediately overwritten by parallel refresh calls.
+
+## 2026-06-12 — Frontend paginated transaction loading
+
+### Context
+
+The transaction page loaded up to `limit=2000` transactions into client memory on every load/refresh. With the server-side pagination API already in place, the frontend was still consuming the full bounded response.
+
+### Decision
+
+Add `fetchTransactionsPage` to the API client with offset/limit parameters. Replace the single-page `refreshTransactions` with a paginated version that fetches page 0 (200 rows) and stores total/has_more metadata. Add `loadMoreTransactions` that appends the next page. Add a "Load More" button to the transaction view.
+
+### Consequence
+
+Initial transaction load is bounded to 200 rows (~8KB) instead of 2000 rows (~80KB+). Large ledgers are loaded incrementally as the user requests more. The client-side transaction array still grows, but only on demand.
 
 ## 2026-06-12 — Replace the user-facing `Carried over` label with `Starting Available`
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from importlib import reload
 from urllib.parse import parse_qs, urlparse
 
@@ -94,6 +95,69 @@ def test_budget_accounts_and_net_worth_endpoints_return_validated_aggregates(mon
         )
         assert checking_ignored["ignored_import_value"] is True
         assert checking_ignored["ignored_reason"] == "duplicate_budget_account"
+
+
+def test_bootstrap_response_stays_shell_sized(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("DUCKDB_PATH", str(tmp_path / "api-test.duckdb"))
+    monkeypatch.setenv("SESSION_SECRET", "test-secret")
+    monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
+    monkeypatch.setenv(
+        "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
+    )
+    get_settings.cache_clear()
+    reload(main_module)
+
+    with TestClient(main_module.app) as client:
+        imported = client.post(
+            "/api/import/google-sheet", json={"sheet_url_or_id": "fixture://default"}
+        )
+        assert imported.status_code == 200
+
+        bootstrap = client.get("/api/bootstrap")
+        assert bootstrap.status_code == 200
+        payload = bootstrap.json()
+        payload_bytes = len(json.dumps(payload))
+
+        assert sorted(payload.keys()) == ["app_status", "default_budget_month", "import_status"]
+        assert payload_bytes < 20_000
+        assert "validation_report" not in json.dumps(payload)
+
+
+def test_transactions_endpoint_returns_bounded_sorted_pages(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("DUCKDB_PATH", str(tmp_path / "api-test.duckdb"))
+    monkeypatch.setenv("SESSION_SECRET", "test-secret")
+    monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
+    monkeypatch.setenv(
+        "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
+    )
+    get_settings.cache_clear()
+    reload(main_module)
+
+    with TestClient(main_module.app) as client:
+        imported = client.post(
+            "/api/import/google-sheet", json={"sheet_url_or_id": "fixture://default"}
+        )
+        assert imported.status_code == 200
+
+        page = client.get(
+            "/api/transactions",
+            params={
+                "show_hidden": "true",
+                "limit": 5,
+                "offset": 5,
+                "sort_by": "date",
+                "sort_dir": "desc",
+            },
+        )
+        assert page.status_code == 200
+        payload = page.json()
+
+        assert len(payload["items"]) == 5
+        assert payload["offset"] == 5
+        assert payload["limit"] == 5
+        assert payload["total"] == 12
+        assert payload["has_more"] is True
+        assert payload["items"][0]["date"] >= payload["items"][-1]["date"]
 
 
 def test_google_start_endpoint_reports_fixture_mode_without_oauth(monkeypatch, tmp_path) -> None:

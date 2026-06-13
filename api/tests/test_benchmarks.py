@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 import dojo.api.main as main_module
 from dojo.api.settings import get_settings
 from dojo.benchmark_fixtures import (
+    DATASET_MEDIUM,
     DATASET_SMALL,
     DATASETS,
     build_synthetic_dataset,
@@ -19,6 +20,8 @@ from dojo.benchmarks import (
     Timer,
     _create_benchmark_service,
     explain_analyze,
+    payload_size_bytes,
+    profile_import,
     run_backend_benchmarks,
 )
 
@@ -48,6 +51,21 @@ class TestBackendBenchmarks:
         service.close()
         print(f"\nImport {dataset_config.label}: {t.elapsed_ms:.2f}ms for {dataset_config.num_transactions} tx")
 
+    @pytest.mark.parametrize("dataset_config", [DATASET_SMALL, DATASET_MEDIUM], ids=["1K", "10K"])
+    def test_import_profile(self, dataset_config) -> None:
+        """Print import phase timings for realistic synthetic dataset sizes."""
+        profile = profile_import(dataset_config)
+        phase_lines = ", ".join(
+            f"{name}={duration:.2f}ms"
+            for name, duration in sorted(profile.phase_timings_ms.items(), key=lambda item: item[1], reverse=True)
+        )
+        print(
+            f"\nImport profile {profile.dataset_label}: {profile.total_ms:.2f}ms total "
+            f"({profile.transaction_count} tx, {profile.allocation_count} allocations, {profile.valuation_count} valuations)"
+        )
+        print(phase_lines)
+        assert profile.transaction_count == dataset_config.num_transactions
+
     @pytest.mark.parametrize("dataset_config", [DATASET_SMALL], ids=["1K"])
     def test_list_transactions_benchmark(self, dataset_config) -> None:
         """Benchmark list_transactions at various limit sizes."""
@@ -62,6 +80,28 @@ class TestBackendBenchmarks:
                 f" ({len(items)}/{dataset_config.num_transactions} rows)"
             )
             assert len(items) <= limit
+        service.close()
+
+    @pytest.mark.parametrize("dataset_config", [DATASET_SMALL, DATASET_MEDIUM], ids=["1K", "10K"])
+    def test_transaction_window_payload_benchmark(self, dataset_config) -> None:
+        """Measure bounded transaction-page payload size on realistic ledgers."""
+        service = _create_benchmark_service(dataset_config)
+
+        for offset in (0, 100):
+            with Timer() as t:
+                result = service.list_transactions(
+                    limit=100,
+                    offset=offset,
+                    show_hidden=True,
+                )
+            payload_bytes = payload_size_bytes(result)
+            print(
+                f"\ntransaction window {dataset_config.label}: offset={offset} limit=100 "
+                f"{t.elapsed_ms:.2f}ms ({len(result['items'])} rows, {payload_bytes} bytes, total={result['total']})"
+            )
+            assert len(result["items"]) <= 100
+            assert result["limit"] == 100
+            assert result["offset"] == offset
         service.close()
 
     @pytest.mark.parametrize("dataset_config", [DATASET_SMALL], ids=["1K"])
@@ -89,6 +129,30 @@ class TestBackendBenchmarks:
         print(f"\nget_budget: {t.elapsed_ms:.2f}ms")
         assert "available_to_budget_minor" in result
         assert "groups" in result
+        service.close()
+
+    @pytest.mark.parametrize("dataset_config", [DATASET_SMALL, DATASET_MEDIUM], ids=["1K", "10K"])
+    def test_budget_shape_benchmark(self, dataset_config) -> None:
+        """Measure category, group, and budget shaping without duplicated aggregation."""
+        service = _create_benchmark_service(dataset_config)
+
+        month = service.default_budget_month()
+        with Timer() as category_timer:
+            categories = service.list_categories(month=month, show_hidden=True)
+        with Timer() as grouped_timer:
+            groups = service.list_category_groups(
+                month=month,
+                show_hidden=True,
+                precomputed_categories=categories,
+            )
+        with Timer() as budget_timer:
+            budget = service.get_budget(month, show_hidden=True)
+        print(
+            f"\nbudget shape {dataset_config.label}: categories={category_timer.elapsed_ms:.2f}ms, "
+            f"groups_from_precomputed={grouped_timer.elapsed_ms:.2f}ms, "
+            f"get_budget={budget_timer.elapsed_ms:.2f}ms"
+        )
+        assert len(groups) == len(budget["groups"])
         service.close()
 
     @pytest.mark.parametrize("dataset_config", [DATASET_SMALL], ids=["1K"])
@@ -141,6 +205,21 @@ class TestBackendBenchmarks:
         print(
             f"\nget_net_worth: {t.elapsed_ms:.2f}ms ({len(result.get('items', []))} items)"
         )
+        service.close()
+
+    @pytest.mark.parametrize("dataset_config", [DATASET_SMALL, DATASET_MEDIUM], ids=["1K", "10K"])
+    def test_bootstrap_payload_benchmark(self, dataset_config) -> None:
+        """Measure bootstrap latency and payload growth by dataset size."""
+        service = _create_benchmark_service(dataset_config)
+
+        with Timer() as t:
+            bootstrap = service.get_bootstrap()
+        payload_bytes = payload_size_bytes(bootstrap)
+        print(
+            f"\nget_bootstrap {dataset_config.label}: {t.elapsed_ms:.2f}ms "
+            f"({payload_bytes} bytes, keys={sorted(bootstrap.keys())})"
+        )
+        assert payload_bytes > 0
         service.close()
 
     @pytest.mark.skip(reason="Manual-only: runs all datasets including 100K (>2min)")

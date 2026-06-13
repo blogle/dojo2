@@ -29,6 +29,9 @@ Bootstrap the `dojo` repository with:
 - `just setup`, `just build`, `just lint`, `just format-check`, `just typecheck`, `just test`, `just docs`, `just container`, `just bench-api` work in the Nix shell or fail with a documented reason
 - `GET /api/transactions` supports pagination (`offset`, `limit`, `sort_by`, `sort_dir`) and returns `total`/`has_more` metadata
 - Transaction list API responses are bounded to a single page instead of the full dataset
+- The transactions page uses a bounded initial request window and bounded DOM rendering; it must not fetch or mount the full ledger for initial render
+- Bootstrap stays a shell-sized payload and must not include full entity tables or the last full validation report
+- Import benchmarking reports phase timings for realistic synthetic datasets, with a desired 10K import target under 5s when feasible and a tolerable ceiling under 10s
 - Backend benchmark tests exist and are runnable via `just bench-api`
 
 ## Aggregate Correctness Criteria

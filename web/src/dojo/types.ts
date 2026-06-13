@@ -86,13 +86,7 @@ export type BudgetResponse = {
 export type BootstrapResponse = {
   app_status: AppStatus;
   import_status: Record<string, unknown> | null;
-  accounts: Account[];
-  category_groups: CategoryGroup[];
-  categories: Category[];
-  budget_buckets: Array<Record<string, unknown>>;
-  current_atb_minor: number;
-  current_budget_month_summary: BudgetResponse["summary"];
-  recent_transactions: Transaction[];
+  default_budget_month: string;
 };
 
 export type NetWorthItem = {

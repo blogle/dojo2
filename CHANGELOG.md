@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Completed the interactive transaction-table path: the frontend now keeps only one server-driven transaction page in reactive state, requests `limit=100` for the initial page, uses previous/next page controls, and relies on the existing virtual table to keep DOM rows bounded.
+- Reused precomputed category lists for both `get_budget` and `GET /api/categories`, so grouped budget responses are shaped once instead of recomputing the same month twice.
+- Batched full-import SCD writes across category groups, accounts, categories, budget buckets, budget-account settings, transactions, allocations, and net-worth valuations. The local synthetic 10K import profile is now about 9.5s, with the remaining cost concentrated in transaction writes and post-import aggregate snapshot work.
+- Reused cached account and default-month category data inside `snapshot_for_validation()` so post-import aggregate checks avoid redundant list/account/group recomputation.
+- Slimmed bootstrap to an app-shell payload: `GET /api/bootstrap` now returns only `app_status`, `import_status`, and `default_budget_month`, and bootstrap/status payloads no longer include the last full validation report. Fixture bootstrap payload dropped from about 248,619 bytes to about 2,296 bytes.
+- Added benchmark coverage for transaction window payload sizes, budget shaping costs, bootstrap payload size, and import phase timings across 1K and 10K synthetic datasets.
+- Added regression coverage for bounded transaction paging, bounded DOM rendering, paginated transaction API semantics, and a bootstrap payload-size ceiling.
 - Added backend benchmark infrastructure: synthetic dataset generator, wall-clock Timer, DuckDB EXPLAIN ANALYZE wrapper, and parameterized benchmark tests for all query/formula domains (transactions, categories, budget, accounts, ATB, net worth, hidden filtering, import speed) at 1K/10K/100K transaction scales.
 - Added API route-level benchmarks with timing and response payload size measurement for all major endpoints.
 - Added `just bench`, `just bench-api`, `just bench-api-quick`, `just bench-api-routes`, `just bench-api-report`, and `just bench-web` commands.

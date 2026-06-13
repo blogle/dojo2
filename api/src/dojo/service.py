@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import date, datetime
+from time import perf_counter
 from typing import Any, cast
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
@@ -16,7 +17,6 @@ from dojo.constants import (
     CATEGORY_KIND_CREDIT_CARD_PAYMENT,
     CATEGORY_KIND_STANDARD,
     MAX_TS,
-    STATUS_CLEARED,
     SYSTEM_ATB_BUCKET_ID,
     SYSTEM_CATEGORY_ATB,
     SYSTEM_CATEGORY_BALANCE_ADJUSTMENT,
@@ -31,7 +31,13 @@ from dojo.importer import (
     fixture_bundle,
     parse_named_range_workbook,
 )
-from dojo.scd import close_current_version, insert_version, replace_current_version, utc_now
+from dojo.scd import (
+    batch_insert_versions,
+    close_current_version,
+    insert_version,
+    replace_current_version,
+    utc_now,
+)
 
 
 class ImportValidationError(Exception):
@@ -109,23 +115,15 @@ class DojoService:
         row = self.db.fetch_one("SELECT * FROM import_runs ORDER BY started_at DESC LIMIT 1")
         if row is None:
             return None
-        return self._decode_json_fields(row, {"summary", "validation_report"})
+        decoded = self._decode_json_fields(row, {"summary", "validation_report"})
+        decoded.pop("validation_report", None)
+        return decoded
 
     def get_bootstrap(self) -> dict[str, Any]:
-        month = self.default_budget_month()
-        budget = self.get_budget(month, show_hidden=False)
         return {
             "app_status": self.get_app_status(),
             "import_status": self.get_import_status(),
-            "accounts": self.list_accounts(show_hidden=True),
-            "category_groups": self.list_category_groups(month=month, show_hidden=True),
-            "categories": self.list_categories(month=month, show_hidden=True),
-            "budget_buckets": self.db.fetch_all(
-                "SELECT * FROM current_budget_buckets ORDER BY bucket_type, category_id"
-            ),
-            "current_atb_minor": budget["available_to_budget_minor"],
-            "current_budget_month_summary": budget["summary"],
-            "recent_transactions": self.list_transactions(limit=20, show_hidden=True)["items"],
+            "default_budget_month": self.default_budget_month(),
         }
 
     def default_budget_month(self) -> str:
@@ -255,39 +253,84 @@ class DojoService:
             connection.execute(f"DELETE FROM {table}")
 
     def _insert_bundle(
-        self, connection: Any, bundle: ParsedImportBundle, imported_at: datetime
+        self,
+        connection: Any,
+        bundle: ParsedImportBundle,
+        imported_at: datetime,
+        phase_timings: dict[str, float] | None = None,
     ) -> None:
+        def run_phase(name: str, fn: Any) -> Any:
+            start = perf_counter()
+            result = fn()
+            if phase_timings is not None:
+                phase_timings[name] = (perf_counter() - start) * 1000
+            return result
+
         group_by_name = {group.name: group for group in bundle.groups}
         category_by_name = {category.name: category for category in bundle.categories}
         account_ids_by_name = {account.name: account.account_id for account in bundle.accounts}
 
-        for group in bundle.groups:
-            group_id = (
-                str(SYSTEM_CREDIT_CARD_GROUP_ID)
-                if group.is_system and group.name == "Credit Card Payments"
-                else group.group_id
-            )
-            insert_version(
-                connection,
-                "category_groups",
-                {
-                    "group_id": group_id,
-                    "name": group.name,
-                    "sort_order": group.sort_order,
-                    "is_system": group.is_system,
-                    "is_deletable": group.is_deletable,
-                    "is_hidden": group.is_hidden,
-                    "valid_from": imported_at,
-                    "valid_to": MAX_TS,
-                    "created_at": imported_at,
-                    "created_by_user_id": None,
-                },
-            )
+        group_rows: list[dict[str, Any]] = []
 
-        insert_version(
-            connection,
-            "budget_buckets",
+        def prepare_groups() -> None:
+            for group in bundle.groups:
+                group_id = (
+                    str(SYSTEM_CREDIT_CARD_GROUP_ID)
+                    if group.is_system and group.name == "Credit Card Payments"
+                    else group.group_id
+                )
+                group_rows.append(
+                    {
+                        "row_id": str(uuid4()),
+                        "group_id": group_id,
+                        "name": group.name,
+                        "sort_order": group.sort_order,
+                        "is_system": group.is_system,
+                        "is_deletable": group.is_deletable,
+                        "is_hidden": group.is_hidden,
+                        "valid_from": imported_at,
+                        "valid_to": MAX_TS,
+                        "created_at": imported_at,
+                        "created_by_user_id": None,
+                    }
+                )
+
+        run_phase("prepare_groups_ms", prepare_groups)
+        run_phase(
+            "write_groups_ms",
+            lambda: batch_insert_versions(connection, "category_groups", group_rows),
+        )
+
+        account_rows: list[dict[str, Any]] = []
+
+        def prepare_accounts() -> None:
+            for account in bundle.accounts:
+                account_rows.append(
+                    {
+                        "row_id": str(uuid4()),
+                        "account_id": account.account_id,
+                        "account_class": account.account_class,
+                        "name": account.name,
+                        "is_hidden": account.is_hidden,
+                        "is_active": account.is_active,
+                        "metadata": json_dumps({}),
+                        "valid_from": imported_at,
+                        "valid_to": MAX_TS,
+                        "created_at": imported_at,
+                        "created_by_user_id": None,
+                    }
+                )
+
+        run_phase("prepare_accounts_ms", prepare_accounts)
+        run_phase(
+            "write_accounts_ms",
+            lambda: batch_insert_versions(connection, "accounts", account_rows),
+        )
+
+        category_rows: list[dict[str, Any]] = []
+        bucket_rows: list[dict[str, Any]] = [
             {
+                "row_id": str(uuid4()),
                 "bucket_id": str(SYSTEM_ATB_BUCKET_ID),
                 "bucket_type": BUCKET_TYPE_ATB,
                 "category_id": None,
@@ -297,220 +340,277 @@ class DojoService:
                 "valid_to": MAX_TS,
                 "created_at": imported_at,
                 "created_by_user_id": None,
-            },
+            }
+        ]
+
+        def prepare_categories_and_buckets() -> None:
+            for category in bundle.categories:
+                group = group_by_name[category.group_name]
+                group_id = (
+                    str(SYSTEM_CREDIT_CARD_GROUP_ID)
+                    if group.is_system and group.name == "Credit Card Payments"
+                    else group.group_id
+                )
+                category_rows.append(
+                    {
+                        "row_id": str(uuid4()),
+                        "category_id": category.category_id,
+                        "group_id": group_id,
+                        "name": category.name,
+                        "category_kind": category.category_kind,
+                        "sort_order": category.sort_order,
+                        "is_hidden": category.is_hidden,
+                        "is_active": category.is_active,
+                        "target_amount_minor": category.target_amount_minor,
+                        "due_date_rule": category.due_date_rule,
+                        "metadata": json_dumps({"linked_account_name": category.linked_account_name}),
+                        "valid_from": imported_at,
+                        "valid_to": MAX_TS,
+                        "created_at": imported_at,
+                        "created_by_user_id": None,
+                    }
+                )
+                bucket_rows.append(
+                    {
+                        "row_id": str(uuid4()),
+                        "bucket_id": self._bucket_id_for_category(category.category_id),
+                        "bucket_type": BUCKET_TYPE_CATEGORY,
+                        "category_id": category.category_id,
+                        "is_allocatable": True,
+                        "is_deletable": category.category_kind
+                        != CATEGORY_KIND_CREDIT_CARD_PAYMENT,
+                        "valid_from": imported_at,
+                        "valid_to": MAX_TS,
+                        "created_at": imported_at,
+                        "created_by_user_id": None,
+                    }
+                )
+
+        run_phase("prepare_categories_and_buckets_ms", prepare_categories_and_buckets)
+        run_phase(
+            "write_categories_ms",
+            lambda: batch_insert_versions(connection, "categories", category_rows),
+        )
+        run_phase(
+            "write_budget_buckets_ms",
+            lambda: batch_insert_versions(connection, "budget_buckets", bucket_rows),
         )
 
-        for account in bundle.accounts:
-            insert_version(
-                connection,
-                "accounts",
-                {
-                    "account_id": account.account_id,
-                    "account_class": account.account_class,
-                    "name": account.name,
-                    "is_hidden": account.is_hidden,
-                    "is_active": account.is_active,
-                    "metadata": json_dumps({}),
-                    "valid_from": imported_at,
-                    "valid_to": MAX_TS,
-                    "created_at": imported_at,
-                    "created_by_user_id": None,
-                },
-            )
+        budget_setting_rows: list[dict[str, Any]] = []
 
-        for category in bundle.categories:
-            group = group_by_name[category.group_name]
-            group_id = (
-                str(SYSTEM_CREDIT_CARD_GROUP_ID)
-                if group.is_system and group.name == "Credit Card Payments"
-                else group.group_id
-            )
-            insert_version(
-                connection,
-                "categories",
-                {
-                    "category_id": category.category_id,
-                    "group_id": group_id,
-                    "name": category.name,
-                    "category_kind": category.category_kind,
-                    "sort_order": category.sort_order,
-                    "is_hidden": category.is_hidden,
-                    "is_active": category.is_active,
-                    "target_amount_minor": category.target_amount_minor,
-                    "due_date_rule": category.due_date_rule,
-                    "metadata": json_dumps({"linked_account_name": category.linked_account_name}),
-                    "valid_from": imported_at,
-                    "valid_to": MAX_TS,
-                    "created_at": imported_at,
-                    "created_by_user_id": None,
-                },
-            )
-            insert_version(
-                connection,
-                "budget_buckets",
-                {
-                    "bucket_id": self._bucket_id_for_category(category.category_id),
-                    "bucket_type": BUCKET_TYPE_CATEGORY,
-                    "category_id": category.category_id,
-                    "is_allocatable": True,
-                    "is_deletable": category.category_kind != CATEGORY_KIND_CREDIT_CARD_PAYMENT,
-                    "valid_from": imported_at,
-                    "valid_to": MAX_TS,
-                    "created_at": imported_at,
-                    "created_by_user_id": None,
-                },
-            )
+        def prepare_budget_settings() -> None:
+            for account in bundle.accounts:
+                if (
+                    account.account_class != ACCOUNT_CLASS_BUDGET
+                    or account.budget_account_type is None
+                ):
+                    continue
+                linked_payment_category_id = None
+                if account.linked_payment_category_name:
+                    linked_payment_category_id = category_by_name[
+                        account.linked_payment_category_name
+                    ].category_id
+                budget_setting_rows.append(
+                    {
+                        "row_id": str(uuid4()),
+                        "account_id": account.account_id,
+                        "budget_account_type": account.budget_account_type,
+                        "linked_payment_category_id": linked_payment_category_id,
+                        "display_liability_positive": account.display_liability_positive,
+                        "valid_from": imported_at,
+                        "valid_to": MAX_TS,
+                        "created_at": imported_at,
+                        "created_by_user_id": None,
+                    }
+                )
 
-        for account in bundle.accounts:
-            if account.account_class != ACCOUNT_CLASS_BUDGET or account.budget_account_type is None:
-                continue
-            linked_payment_category_id = None
-            if account.linked_payment_category_name:
-                linked_payment_category_id = category_by_name[
-                    account.linked_payment_category_name
-                ].category_id
-            insert_version(
+        run_phase("prepare_budget_account_settings_ms", prepare_budget_settings)
+        run_phase(
+            "write_budget_account_settings_ms",
+            lambda: batch_insert_versions(
                 connection,
                 "budget_account_settings",
-                {
-                    "account_id": account.account_id,
-                    "budget_account_type": account.budget_account_type,
-                    "linked_payment_category_id": linked_payment_category_id,
-                    "display_liability_positive": account.display_liability_positive,
-                    "valid_from": imported_at,
-                    "valid_to": MAX_TS,
-                    "created_at": imported_at,
-                    "created_by_user_id": None,
-                },
-            )
+                budget_setting_rows,
+            ),
+        )
 
-        for transaction in bundle.transactions:
-            transaction_account_id = account_ids_by_name[transaction.account_name]
-            category_id = (
-                category_by_name[transaction.category_name].category_id
-                if transaction.category_name
-                else None
-            )
-            insert_version(
+        tx_rows: list[dict[str, Any]] = []
+        def prepare_transactions() -> None:
+            for transaction in bundle.transactions:
+                transaction_account_id = account_ids_by_name[transaction.account_name]
+                category_id = (
+                    category_by_name[transaction.category_name].category_id
+                    if transaction.category_name
+                    else None
+                )
+                tx_rows.append(
+                    {
+                        "row_id": str(uuid4()),
+                        "transaction_id": transaction.transaction_id,
+                        "date": transaction.date,
+                        "account_id": transaction_account_id,
+                        "amount_minor": transaction.amount_minor,
+                        "category_id": category_id,
+                        "system_category": transaction.system_category,
+                        "status": transaction.status,
+                        "memo": transaction.memo,
+                        "valid_from": imported_at,
+                        "valid_to": MAX_TS,
+                        "created_at": imported_at,
+                        "created_by_user_id": None,
+                    }
+                )
+
+        run_phase("prepare_transactions_ms", prepare_transactions)
+        run_phase(
+            "write_transactions_ms",
+            lambda: batch_insert_versions(
                 connection,
                 "transactions",
-                {
-                    "transaction_id": transaction.transaction_id,
-                    "date": transaction.date,
-                    "account_id": transaction_account_id,
-                    "amount_minor": transaction.amount_minor,
-                    "category_id": category_id,
-                    "system_category": transaction.system_category,
-                    "status": transaction.status,
-                    "memo": transaction.memo,
-                    "valid_from": imported_at,
-                    "valid_to": MAX_TS,
-                    "created_at": imported_at,
-                    "created_by_user_id": None,
-                },
-            )
+                tx_rows,
+                batch_size=2_000,
+            ),
+        )
 
-        for allocation in bundle.allocations:
-            insert_version(
-                connection,
-                "allocations",
-                {
-                    "allocation_id": allocation.allocation_id,
-                    "date": allocation.date,
-                    "from_bucket_id": self._bucket_id_from_name(
-                        allocation.from_name, category_by_name
-                    ),
-                    "to_bucket_id": self._bucket_id_from_name(allocation.to_name, category_by_name),
-                    "amount_minor": allocation.amount_minor,
-                    "memo": allocation.memo,
-                    "valid_from": imported_at,
-                    "valid_to": MAX_TS,
-                    "created_at": imported_at,
-                    "created_by_user_id": None,
-                },
-            )
-
-        for valuation in bundle.valuations:
-            account_id: str | None = None
-            if valuation.account_name is not None:
-                account_id = account_ids_by_name[valuation.account_name]
-            elif valuation.raw_name not in account_ids_by_name:
-                new_account_id = self._tracking_account_id(valuation.raw_name)
-                account_ids_by_name[valuation.raw_name] = new_account_id
-                insert_version(
-                    connection,
-                    "accounts",
+        alloc_rows: list[dict[str, Any]] = []
+        def prepare_allocations() -> None:
+            for allocation in bundle.allocations:
+                alloc_rows.append(
                     {
-                        "account_id": new_account_id,
-                        "account_class": ACCOUNT_CLASS_TRACKING_BALANCE,
-                        "name": valuation.raw_name,
-                        "is_hidden": False,
-                        "is_active": True,
+                        "row_id": str(uuid4()),
+                        "allocation_id": allocation.allocation_id,
+                        "date": allocation.date,
+                        "from_bucket_id": self._bucket_id_from_name(
+                            allocation.from_name, category_by_name
+                        ),
+                        "to_bucket_id": self._bucket_id_from_name(
+                            allocation.to_name, category_by_name
+                        ),
+                        "amount_minor": allocation.amount_minor,
+                        "memo": allocation.memo,
+                        "valid_from": imported_at,
+                        "valid_to": MAX_TS,
+                        "created_at": imported_at,
+                        "created_by_user_id": None,
+                    }
+                )
+
+        run_phase("prepare_allocations_ms", prepare_allocations)
+        run_phase(
+            "write_allocations_ms",
+            lambda: batch_insert_versions(connection, "allocations", alloc_rows),
+        )
+
+        tracking_account_rows: list[dict[str, Any]] = []
+        valuation_rows: list[dict[str, Any]] = []
+
+        def prepare_valuations() -> None:
+            for valuation in bundle.valuations:
+                account_id: str | None = None
+                if valuation.account_name is not None:
+                    account_id = account_ids_by_name[valuation.account_name]
+                elif valuation.raw_name not in account_ids_by_name:
+                    new_account_id = self._tracking_account_id(valuation.raw_name)
+                    account_ids_by_name[valuation.raw_name] = new_account_id
+                    tracking_account_rows.append(
+                        {
+                            "row_id": str(uuid4()),
+                            "account_id": new_account_id,
+                            "account_class": ACCOUNT_CLASS_TRACKING_BALANCE,
+                            "name": valuation.raw_name,
+                            "is_hidden": False,
+                            "is_active": True,
+                            "metadata": json_dumps(
+                                {
+                                    "imported_from_net_worth": True,
+                                    "net_worth_match_kind": valuation.match_kind,
+                                    "net_worth_match_candidates": list(
+                                        valuation.match_candidates
+                                    ),
+                                }
+                            ),
+                            "valid_from": imported_at,
+                            "valid_to": MAX_TS,
+                            "created_at": imported_at,
+                            "created_by_user_id": None,
+                        }
+                    )
+                    account_id = new_account_id
+                else:
+                    account_id = account_ids_by_name[valuation.raw_name]
+
+                valuation_rows.append(
+                    {
+                        "row_id": str(uuid4()),
+                        "valuation_id": valuation.valuation_id,
+                        "account_id": account_id,
+                        "raw_name": valuation.raw_name,
+                        "effective_date": valuation.effective_date,
+                        "amount_minor": valuation.amount_minor,
+                        "notes": valuation.notes,
                         "metadata": json_dumps(
                             {
-                                "imported_from_net_worth": True,
-                                "net_worth_match_kind": valuation.match_kind,
-                                "net_worth_match_candidates": list(valuation.match_candidates),
+                                "normalized_name": valuation.normalized_name,
+                                "match_kind": valuation.match_kind,
+                                "match_candidates": list(valuation.match_candidates),
                             }
                         ),
                         "valid_from": imported_at,
                         "valid_to": MAX_TS,
                         "created_at": imported_at,
                         "created_by_user_id": None,
-                    },
+                    }
                 )
-                account_id = new_account_id
-            else:
-                account_id = account_ids_by_name[valuation.raw_name]
 
-            insert_version(
+        run_phase("prepare_valuations_ms", prepare_valuations)
+        run_phase(
+            "write_tracking_accounts_ms",
+            lambda: batch_insert_versions(
+                connection,
+                "accounts",
+                tracking_account_rows,
+            ),
+        )
+        run_phase(
+            "write_valuations_ms",
+            lambda: batch_insert_versions(
                 connection,
                 "net_worth_valuations",
-                {
-                    "valuation_id": valuation.valuation_id,
-                    "account_id": account_id,
-                    "raw_name": valuation.raw_name,
-                    "effective_date": valuation.effective_date,
-                    "amount_minor": valuation.amount_minor,
-                    "notes": valuation.notes,
-                    "metadata": json_dumps(
-                        {
-                            "normalized_name": valuation.normalized_name,
-                            "match_kind": valuation.match_kind,
-                            "match_candidates": list(valuation.match_candidates),
-                        }
-                    ),
-                    "valid_from": imported_at,
-                    "valid_to": MAX_TS,
-                    "created_at": imported_at,
-                    "created_by_user_id": None,
-                },
-            )
+                valuation_rows,
+            ),
+        )
 
     def _validate_bundle(self, bundle: ParsedImportBundle) -> dict[str, Any]:
         return build_validation_report(self, bundle)
 
     def snapshot_for_validation(self, months: list[str]) -> dict[str, Any]:
+        default_month = self.default_budget_month()
+        accounts = self.list_accounts(show_hidden=True)
+        categories_by_month: dict[str, list[dict[str, Any]]] = {
+            default_month: self.list_categories(month=default_month, show_hidden=True)
+        }
         account_balances = {
             account["name"]: {
                 "actual": account["actual_balance_minor"],
                 "pending": account["pending_balance_minor"],
                 "cleared": account["cleared_balance_minor"],
             }
-            for account in self.list_accounts(show_hidden=True)
+            for account in accounts
             if account["account_class"] == ACCOUNT_CLASS_BUDGET
         }
+        default_categories = categories_by_month[default_month]
         category_available = {
             category["name"]: category["available_minor"]
-            for category in self.list_categories(
-                month=self.default_budget_month(), show_hidden=True
-            )
+            for category in default_categories
         }
         month_activity: dict[str, dict[str, int]] = {}
         month_budgeted: dict[str, dict[str, int]] = {}
         starting_available: dict[str, dict[str, int]] = {}
         for month in months:
-            categories = self.list_categories(month=month, show_hidden=True)
+            categories = categories_by_month.get(month)
+            if categories is None:
+                categories = self.list_categories(month=month, show_hidden=True)
+                categories_by_month[month] = categories
             month_activity[month] = {
                 category["name"]: category["month_activity_minor"] for category in categories
             }
@@ -521,13 +621,15 @@ class DojoService:
                 category["name"]: category["starting_available_minor"] for category in categories
             }
         return {
-            "account_count": len(self.list_accounts(show_hidden=True)),
+            "account_count": len(accounts),
             "category_group_count": len(
-                self.list_category_groups(month=self.default_budget_month(), show_hidden=True)
+                self.list_category_groups(
+                    month=default_month,
+                    show_hidden=True,
+                    precomputed_categories=default_categories,
+                )
             ),
-            "category_count": len(
-                self.list_categories(month=self.default_budget_month(), show_hidden=True)
-            ),
+            "category_count": len(default_categories),
             "net_worth_valuation_rows": len(
                 self.db.fetch_all("SELECT * FROM current_net_worth_valuations")
             ),
@@ -650,7 +752,7 @@ class DojoService:
             hidden_category_ids = {cid for cid, c in categories.items() if c["is_hidden"]}
 
         total_query = "SELECT COUNT(*) AS cnt FROM current_transactions"
-        total_params: tuple = ()
+        total_params: tuple[str, ...] = ()
         if hidden_account_ids or hidden_category_ids:
             filters: list[str] = []
             params: list[str] = []
@@ -707,11 +809,17 @@ class DojoService:
             "has_more": (offset + limit) < total_count,
         }
 
-    def list_category_groups(self, *, month: str, show_hidden: bool) -> list[dict[str, Any]]:
+    def list_category_groups(
+        self, *, month: str, show_hidden: bool, precomputed_categories: list[dict[str, Any]] | None = None
+    ) -> list[dict[str, Any]]:
         groups = self.db.fetch_all(
             "SELECT * FROM current_category_groups ORDER BY sort_order, name"
         )
-        categories = self.list_categories(month=month, show_hidden=True)
+        categories = (
+            precomputed_categories
+            if precomputed_categories is not None
+            else self.list_categories(month=month, show_hidden=True)
+        )
         categories_by_group: dict[Any, list[dict[str, Any]]] = defaultdict(list)
         for category in categories:
             categories_by_group[category["group_id"]].append(category)
@@ -885,7 +993,9 @@ class DojoService:
                 "reportable_income_minor": self.compute_reportable_income(month_start, month_end),
                 "spent_minor": self.compute_spent(month_start, month_end, show_hidden=show_hidden),
             },
-            "groups": self.list_category_groups(month=month, show_hidden=show_hidden),
+            "groups": self.list_category_groups(
+                month=month, show_hidden=show_hidden, precomputed_categories=categories
+            ),
         }
 
     def get_net_worth(self) -> dict[str, Any]:
@@ -1490,19 +1600,18 @@ class DojoService:
         return total
 
     def _account_balances(self) -> dict[str, dict[str, int]]:
-        balances: dict[str, dict[str, int]] = defaultdict(
-            lambda: {"actual": 0, "pending": 0, "cleared": 0}
+        rows = self.db.fetch_all(
+            """
+            SELECT
+                account_id,
+                SUM(amount_minor) AS actual,
+                SUM(CASE WHEN status = 'CLEARED' THEN amount_minor ELSE 0 END) AS cleared,
+                SUM(CASE WHEN status = 'PENDING' THEN amount_minor ELSE 0 END) AS pending
+            FROM current_transactions
+            GROUP BY account_id
+            """
         )
-        for transaction in self.db.fetch_all(
-            "SELECT account_id, amount_minor, status FROM current_transactions"
-        ):
-            balance = balances[transaction["account_id"]]
-            balance["actual"] += transaction["amount_minor"]
-            if transaction["status"] == STATUS_CLEARED:
-                balance["cleared"] += transaction["amount_minor"]
-            else:
-                balance["pending"] += transaction["amount_minor"]
-        return dict(balances)
+        return {row["account_id"]: {"actual": row["actual"], "pending": row["pending"], "cleared": row["cleared"]} for row in rows}
 
     def _validate_transaction_payload(self, payload: dict[str, Any]) -> None:
         has_category = payload.get("category_id") is not None

@@ -65,13 +65,7 @@ function stubApi(ready: boolean): void {
           json: async () => ({
             app_status: { app: "dojo", ready, mode: ready ? "ready" : "onboarding", needs_onboarding: !ready, latest_import_batch: null, latest_import_run: null },
             import_status: null,
-            accounts: [],
-            category_groups: budgetResponse.groups,
-            categories: budgetResponse.groups[0].categories,
-            budget_buckets: [],
-            current_atb_minor: 404000,
-            current_budget_month_summary: budgetResponse.summary,
-            recent_transactions: [{ date: "2026-02-03" }],
+            default_budget_month: "2026-02",
           }),
         };
       }
@@ -79,7 +73,7 @@ function stubApi(ready: boolean): void {
         return { ok: true, json: async () => budgetResponse };
       }
       if (input.includes("/api/transactions")) {
-        return { ok: true, json: async () => ({ items: [] }) };
+        return { ok: true, json: async () => ({ items: [], total: 0, offset: 0, limit: 100, has_more: false }) };
       }
       if (input.includes("/api/accounts")) {
         return { ok: true, json: async () => ({ items: [] }) };

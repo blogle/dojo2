@@ -9,13 +9,12 @@ import {
   createTransfer,
   deleteTransaction,
   fetchAccounts,
-  fetchAppStatus,
   fetchBootstrap,
   fetchBudget,
   fetchCategories,
   fetchGoogleOnboardingStatus,
   fetchNetWorth,
-  fetchTransactions,
+  fetchTransactionsPage,
   importGoogleSheet,
   startGoogleOnboarding,
   updateAccount,
@@ -54,6 +53,9 @@ const state = reactive({
   importResult: null as ImportResult | null,
   onboardingInfo: null as GoogleOnboardingStatus | null,
   editingTransactionId: null as string | null,
+  transactionOffset: 0,
+  transactionTotal: 0,
+  hasMoreTransactions: false,
 });
 
 function resetState(): void {
@@ -73,6 +75,9 @@ function resetState(): void {
   state.importResult = null;
   state.onboardingInfo = null;
   state.editingTransactionId = null;
+  state.transactionOffset = 0;
+  state.transactionTotal = 0;
+  state.hasMoreTransactions = false;
 }
 
 async function withLoading<T>(fn: () => Promise<T>): Promise<T> {
@@ -103,14 +108,11 @@ async function withSaving<T>(fn: () => Promise<T>): Promise<T> {
 
 async function refreshBootstrap(): Promise<void> {
   const bootstrap = await fetchBootstrap();
-    state.bootstrap = bootstrap;
-    state.appStatus = bootstrap.app_status;
-    state.accounts = bootstrap.accounts;
-    state.categoryGroups = bootstrap.category_groups;
-    state.categories = bootstrap.categories;
-    if (!state.month) {
-      state.month = bootstrap.recent_transactions[0]?.date.slice(0, 7) ?? new Date().toISOString().slice(0, 7);
-    }
+  state.bootstrap = bootstrap;
+  state.appStatus = bootstrap.app_status;
+  if (!state.month) {
+    state.month = bootstrap.default_budget_month;
+  }
 }
 
 async function refreshBudget(): Promise<void> {
@@ -122,8 +124,32 @@ async function refreshBudget(): Promise<void> {
   state.categories = state.budget.groups.flatMap((group) => group.categories);
 }
 
+const PAGE_SIZE = 100;
+
+async function fetchTransactionPage(offset: number): Promise<void> {
+  const page = await fetchTransactionsPage(state.showHidden, offset, PAGE_SIZE);
+  state.transactions = page.items;
+  state.transactionOffset = page.offset;
+  state.transactionTotal = page.total;
+  state.hasMoreTransactions = page.has_more;
+}
+
 async function refreshTransactions(): Promise<void> {
-  state.transactions = await fetchTransactions(state.showHidden);
+  await fetchTransactionPage(0);
+}
+
+async function loadMoreTransactions(): Promise<void> {
+  if (!state.hasMoreTransactions) return;
+  await withLoading(async () => {
+    await fetchTransactionPage(state.transactionOffset + PAGE_SIZE);
+  });
+}
+
+async function loadPreviousTransactions(): Promise<void> {
+  if (state.transactionOffset === 0) return;
+  await withLoading(async () => {
+    await fetchTransactionPage(Math.max(0, state.transactionOffset - PAGE_SIZE));
+  });
 }
 
 async function refreshAccounts(): Promise<void> {
@@ -142,12 +168,8 @@ async function refreshNetWorth(): Promise<void> {
 
 async function initialize(): Promise<void> {
   await withLoading(async () => {
-    state.appStatus = await fetchAppStatus();
-    if (!state.month) {
-      state.month = new Date().toISOString().slice(0, 7);
-    }
     await refreshBootstrap();
-    if (state.appStatus.ready) {
+    if (state.appStatus?.ready) {
       await Promise.all([refreshBudget(), refreshTransactions(), refreshAccounts(), refreshNetWorth()]);
       return;
     }
@@ -345,6 +367,8 @@ export function useAppState() {
     saveAccount,
     saveCategoryGroup,
     saveCategory,
+    loadMoreTransactions,
+    loadPreviousTransactions,
     refreshBudget,
     refreshTransactions,
     refreshAccounts,

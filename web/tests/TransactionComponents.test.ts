@@ -39,8 +39,13 @@ describe("transaction components", () => {
   });
 
   it("renders only visible rows plus overscan", () => {
+    const manyTransactions = Array.from({ length: 1000 }, (_, index) => ({
+      ...sampleTransactions[0],
+      transaction_id: `tx-${index}`,
+      memo: `memo-${index}`,
+    }));
     const wrapper = mount(VirtualTransactionTable, {
-      props: { transactions: sampleTransactions },
+      props: { transactions: manyTransactions },
     });
 
     expect(wrapper.findAll("[data-transaction-id]").length).toBeLessThan(40);

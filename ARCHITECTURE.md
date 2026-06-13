@@ -64,7 +64,7 @@ Google OAuth is initiated by `/api/onboarding/google/start`, completed at `/api/
 - Styles: `web/src/dojo/styles/`
 - Tests: `web/tests/`
 
-The frontend uses Vue Router plus a shared composable store. On startup it fetches bootstrap state, redirects to onboarding when no successful import exists, and otherwise renders the budget, transactions, accounts, categories, and net worth pages.
+The frontend uses Vue Router plus a shared composable store. On startup it fetches a small bootstrap payload with readiness state plus the default budget month, redirects to onboarding when no successful import exists, and otherwise fetches budget, transactions, accounts, categories, and net-worth data on demand.
 
 UI flows are intentionally operational rather than decorative:
 
@@ -105,30 +105,41 @@ Routine verification is still driven by `just setup`, `just lint`, `just typeche
 
 ### Current Measured Performance (post-optimization)
 
-| Operation | 1K (ms) | 10K (ms) | 100K (ms) |
-|-----------|---------|----------|-----------|
-| list_transactions(limit=50) | ~15 | ~15 | ~30 |
-| list_transactions(limit=500) | ~45 | ~25 | ~40 |
-| list_categories | ~20 | ~75 | ~300 |
-| get_budget | ~72 | ~225 | ~800 |
-| compute_available_to_budget | ~5 | ~10 | ~20 |
-| list_accounts | ~10 | ~12 | ~15 |
-| get_net_worth | ~10 | ~30 | ~60 |
+| Operation | 1K (ms) | 10K (ms) |
+|-----------|---------|----------|
+| transaction window `limit=100` | ~32-44 | ~40-44 |
+| list_categories | ~55-61 | ~285 |
+| list_category_groups from precomputed categories | ~6 | ~5.5 |
+| get_budget | ~115-123 | ~718 |
+| get_bootstrap (synthetic service payload) | ~13 | ~16 |
+| import profile total | ~1,003 | ~9,491 |
+| import write_transactions phase | ~560 | ~5,007 |
+| import post_import_snapshot phase | ~294 | ~3,872 |
 
-*Wall-clock milliseconds on synthetic datasets with DuckDB in-memory. 100K estimates based on scaling curve.*
+Fixture API-route payload sizes after this pass:
+
+- `GET /api/transactions?limit=50`: ~6.8 KB
+- `GET /api/budget`: ~4.8 KB
+- `GET /api/accounts`: ~3.2 KB
+- `GET /api/categories`: ~7.6 KB
+- `GET /api/net-worth`: ~5.9 KB
+- `GET /api/bootstrap`: ~2.3 KB
+
+*Wall-clock milliseconds from the local benchmark suite using DuckDB in-memory synthetic datasets unless otherwise noted.*
 
 ### Known Bottlenecks
 
-1. **Import speed**: Full import of 100K transactions takes >60s due to individual SCD INSERT statements (one per row, each generating a UUID). For realistic usage (1-10K transactions), import takes 1-15s which is acceptable for an occasional operation. If bulk import speed becomes critical, consider batch INSERT with pre-generated UUIDs.
+1. **Import speed**: The 10K synthetic import profile now lands just under the tolerable 10s ceiling, but the dominant remaining phases are still transaction writes and post-import aggregate snapshot work. If import needs to move materially below that ceiling, the next likely wins are a more efficient bulk-load primitive for transactions and deeper aggregate-validation-path optimization.
 
-2. **`get_budget` still calls `list_category_groups`**: `get_budget` calls both `list_categories` and `list_category_groups`, and `list_category_groups` calls `list_categories` again internally. This doubles the per-category work. A future optimization could make `list_category_groups` accept pre-computed categories or share computed data.
-
-3. **Credit-card payment category computation**: Each CC payment category triggers two additional DB queries (CC spend + transfer adjustment). For typical datasets with 1-3 CC accounts this is negligible, but the queries could be batched for larger deployments.
+2. **Credit-card payment category computation**: Each CC payment category triggers two additional DB queries (CC spend + transfer adjustment). For typical datasets with 1-3 CC accounts this is negligible, but the queries could be batched for larger deployments.
 
 ### Transaction Data Path
 
-- **Pre-optimization**: `GET /api/transactions` returned all matching rows with a Python-side `LIMIT` after fetching the full result set. The frontend loaded up to `limit=2000` transactions into client memory. No pagination metadata was returned.
-- **Post-optimization**: `GET /api/transactions?offset=0&limit=50` returns only the requested window with `total`, `offset`, `limit`, `has_more` metadata. Hidden-entity filtering uses SQL WHERE clauses. Sorting is supported via `sort_by` (date, amount_minor, status, created_at) and `sort_dir` (asc, desc). The frontend should be updated to page through results instead of loading the full dataset.
+- `GET /api/transactions` returns only the requested page with `total`, `offset`, `limit`, and `has_more` metadata.
+- Hidden-entity filtering is server-side through the existing `show_hidden` parameter rather than client-side post-filtering.
+- The frontend requests `limit=100` for the initial page and keeps only the current page in reactive state.
+- Pagination is explicit with previous/next controls. The client does not accumulate the entire ledger as the user pages.
+- Ordering is server-driven. The current frontend path requests `sort_by=date&sort_dir=desc`, so no client-side sort of partial pages can drift from backend order.
 
 ### Paginated Transaction API
 
@@ -152,7 +163,25 @@ Response shape:
 
 ### Frontend Rendering
 
-Transaction-heavy views use `VirtualDataTable`/`VirtualTransactionTable` which render only the visible window plus overscan (6 rows) via CSS spacer divs. This prevents DOM flooding for large datasets, but the full transaction array remains in client-side memory. The `limit=2000` frontend cap bounds memory usage to a realistic maximum.
+Transaction-heavy views use `VirtualDataTable`/`VirtualTransactionTable` which render only the visible window plus overscan (6 rows) via CSS spacer divs. This prevents DOM flooding for large datasets. Transactions are now loaded in server-driven pages of 100 via `fetchTransactionsPage`; the page controls swap the current page instead of appending into a growing client-side ledger array.
+
+### Bootstrap Payload Policy
+
+- Bootstrap is an app-shell payload, not a data dump.
+- `GET /api/bootstrap` now returns only `app_status`, `import_status`, and `default_budget_month`.
+- Bootstrap and app-status paths no longer carry the last full validation report, which was the main source of the earlier 249 KB fixture payload.
+- Accounts, budget groups/categories, transactions, and net worth are fetched on demand after bootstrap when the app is ready.
+
+### Budget Aggregate Shaping
+
+- `get_budget()` computes the category list once and shapes group totals from those precomputed categories.
+- `GET /api/categories` now follows the same pattern instead of calling `list_categories()` once for groups and again for flat items.
+
+### Import Batch Write Strategy
+
+- `_insert_bundle()` prepares row dictionaries in memory and batches inserts per table for category groups, accounts, categories, budget buckets, budget-account settings, transactions, allocations, and net-worth valuations.
+- Transactions remain the dominant write phase, but batching the smaller dimension tables removed a large amount of per-row DuckDB overhead.
+- `snapshot_for_validation()` now reuses already-fetched accounts and default-month category data so post-import aggregate checks avoid redundant work.
 
 ## Documentation Structure
 

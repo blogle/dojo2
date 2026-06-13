@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from functools import partial
 from typing import Any, Callable
+from uuid import uuid4
 
 from dojo.benchmark_fixtures import DATASETS, build_synthetic_dataset, describe_dataset
-from dojo.database import Database
+from dojo.database import Database, json_dumps
+from dojo.scd import utc_now
 from dojo.service import DojoService
 
 
@@ -25,6 +28,16 @@ class ExplainAnalyzeResult:
     query: str
     plan: str
     duration_ms: float
+
+
+@dataclass
+class ImportProfile:
+    dataset_label: str
+    transaction_count: int
+    allocation_count: int
+    valuation_count: int
+    total_ms: float
+    phase_timings_ms: dict[str, float]
 
 
 class Timer:
@@ -51,6 +64,63 @@ def explain_analyze(db: Database, query: str, params: tuple[Any, ...] = ()) -> E
                     duration_str = part[:-1]
     duration_ms = float(duration_str) * 1000 if duration_str else 0.0
     return ExplainAnalyzeResult(query=query, plan=plan_text, duration_ms=duration_ms)
+
+
+def payload_size_bytes(payload: Any) -> int:
+    return len(json_dumps(payload))
+
+
+def profile_import(config: Any) -> ImportProfile:
+    phase_timings: dict[str, float] = {}
+
+    with Timer() as build_timer:
+        bundle = build_synthetic_dataset(config)
+    dataset_description = describe_dataset(bundle)
+
+    service = DojoService(":memory:")
+    imported_at = utc_now()
+    with Timer() as total_timer:
+        with service.db.transaction() as connection:
+            with Timer() as clear_timer:
+                service._clear_domain_tables(connection)
+            with Timer() as insert_timer:
+                service._insert_bundle(
+                    connection,
+                    bundle,
+                    imported_at,
+                    phase_timings=phase_timings,
+                )
+            with Timer() as validate_timer:
+                service.snapshot_for_validation(list(dataset_description["months"]))
+            with Timer() as record_timer:
+                connection.execute(
+                    "INSERT INTO import_batches (import_batch_id, spreadsheet_id, spreadsheet_title, imported_at, cutover_at, summary) VALUES (?, ?, ?, ?, ?, CAST(? AS JSON))",
+                    (
+                        str(uuid4()),
+                        bundle.spreadsheet_id,
+                        bundle.spreadsheet_title,
+                        imported_at,
+                        imported_at,
+                        json_dumps({"transactions": len(bundle.transactions)}),
+                    ),
+                )
+    service.close()
+
+    return ImportProfile(
+        dataset_label=config.label,
+        transaction_count=len(bundle.transactions),
+        allocation_count=len(bundle.allocations),
+        valuation_count=len(bundle.valuations),
+        total_ms=total_timer.elapsed_ms,
+        phase_timings_ms={
+            "build_bundle_ms": build_timer.elapsed_ms,
+            "clear_domain_tables_ms": clear_timer.elapsed_ms,
+            "insert_bundle_ms": insert_timer.elapsed_ms,
+            "post_import_snapshot_ms": validate_timer.elapsed_ms,
+            "record_import_batch_ms": record_timer.elapsed_ms,
+            **phase_timings,
+        },
+    )
 
 
 def _create_benchmark_service(config: Any) -> DojoService:
@@ -108,7 +178,7 @@ def _run_single_dataset(config: Any) -> list[BenchmarkResult]:
         for limit in (50, 500, 2000):
             bench(
                 f"list_transactions(limit={limit})",
-                lambda lim=limit: service.list_transactions(limit=lim, show_hidden=True),
+                partial(service.list_transactions, limit=limit, show_hidden=True),
                 row_extractor=lambda r: len(r["items"]),
                 total_rows=tx_count,
             )
@@ -116,7 +186,7 @@ def _run_single_dataset(config: Any) -> list[BenchmarkResult]:
     # Account balance query
     bench(
         "list_accounts",
-        lambda: service.list_accounts(show_hidden=True),
+        partial(service.list_accounts, show_hidden=True),
         row_extractor=lambda r: len(r),
         total_rows=ds["accounts"],
     )
@@ -125,14 +195,14 @@ def _run_single_dataset(config: Any) -> list[BenchmarkResult]:
     month = service.default_budget_month()
     bench(
         "list_categories",
-        lambda m=month: service.list_categories(month=m, show_hidden=True),
+        partial(service.list_categories, month=month, show_hidden=True),
         row_extractor=lambda r: len(r),
         total_rows=ds["categories"],
     )
 
     bench(
         "list_category_groups",
-        lambda m=month: service.list_category_groups(month=m, show_hidden=True),
+        partial(service.list_category_groups, month=month, show_hidden=True),
         row_extractor=lambda r: len(r),
         total_rows=ds["groups"],
     )
@@ -140,7 +210,7 @@ def _run_single_dataset(config: Any) -> list[BenchmarkResult]:
     # Full budget
     bench(
         "get_budget",
-        lambda m=month: service.get_budget(m, show_hidden=True),
+        partial(service.get_budget, month, show_hidden=True),
         row_extractor=lambda r: len(r.get("groups", [])),
         total_rows=ds["groups"],
     )
@@ -148,7 +218,7 @@ def _run_single_dataset(config: Any) -> list[BenchmarkResult]:
     # ATB computation
     bench(
         "compute_available_to_budget",
-        lambda: service.compute_available_to_budget(),
+        service.compute_available_to_budget,
         row_extractor=lambda r: 1,
         total_rows=1,
     )
@@ -160,25 +230,25 @@ def _run_single_dataset(config: Any) -> list[BenchmarkResult]:
         ms, me = service._month_bounds(month)
         bench(
             "compute_category_available (single)",
-            lambda cid=cat["category_id"]: service.compute_category_available(cid),
+            partial(service.compute_category_available, cat["category_id"]),
             row_extractor=lambda r: 1,
             total_rows=1,
         )
         bench(
             "compute_month_activity (single)",
-            lambda cid=cat["category_id"], ms=ms, me=me: service.compute_month_activity(cid, ms, me),
+            partial(service.compute_month_activity, cat["category_id"], ms, me),
             row_extractor=lambda r: 1,
             total_rows=1,
         )
         bench(
             "compute_month_budgeted (single)",
-            lambda bid=cat["bucket_id"], ms=ms, me=me: service.compute_month_budgeted(bid, ms, me),
+            partial(service.compute_month_budgeted, cat["bucket_id"], ms, me),
             row_extractor=lambda r: 1,
             total_rows=1,
         )
         bench(
             "compute_carried_over (single)",
-            lambda cid=cat["category_id"], bid=cat["bucket_id"], ms=ms: service.compute_carried_over(cid, bid, ms),
+            partial(service.compute_carried_over, cat["category_id"], cat["bucket_id"], ms),
             row_extractor=lambda r: 1,
             total_rows=1,
         )
@@ -186,13 +256,13 @@ def _run_single_dataset(config: Any) -> list[BenchmarkResult]:
     # Reportable income / spent
     bench(
         "compute_reportable_income",
-        lambda ms=ms, me=me: service.compute_reportable_income(ms, me),
+        partial(service.compute_reportable_income, ms, me),
         row_extractor=lambda r: 1,
         total_rows=1,
     )
     bench(
         "compute_spent",
-        lambda ms=ms, me=me: service.compute_spent(ms, me, show_hidden=True),
+        partial(service.compute_spent, ms, me, show_hidden=True),
         row_extractor=lambda r: 1,
         total_rows=1,
     )
@@ -200,7 +270,7 @@ def _run_single_dataset(config: Any) -> list[BenchmarkResult]:
     # Net worth
     bench(
         "get_net_worth",
-        lambda: service.get_net_worth(),
+        service.get_net_worth,
         row_extractor=lambda r: len(r.get("items", [])),
         total_rows=ds["accounts"] + ds["valuations"],
     )
@@ -210,7 +280,7 @@ def _run_single_dataset(config: Any) -> list[BenchmarkResult]:
     if months:
         bench(
             "snapshot_for_validation",
-            lambda m=months: service.snapshot_for_validation(m),
+            partial(service.snapshot_for_validation, months),
             row_extractor=lambda r: r.get("account_count", 0),
             total_rows=ds["accounts"],
         )

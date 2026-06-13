@@ -54,10 +54,27 @@ export async function fetchBudget(month: string, showHidden: boolean): Promise<B
   return request<BudgetResponse>(`/api/budget?${params.toString()}`);
 }
 
-export async function fetchTransactions(showHidden: boolean): Promise<Transaction[]> {
-  const params = new URLSearchParams({ show_hidden: String(showHidden), limit: "2000" });
-  const response = await request<{ items: Transaction[] }>(`/api/transactions?${params.toString()}`);
-  return response.items;
+export type TransactionPage = {
+  items: Transaction[];
+  total: number;
+  offset: number;
+  limit: number;
+  has_more: boolean;
+};
+
+export async function fetchTransactionsPage(
+  showHidden: boolean,
+  offset: number,
+  limit: number,
+): Promise<TransactionPage> {
+  const params = new URLSearchParams({
+    show_hidden: String(showHidden),
+    offset: String(offset),
+    limit: String(limit),
+    sort_by: "date",
+    sort_dir: "desc",
+  });
+  return request<TransactionPage>(`/api/transactions?${params.toString()}`);
 }
 
 export async function fetchAccounts(showHidden: boolean): Promise<Account[]> {

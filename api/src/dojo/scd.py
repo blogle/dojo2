@@ -37,6 +37,38 @@ def insert_version(
     )
 
 
+def _sql_literal(value: Any) -> str:
+    if value is None:
+        return "NULL"
+    if isinstance(value, bool):
+        return "TRUE" if value else "FALSE"
+    if isinstance(value, int | float):
+        return str(value)
+    escaped = str(value).replace("'", "''")
+    return f"'{escaped}'"
+
+
+def batch_insert_versions(
+    connection: DuckDBPyConnection,
+    table: str,
+    rows: list[dict[str, Any]],
+    *,
+    batch_size: int = 500,
+) -> None:
+    if not rows:
+        return
+    columns = ", ".join(rows[0].keys())
+    for start in range(0, len(rows), batch_size):
+        batch = rows[start : start + batch_size]
+        values_clause = ", ".join(
+            "(" + ", ".join(_sql_literal(v) for v in row.values()) + ")"
+            for row in batch
+        )
+        connection.execute(
+            f"INSERT INTO {table} ({columns}) VALUES {values_clause}"
+        )
+
+
 def replace_current_version(
     connection: DuckDBPyConnection,
     table: str,

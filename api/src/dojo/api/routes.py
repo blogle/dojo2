@@ -267,9 +267,14 @@ def categories(
 ) -> dict[str, Any]:
     service = get_service(request)
     active_month = month or service.default_budget_month()
+    items = service.list_categories(month=active_month, show_hidden=show_hidden)
     return {
-        "groups": service.list_category_groups(month=active_month, show_hidden=show_hidden),
-        "items": service.list_categories(month=active_month, show_hidden=show_hidden),
+        "groups": service.list_category_groups(
+            month=active_month,
+            show_hidden=show_hidden,
+            precomputed_categories=items,
+        ),
+        "items": items,
     }
 
 
