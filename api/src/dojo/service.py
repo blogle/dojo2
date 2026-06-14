@@ -6,7 +6,10 @@ from time import perf_counter
 from typing import Any, cast
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
+import duckdb
+
 from dojo.aggregate_validation import build_validation_report
+from dojo.clock import Clock, SystemClock, budget_month
 from dojo.constants import (
     ACCOUNT_CLASS_BUDGET,
     ACCOUNT_CLASS_TRACKING_BALANCE,
@@ -36,8 +39,8 @@ from dojo.scd import (
     close_current_version,
     insert_version,
     replace_current_version,
-    utc_now,
 )
+from dojo.sql import load_sql, render_sql
 
 
 class ImportValidationError(Exception):
@@ -47,18 +50,46 @@ class ImportValidationError(Exception):
 
 
 class DojoService:
-    def __init__(self, duckdb_path: str) -> None:
-        self.db = Database(duckdb_path)
+    def __init__(
+        self,
+        duckdb_path: str | None = None,
+        *,
+        clock: Clock | None = None,
+        database: Database | None = None,
+    ) -> None:
+        if database is None:
+            if duckdb_path is None:
+                raise ValueError("duckdb_path is required when no Database is provided")
+            self.db = Database(duckdb_path)
+        else:
+            self.db = database
+        self.clock = clock or SystemClock()
+        self._assert_schema_ready()
         self._ensure_system_rows()
 
     def close(self) -> None:
         self.db.close()
 
+    def _assert_schema_ready(self) -> None:
+        try:
+            row = self.db.fetch_one(
+                "SELECT table_name FROM duckdb_tables() WHERE table_name = 'import_runs'"
+            )
+        except duckdb.Error as exc:
+            raise RuntimeError(
+                "Failed to inspect the DuckDB schema before service startup"
+            ) from exc
+        if row is None:
+            raise RuntimeError(
+                "DuckDB schema is not provisioned. Run `python -m dojo.migrations <path>` or the canonical just command before starting the API or tests."
+            )
+
     def _ensure_system_rows(self) -> None:
-        now = utc_now()
+        now = self.clock.now()
         with self.db.transaction() as connection:
             group_count_row = connection.execute(
-                f"SELECT COUNT(*) FROM current_category_groups WHERE group_id = '{SYSTEM_CREDIT_CARD_GROUP_ID}'"
+                "SELECT COUNT(*) FROM current_category_groups WHERE group_id = ?",
+                (str(SYSTEM_CREDIT_CARD_GROUP_ID),),
             ).fetchone()
             if group_count_row is not None and group_count_row[0] == 0:
                 insert_version(
@@ -78,7 +109,8 @@ class DojoService:
                     },
                 )
             bucket_count_row = connection.execute(
-                f"SELECT COUNT(*) FROM current_budget_buckets WHERE bucket_id = '{SYSTEM_ATB_BUCKET_ID}'"
+                "SELECT COUNT(*) FROM current_budget_buckets WHERE bucket_id = ?",
+                (str(SYSTEM_ATB_BUCKET_ID),),
             ).fetchone()
             if bucket_count_row is not None and bucket_count_row[0] == 0:
                 insert_version(
@@ -127,7 +159,7 @@ class DojoService:
         }
 
     def default_budget_month(self) -> str:
-        return date.today().strftime("%Y-%m")
+        return budget_month(self.clock)
 
     def import_sheet_data(
         self,
@@ -139,7 +171,7 @@ class DojoService:
         available_named_ranges: list[str] | None = None,
         expected: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        started_at = utc_now()
+        started_at = self.clock.now()
         import_run_id = str(uuid4())
         spreadsheet_id = extract_sheet_id(source)
         try:
@@ -163,7 +195,7 @@ class DojoService:
                 spreadsheet_id=spreadsheet_id,
                 spreadsheet_title=spreadsheet_title or source,
                 started_at=started_at,
-                completed_at=utc_now(),
+                completed_at=self.clock.now(),
                 status="failed",
                 source_kind=source_kind,
                 validation_passed=False,
@@ -185,7 +217,7 @@ class DojoService:
                 spreadsheet_id=spreadsheet_id,
                 spreadsheet_title=spreadsheet_title or source,
                 started_at=started_at,
-                completed_at=utc_now(),
+                completed_at=self.clock.now(),
                 status="failed",
                 source_kind=source_kind,
                 validation_passed=False,
@@ -200,7 +232,7 @@ class DojoService:
             spreadsheet_id=bundle.spreadsheet_id,
             spreadsheet_title=bundle.spreadsheet_title,
             started_at=started_at,
-            completed_at=utc_now(),
+            completed_at=self.clock.now(),
             status="succeeded",
             source_kind=source_kind,
             validation_passed=True,
@@ -218,7 +250,7 @@ class DojoService:
         }
 
     def _apply_import_bundle(self, bundle: ParsedImportBundle) -> dict[str, Any]:
-        imported_at = utc_now()
+        imported_at = self.clock.now()
         with self.db.transaction() as connection:
             self._clear_domain_tables(connection)
             self._insert_bundle(connection, bundle, imported_at)
@@ -226,7 +258,7 @@ class DojoService:
             if report["hard_failures"]:
                 raise ImportValidationError(report)
             connection.execute(
-                "INSERT INTO import_batches (import_batch_id, spreadsheet_id, spreadsheet_title, imported_at, cutover_at, summary) VALUES (?, ?, ?, ?, ?, CAST(? AS JSON))",
+                load_sql("queries/insert_import_batch"),
                 (
                     str(uuid4()),
                     bundle.spreadsheet_id,
@@ -363,7 +395,9 @@ class DojoService:
                         "is_active": category.is_active,
                         "target_amount_minor": category.target_amount_minor,
                         "due_date_rule": category.due_date_rule,
-                        "metadata": json_dumps({"linked_account_name": category.linked_account_name}),
+                        "metadata": json_dumps(
+                            {"linked_account_name": category.linked_account_name}
+                        ),
                         "valid_from": imported_at,
                         "valid_to": MAX_TS,
                         "created_at": imported_at,
@@ -377,8 +411,7 @@ class DojoService:
                         "bucket_type": BUCKET_TYPE_CATEGORY,
                         "category_id": category.category_id,
                         "is_allocatable": True,
-                        "is_deletable": category.category_kind
-                        != CATEGORY_KIND_CREDIT_CARD_PAYMENT,
+                        "is_deletable": category.category_kind != CATEGORY_KIND_CREDIT_CARD_PAYMENT,
                         "valid_from": imported_at,
                         "valid_to": MAX_TS,
                         "created_at": imported_at,
@@ -435,6 +468,7 @@ class DojoService:
         )
 
         tx_rows: list[dict[str, Any]] = []
+
         def prepare_transactions() -> None:
             for transaction in bundle.transactions:
                 transaction_account_id = account_ids_by_name[transaction.account_name]
@@ -473,6 +507,7 @@ class DojoService:
         )
 
         alloc_rows: list[dict[str, Any]] = []
+
         def prepare_allocations() -> None:
             for allocation in bundle.allocations:
                 alloc_rows.append(
@@ -524,9 +559,7 @@ class DojoService:
                                 {
                                     "imported_from_net_worth": True,
                                     "net_worth_match_kind": valuation.match_kind,
-                                    "net_worth_match_candidates": list(
-                                        valuation.match_candidates
-                                    ),
+                                    "net_worth_match_candidates": list(valuation.match_candidates),
                                 }
                             ),
                             "valid_from": imported_at,
@@ -600,8 +633,7 @@ class DojoService:
         }
         default_categories = categories_by_month[default_month]
         category_available = {
-            category["name"]: category["available_minor"]
-            for category in default_categories
+            category["name"]: category["available_minor"] for category in default_categories
         }
         month_activity: dict[str, dict[str, int]] = {}
         month_budgeted: dict[str, dict[str, int]] = {}
@@ -676,7 +708,7 @@ class DojoService:
         error_message: str | None,
     ) -> None:
         self.db.execute(
-            "INSERT INTO import_runs (import_run_id, spreadsheet_id, spreadsheet_title, started_at, completed_at, status, source_kind, validation_passed, summary, validation_report, error_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS JSON), CAST(? AS JSON), ?)",
+            load_sql("queries/insert_import_run"),
             (
                 import_run_id,
                 spreadsheet_id,
@@ -693,14 +725,7 @@ class DojoService:
         )
 
     def list_accounts(self, *, show_hidden: bool) -> list[dict[str, Any]]:
-        accounts = self.db.fetch_all(
-            """
-            SELECT a.*, s.budget_account_type, s.linked_payment_category_id, s.display_liability_positive
-            FROM current_accounts a
-            LEFT JOIN current_budget_account_settings s ON s.account_id = a.account_id
-            ORDER BY a.name
-            """
-        )
+        accounts = self.db.fetch_all(load_sql("queries/list_accounts"))
         balances = self._account_balances()
         results = []
         for account in accounts:
@@ -734,15 +759,23 @@ class DojoService:
         sort_by: str = "date",
         sort_dir: str = "desc",
     ) -> dict[str, Any]:
-        valid_sort_cols = {"date", "amount_minor", "status", "created_at"}
-        sort_col = sort_by if sort_by in valid_sort_cols else "date"
-        sort_direction = "DESC" if sort_dir == "desc" else "ASC"
+        sort_expressions = {
+            "date": {"asc": "date ASC", "desc": "date DESC"},
+            "amount_minor": {"asc": "amount_minor ASC", "desc": "amount_minor DESC"},
+            "status": {"asc": "status ASC", "desc": "status DESC"},
+            "created_at": {"asc": "created_at ASC", "desc": "created_at DESC"},
+        }
+        sort_expression = sort_expressions.get(sort_by, sort_expressions["date"])[
+            "desc" if sort_dir == "desc" else "asc"
+        ]
 
         accounts = {
-            row["account_id"]: row for row in self.db.fetch_all("SELECT * FROM current_accounts")
+            row["account_id"]: row
+            for row in self.db.fetch_all(load_sql("queries/current_accounts"))
         }
         categories = {
-            row["category_id"]: row for row in self.db.fetch_all("SELECT * FROM current_categories")
+            row["category_id"]: row
+            for row in self.db.fetch_all(load_sql("queries/current_categories"))
         }
 
         hidden_account_ids: set[str] = set()
@@ -751,7 +784,7 @@ class DojoService:
             hidden_account_ids = {aid for aid, a in accounts.items() if a["is_hidden"]}
             hidden_category_ids = {cid for cid, c in categories.items() if c["is_hidden"]}
 
-        total_query = "SELECT COUNT(*) AS cnt FROM current_transactions"
+        where_clause = ""
         total_params: tuple[str, ...] = ()
         if hidden_account_ids or hidden_category_ids:
             filters: list[str] = []
@@ -764,29 +797,25 @@ class DojoService:
                 placeholders = ",".join("?" for _ in hidden_category_ids)
                 filters.append(f"(category_id IS NULL OR category_id NOT IN ({placeholders}))")
                 params.extend(str(h) for h in hidden_category_ids)
-            total_query += " WHERE " + " AND ".join(filters)
+            where_clause = "WHERE " + " AND ".join(filters)
             total_params = tuple(params)
-        total = self.db.fetch_one(total_query, total_params)
+        total = self.db.fetch_one(
+            render_sql("queries/list_transactions_count", where_clause=where_clause),
+            total_params,
+        )
         total_count = total["cnt"] if total else 0
 
-        query = f"SELECT * FROM current_transactions ORDER BY {sort_col} {sort_direction}, created_at DESC, transaction_id DESC LIMIT ? OFFSET ?"
-        query_params: list[Any] = []
-        if hidden_account_ids or hidden_category_ids:
-            where_clause: list[str] = []
-            where_params: list[Any] = []
-            if hidden_account_ids:
-                placeholders = ",".join("?" for _ in hidden_account_ids)
-                where_clause.append(f"account_id NOT IN ({placeholders})")
-                where_params.extend(str(h) for h in hidden_account_ids)
-            if hidden_category_ids:
-                placeholders = ",".join("?" for _ in hidden_category_ids)
-                where_clause.append(f"(category_id IS NULL OR category_id NOT IN ({placeholders}))")
-                where_params.extend(str(h) for h in hidden_category_ids)
-            query = f"SELECT * FROM current_transactions WHERE {' AND '.join(where_clause)} ORDER BY {sort_col} {sort_direction}, created_at DESC, transaction_id DESC LIMIT ? OFFSET ?"
-            query_params = where_params
+        query_params: list[Any] = list(total_params)
         query_params.append(limit)
         query_params.append(offset)
-        rows = self.db.fetch_all(query, tuple(query_params))
+        rows = self.db.fetch_all(
+            render_sql(
+                "queries/list_transactions_page",
+                where_clause=where_clause,
+                sort_expression=sort_expression,
+            ),
+            tuple(query_params),
+        )
 
         results: list[dict[str, Any]] = []
         for row in rows:
@@ -810,11 +839,13 @@ class DojoService:
         }
 
     def list_category_groups(
-        self, *, month: str, show_hidden: bool, precomputed_categories: list[dict[str, Any]] | None = None
+        self,
+        *,
+        month: str,
+        show_hidden: bool,
+        precomputed_categories: list[dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
-        groups = self.db.fetch_all(
-            "SELECT * FROM current_category_groups ORDER BY sort_order, name"
-        )
+        groups = self.db.fetch_all(load_sql("queries/current_category_groups_ordered"))
         categories = (
             precomputed_categories
             if precomputed_categories is not None
@@ -855,14 +886,14 @@ class DojoService:
         return results
 
     def list_categories(self, *, month: str, show_hidden: bool) -> list[dict[str, Any]]:
-        categories = self.db.fetch_all("SELECT * FROM current_categories ORDER BY sort_order, name")
+        categories = self.db.fetch_all(load_sql("queries/current_categories_ordered"))
         groups = {
             row["group_id"]: row
-            for row in self.db.fetch_all("SELECT * FROM current_category_groups")
+            for row in self.db.fetch_all(load_sql("queries/current_category_groups"))
         }
         settings = {
             row["linked_payment_category_id"]: row
-            for row in self.db.fetch_all("SELECT * FROM current_budget_account_settings")
+            for row in self.db.fetch_all(load_sql("queries/current_budget_account_settings"))
             if row["linked_payment_category_id"] is not None
         }
         month_start, month_end = self._month_bounds(month)
@@ -934,17 +965,19 @@ class DojoService:
                     + cc_transfer_adj_by_cat.get(cid, 0)
                 )
             else:
-                available = tx_by_category.get(cid, 0) + alloc_to_bucket.get(
-                    bucket_id, 0
-                ) - alloc_from_bucket.get(bucket_id, 0)
+                available = (
+                    tx_by_category.get(cid, 0)
+                    + alloc_to_bucket.get(bucket_id, 0)
+                    - alloc_from_bucket.get(bucket_id, 0)
+                )
 
             month_activity = tx_month_activity.get(cid, 0)
-            month_budgeted = alloc_month_to.get(bucket_id, 0) - alloc_month_from.get(
-                bucket_id, 0
+            month_budgeted = alloc_month_to.get(bucket_id, 0) - alloc_month_from.get(bucket_id, 0)
+            starting_available = (
+                tx_pre_month.get(cid, 0)
+                + alloc_pre_to.get(bucket_id, 0)
+                - alloc_pre_from.get(bucket_id, 0)
             )
-            starting_available = tx_pre_month.get(cid, 0) + alloc_pre_to.get(
-                bucket_id, 0
-            ) - alloc_pre_from.get(bucket_id, 0)
 
             results.append(
                 category
@@ -1000,13 +1033,12 @@ class DojoService:
 
     def get_net_worth(self) -> dict[str, Any]:
         accounts = {
-            row["account_id"]: row for row in self.db.fetch_all("SELECT * FROM current_accounts")
+            row["account_id"]: row
+            for row in self.db.fetch_all(load_sql("queries/current_accounts"))
         }
         valuations = [
             self._decode_json_fields(row, {"metadata"})
-            for row in self.db.fetch_all(
-            "SELECT * FROM current_net_worth_valuations ORDER BY effective_date DESC, created_at DESC"
-            )
+            for row in self.db.fetch_all(load_sql("queries/current_net_worth_valuations_ordered"))
         ]
         latest_valuation_by_account: dict[str, dict[str, Any]] = {}
         for valuation in valuations:
@@ -1088,7 +1120,7 @@ class DojoService:
     ) -> dict[str, Any]:
         if amount_minor <= 0:
             raise ValueError("Allocation amount must be positive")
-        now = utc_now()
+        now = self.clock.now()
         allocation_id = str(uuid4())
         with self.db.transaction() as connection:
             insert_version(
@@ -1110,7 +1142,7 @@ class DojoService:
         return {"allocation_id": allocation_id}
 
     def create_transaction(self, payload: dict[str, Any]) -> dict[str, Any]:
-        now = utc_now()
+        now = self.clock.now()
         transaction_id = str(uuid4())
         self._validate_transaction_payload(payload)
         with self.db.transaction() as connection:
@@ -1142,7 +1174,7 @@ class DojoService:
         )
         if current is None:
             raise ValueError("Transaction not found")
-        now = utc_now()
+        now = self.clock.now()
         with self.db.transaction() as connection:
             replace_current_version(
                 connection,
@@ -1167,8 +1199,15 @@ class DojoService:
         return {"transaction_id": transaction_id}
 
     def delete_transaction(self, transaction_id: str) -> None:
+        now = self.clock.now()
         with self.db.transaction() as connection:
-            close_current_version(connection, "transactions", "transaction_id", transaction_id)
+            close_current_version(
+                connection,
+                "transactions",
+                "transaction_id",
+                transaction_id,
+                now=now,
+            )
 
     def create_transfer(
         self,
@@ -1182,7 +1221,7 @@ class DojoService:
     ) -> dict[str, Any]:
         if amount_minor <= 0:
             raise ValueError("Transfer amount must be positive")
-        now = utc_now()
+        now = self.clock.now()
         source_transaction_id = str(uuid4())
         destination_transaction_id = str(uuid4())
         with self.db.transaction() as connection:
@@ -1214,7 +1253,7 @@ class DojoService:
         }
 
     def create_account(self, payload: dict[str, Any]) -> dict[str, Any]:
-        now = utc_now()
+        now = self.clock.now()
         account_id = str(uuid4())
         with self.db.transaction() as connection:
             insert_version(
@@ -1267,7 +1306,7 @@ class DojoService:
         )
         if current is None:
             raise ValueError("Account not found")
-        now = utc_now()
+        now = self.clock.now()
         with self.db.transaction() as connection:
             replace_current_version(
                 connection,
@@ -1290,7 +1329,7 @@ class DojoService:
         return {"account_id": account_id}
 
     def create_category_group(self, payload: dict[str, Any]) -> dict[str, Any]:
-        now = utc_now()
+        now = self.clock.now()
         group_id = str(uuid4())
         insert_values = {
             "group_id": group_id,
@@ -1314,7 +1353,7 @@ class DojoService:
         )
         if current is None:
             raise ValueError("Category group not found")
-        now = utc_now()
+        now = self.clock.now()
         with self.db.transaction() as connection:
             replace_current_version(
                 connection,
@@ -1337,7 +1376,7 @@ class DojoService:
         return {"group_id": group_id}
 
     def create_category(self, payload: dict[str, Any]) -> dict[str, Any]:
-        now = utc_now()
+        now = self.clock.now()
         category_id = str(uuid4())
         with self.db.transaction() as connection:
             insert_version(
@@ -1383,7 +1422,7 @@ class DojoService:
         )
         if current is None:
             raise ValueError("Category not found")
-        now = utc_now()
+        now = self.clock.now()
         with self.db.transaction() as connection:
             replace_current_version(
                 connection,
@@ -1413,12 +1452,7 @@ class DojoService:
 
     def compute_available_to_budget(self) -> int:
         transactions = self.db.fetch_all(
-            """
-            SELECT t.amount_minor, t.system_category
-            FROM current_transactions t
-            JOIN current_accounts a ON a.account_id = t.account_id
-            WHERE a.account_class = ? AND t.system_category IN (?, ?, ?)
-            """,
+            load_sql("queries/available_to_budget_transactions"),
             (
                 ACCOUNT_CLASS_BUDGET,
                 SYSTEM_CATEGORY_ATB,
@@ -1600,18 +1634,15 @@ class DojoService:
         return total
 
     def _account_balances(self) -> dict[str, dict[str, int]]:
-        rows = self.db.fetch_all(
-            """
-            SELECT
-                account_id,
-                SUM(amount_minor) AS actual,
-                SUM(CASE WHEN status = 'CLEARED' THEN amount_minor ELSE 0 END) AS cleared,
-                SUM(CASE WHEN status = 'PENDING' THEN amount_minor ELSE 0 END) AS pending
-            FROM current_transactions
-            GROUP BY account_id
-            """
-        )
-        return {row["account_id"]: {"actual": row["actual"], "pending": row["pending"], "cleared": row["cleared"]} for row in rows}
+        rows = self.db.fetch_all(load_sql("queries/account_balances"))
+        return {
+            row["account_id"]: {
+                "actual": row["actual"],
+                "pending": row["pending"],
+                "cleared": row["cleared"],
+            }
+            for row in rows
+        }
 
     def _validate_transaction_payload(self, payload: dict[str, Any]) -> None:
         has_category = payload.get("category_id") is not None

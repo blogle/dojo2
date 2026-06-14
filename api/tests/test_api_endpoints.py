@@ -9,17 +9,25 @@ from fastapi.testclient import TestClient
 import dojo.api.main as main_module
 import dojo.api.routes as routes_module
 from dojo.api.settings import get_settings
+from dojo.migrations import provision_database
+
+
+def provisioned_main_module(monkeypatch, tmp_path, filename: str):
+    duckdb_path = tmp_path / filename
+    monkeypatch.setenv("DUCKDB_PATH", str(duckdb_path))
+    provision_database(str(duckdb_path))
+    get_settings.cache_clear()
+    reload(main_module)
+    return main_module
 
 
 def test_app_bootstrap_and_import_flow(monkeypatch, tmp_path) -> None:
-    monkeypatch.setenv("DUCKDB_PATH", str(tmp_path / "api-test.duckdb"))
     monkeypatch.setenv("SESSION_SECRET", "test-secret")
     monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
     monkeypatch.setenv(
         "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
     )
-    get_settings.cache_clear()
-    reload(main_module)
+    provisioned_main_module(monkeypatch, tmp_path, "api-test.duckdb")
 
     with TestClient(main_module.app) as client:
         status = client.get("/api/app/status")
@@ -46,15 +54,15 @@ def test_app_bootstrap_and_import_flow(monkeypatch, tmp_path) -> None:
         assert len(transactions.json()["items"]) == 12
 
 
-def test_budget_accounts_and_net_worth_endpoints_return_validated_aggregates(monkeypatch, tmp_path) -> None:
-    monkeypatch.setenv("DUCKDB_PATH", str(tmp_path / "api-test.duckdb"))
+def test_budget_accounts_and_net_worth_endpoints_return_validated_aggregates(
+    monkeypatch, tmp_path
+) -> None:
     monkeypatch.setenv("SESSION_SECRET", "test-secret")
     monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
     monkeypatch.setenv(
         "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
     )
-    get_settings.cache_clear()
-    reload(main_module)
+    provisioned_main_module(monkeypatch, tmp_path, "api-test.duckdb")
 
     with TestClient(main_module.app) as client:
         imported = client.post(
@@ -90,22 +98,19 @@ def test_budget_accounts_and_net_worth_endpoints_return_validated_aggregates(mon
         checking_ignored = next(
             item
             for item in net_worth.json()["items"]
-            if item.get("account_name") == "Checking"
-            and item.get("source") == "imported_valuation"
+            if item.get("account_name") == "Checking" and item.get("source") == "imported_valuation"
         )
         assert checking_ignored["ignored_import_value"] is True
         assert checking_ignored["ignored_reason"] == "duplicate_budget_account"
 
 
 def test_bootstrap_response_stays_shell_sized(monkeypatch, tmp_path) -> None:
-    monkeypatch.setenv("DUCKDB_PATH", str(tmp_path / "api-test.duckdb"))
     monkeypatch.setenv("SESSION_SECRET", "test-secret")
     monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
     monkeypatch.setenv(
         "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
     )
-    get_settings.cache_clear()
-    reload(main_module)
+    provisioned_main_module(monkeypatch, tmp_path, "api-test.duckdb")
 
     with TestClient(main_module.app) as client:
         imported = client.post(
@@ -124,14 +129,12 @@ def test_bootstrap_response_stays_shell_sized(monkeypatch, tmp_path) -> None:
 
 
 def test_transactions_endpoint_returns_bounded_sorted_pages(monkeypatch, tmp_path) -> None:
-    monkeypatch.setenv("DUCKDB_PATH", str(tmp_path / "api-test.duckdb"))
     monkeypatch.setenv("SESSION_SECRET", "test-secret")
     monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
     monkeypatch.setenv(
         "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
     )
-    get_settings.cache_clear()
-    reload(main_module)
+    provisioned_main_module(monkeypatch, tmp_path, "api-test.duckdb")
 
     with TestClient(main_module.app) as client:
         imported = client.post(
@@ -160,15 +163,29 @@ def test_transactions_endpoint_returns_bounded_sorted_pages(monkeypatch, tmp_pat
         assert payload["items"][0]["date"] >= payload["items"][-1]["date"]
 
 
+def test_transactions_endpoint_rejects_unsupported_sort_fields(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("SESSION_SECRET", "test-secret")
+    monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
+    monkeypatch.setenv(
+        "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
+    )
+    provisioned_main_module(monkeypatch, tmp_path, "api-test.duckdb")
+
+    with TestClient(main_module.app) as client:
+        response = client.get(
+            "/api/transactions",
+            params={"limit": 10, "sort_by": "memo", "sort_dir": "desc"},
+        )
+        assert response.status_code == 422
+
+
 def test_google_start_endpoint_reports_fixture_mode_without_oauth(monkeypatch, tmp_path) -> None:
-    monkeypatch.setenv("DUCKDB_PATH", str(tmp_path / "api-test.duckdb"))
     monkeypatch.setenv("SESSION_SECRET", "test-secret")
     monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
     monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_ID", "")
     monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_SECRET", "")
     monkeypatch.setenv("GOOGLE_OAUTH_REDIRECT_URI", "")
-    get_settings.cache_clear()
-    reload(main_module)
+    provisioned_main_module(monkeypatch, tmp_path, "api-test.duckdb")
 
     with TestClient(main_module.app) as client:
         response = client.post("/api/onboarding/google/start")
@@ -180,26 +197,21 @@ def test_google_start_endpoint_reports_fixture_mode_without_oauth(monkeypatch, t
 
 
 def test_google_import_requires_session_oauth_token(monkeypatch, tmp_path) -> None:
-    monkeypatch.setenv("DUCKDB_PATH", str(tmp_path / "api-test.duckdb"))
     monkeypatch.setenv("SESSION_SECRET", "test-secret")
     monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_ID", "client-id")
     monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_SECRET", "client-secret")
     monkeypatch.setenv(
         "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
     )
-    get_settings.cache_clear()
-    reload(main_module)
+    provisioned_main_module(monkeypatch, tmp_path, "api-test.duckdb")
 
     with TestClient(main_module.app) as client:
-        response = client.post(
-            "/api/import/google-sheet", json={"sheet_url_or_id": "sheet-123"}
-        )
+        response = client.post("/api/import/google-sheet", json={"sheet_url_or_id": "sheet-123"})
         assert response.status_code == 400
         assert "Complete the OAuth step" in response.json()["detail"]
 
 
 def test_google_callback_stores_token_in_memory_and_updates_status(monkeypatch, tmp_path) -> None:
-    monkeypatch.setenv("DUCKDB_PATH", str(tmp_path / "api-test.duckdb"))
     monkeypatch.setenv("SESSION_SECRET", "test-secret")
     monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_ID", "client-id")
     monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_SECRET", "client-secret")
@@ -207,8 +219,7 @@ def test_google_callback_stores_token_in_memory_and_updates_status(monkeypatch, 
     monkeypatch.setenv(
         "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
     )
-    get_settings.cache_clear()
-    reload(main_module)
+    provisioned_main_module(monkeypatch, tmp_path, "api-test.duckdb")
     monkeypatch.setattr(
         routes_module,
         "exchange_google_code",

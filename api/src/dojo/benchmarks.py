@@ -7,8 +7,9 @@ from typing import Any, Callable
 from uuid import uuid4
 
 from dojo.benchmark_fixtures import DATASETS, build_synthetic_dataset, describe_dataset
+from dojo.clock import SystemClock
 from dojo.database import Database, json_dumps
-from dojo.scd import utc_now
+from dojo.migrations import apply_migrations
 from dojo.service import DojoService
 
 
@@ -54,8 +55,15 @@ class Timer:
 
 
 def explain_analyze(db: Database, query: str, params: tuple[Any, ...] = ()) -> ExplainAnalyzeResult:
-    plan_rows = db.fetch_all(f"EXPLAIN ANALYZE {query}", params) if params else db.fetch_all(f"EXPLAIN ANALYZE {query}")
-    plan_text = "\n".join(row.get("explain_key", "") if "explain_key" in row else list(row.values())[0] for row in plan_rows)
+    plan_rows = (
+        db.fetch_all(f"EXPLAIN ANALYZE {query}", params)
+        if params
+        else db.fetch_all(f"EXPLAIN ANALYZE {query}")
+    )
+    plan_text = "\n".join(
+        row.get("explain_key", "") if "explain_key" in row else list(row.values())[0]
+        for row in plan_rows
+    )
     duration_str = ""
     for line in plan_text.split("\n"):
         if "EC" in line and "rows" in line:
@@ -77,8 +85,11 @@ def profile_import(config: Any) -> ImportProfile:
         bundle = build_synthetic_dataset(config)
     dataset_description = describe_dataset(bundle)
 
-    service = DojoService(":memory:")
-    imported_at = utc_now()
+    database = Database(":memory:")
+    apply_migrations(database.connection)
+    clock = SystemClock()
+    service = DojoService(clock=clock, database=database)
+    imported_at = clock.now()
     with Timer() as total_timer:
         with service.db.transaction() as connection:
             with Timer() as clear_timer:
@@ -125,8 +136,11 @@ def profile_import(config: Any) -> ImportProfile:
 
 def _create_benchmark_service(config: Any) -> DojoService:
     bundle = build_synthetic_dataset(config)
-    service = DojoService(":memory:")
-    imported_at = __import__("dojo.scd", fromlist=["utc_now"]).utc_now()
+    database = Database(":memory:")
+    apply_migrations(database.connection)
+    clock = SystemClock()
+    service = DojoService(clock=clock, database=database)
+    imported_at = clock.now()
     with service.db.transaction() as connection:
         service._clear_domain_tables(connection)
         service._insert_bundle(connection, bundle, imported_at)
@@ -304,7 +318,9 @@ def format_results_table(all_results: list[list[BenchmarkResult]]) -> str:
         )
 
     lines.append("\n\n## Per-Operation Timings")
-    lines.append(f"{'Operation':<55} {'1K (ms)':<12} {'10K (ms)':<12} {'100K (ms)':<12} {'Notes':<20}")
+    lines.append(
+        f"{'Operation':<55} {'1K (ms)':<12} {'10K (ms)':<12} {'100K (ms)':<12} {'Notes':<20}"
+    )
     lines.append("-" * 111)
 
     if not all_results:

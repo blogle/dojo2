@@ -7,12 +7,15 @@ from tempfile import TemporaryDirectory
 from typing import Any
 
 from dojo.importer import parse_named_range_workbook
+from dojo.migrations import provision_database
 from dojo.service import DojoService
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run dojo aggregate validation")
-    parser.add_argument("--fixture", action="store_true", help="Validate the deterministic repository fixture")
+    parser.add_argument(
+        "--fixture", action="store_true", help="Validate the deterministic repository fixture"
+    )
     parser.add_argument(
         "--fetch-dump",
         help="Validate a saved live-sheet fetch dump produced by dojo.live_sheet_harness",
@@ -38,6 +41,7 @@ def main() -> int:
 
 
 def run_validation(args: argparse.Namespace, duckdb_path: Path) -> dict[str, Any]:
+    provision_database(str(duckdb_path))
     service = DojoService(str(duckdb_path))
     try:
         if args.fixture:

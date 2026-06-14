@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Added explicit DuckDB provisioning through `api/src/dojo/migrations.py`, moved schema SQL into native `.sql` files, and stopped `Database(...)` from creating or migrating schema as a hidden side effect.
+- Added a central backend clock abstraction plus deterministic test clocks, reusable SCD2 invariant assertions, fresh-database provisioning tests, and Hypothesis coverage for real allocation, transfer, status-change, and transaction-history behavior.
+- Added repository architecture and policy checks for direct DuckDB connections, direct wall-clock usage, router boundary violations, large inline SQL, SQL f-strings, SQL file location, test-only imports, and persisted money type rules.
+- Added `CONTRIBUTING.md` as the canonical development guide, shortened `AGENTS.md` to routing guidance, and aligned CI with the canonical `just ci` command.
+
 - Completed the interactive transaction-table path: the frontend now keeps only one server-driven transaction page in reactive state, requests `limit=100` for the initial page, uses previous/next page controls, and relies on the existing virtual table to keep DOM rows bounded.
 - Reused precomputed category lists for both `get_budget` and `GET /api/categories`, so grouped budget responses are shaped once instead of recomputing the same month twice.
 - Batched full-import SCD writes across category groups, accounts, categories, budget buckets, budget-account settings, transactions, allocations, and net-worth valuations. The local synthetic 10K import profile is now about 9.5s, with the remaining cost concentrated in transaction writes and post-import aggregate snapshot work.

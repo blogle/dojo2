@@ -1,5 +1,9 @@
 name: CI
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   pull_request:
   push:
@@ -13,14 +17,5 @@ jobs:
       - uses: DeterminateSystems/nix-installer-action@main
       - uses: DeterminateSystems/magic-nix-cache-action@main
 
-      - name: Lint
-        run: nix develop --command just lint
-
-      - name: Typecheck
-        run: nix develop --command just typecheck
-
-      - name: Test
-        run: nix develop --command just test
-
-      - name: Build container
-        run: nix build .#container
+      - name: Run canonical CI command
+        run: nix develop --command just ci

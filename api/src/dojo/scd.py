@@ -1,16 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
 from duckdb import DuckDBPyConnection
 
 from dojo.constants import MAX_TS
-
-
-def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
 
 
 def current_predicate(alias: str = "") -> str:
@@ -61,12 +57,9 @@ def batch_insert_versions(
     for start in range(0, len(rows), batch_size):
         batch = rows[start : start + batch_size]
         values_clause = ", ".join(
-            "(" + ", ".join(_sql_literal(v) for v in row.values()) + ")"
-            for row in batch
+            "(" + ", ".join(_sql_literal(v) for v in row.values()) + ")" for row in batch
         )
-        connection.execute(
-            f"INSERT INTO {table} ({columns}) VALUES {values_clause}"
-        )
+        connection.execute(f"INSERT INTO {table} ({columns}) VALUES {values_clause}")
 
 
 def replace_current_version(
@@ -75,14 +68,14 @@ def replace_current_version(
     logical_column: str,
     logical_id: str,
     replacement: dict[str, Any],
-    now: datetime | None = None,
+    *,
+    now: datetime,
 ) -> None:
-    timestamp = now or utc_now()
     connection.execute(
         f"UPDATE {table} SET valid_to = ? WHERE {logical_column} = ? AND valid_to = TIMESTAMPTZ '{MAX_TS}'",
-        (timestamp, logical_id),
+        (now, logical_id),
     )
-    insert_version(connection, table, replacement | {"valid_from": timestamp, "valid_to": MAX_TS})
+    insert_version(connection, table, replacement | {"valid_from": now, "valid_to": MAX_TS})
 
 
 def close_current_version(
@@ -90,10 +83,10 @@ def close_current_version(
     table: str,
     logical_column: str,
     logical_id: str,
-    now: datetime | None = None,
+    *,
+    now: datetime,
 ) -> None:
-    timestamp = now or utc_now()
     connection.execute(
         f"UPDATE {table} SET valid_to = ? WHERE {logical_column} = ? AND valid_to = TIMESTAMPTZ '{MAX_TS}'",
-        (timestamp, logical_id),
+        (now, logical_id),
     )

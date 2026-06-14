@@ -1,5 +1,37 @@
 # Decisions
 
+## 2026-06-13 — Make DuckDB provisioning explicit and route domain time through an injected clock
+
+### Context
+
+The repository previously created tables and applied compatibility repairs as a side effect of `Database(...)` construction, and domain code still called wall-clock functions directly. That made startup behavior implicit and made deterministic history tests harder to trust.
+
+### Decision
+
+Move schema application into `api/src/dojo/migrations.py` and make `just api` run it explicitly before starting FastAPI. Keep `api/src/dojo/database.py` focused on connection lifecycle only. Route service time through `api/src/dojo/clock.py` and inject deterministic clocks in tests.
+
+### Consequence
+
+- API import and app construction no longer perform hidden schema work.
+- Tests can provision a fresh database and advance time deterministically.
+- Contributors must use the canonical provisioning commands instead of assuming service construction will create tables.
+
+## 2026-06-13 — Enforce repository policy with focused pytest-based AST checks and native SQL files
+
+### Context
+
+Important repository rules existed only by convention: routers should not import DuckDB or SQL loaders, production code should not call `duckdb.connect(...)` directly, wall-clock access should be centralized, and core SQL should move out of large inline Python strings.
+
+### Decision
+
+Add repository policy checks under `api/tests/architecture/` and move key schema and query SQL into `api/src/dojo/sql/`. Keep the checks small and explicit instead of building a general-purpose enforcement framework.
+
+### Consequence
+
+- `just architecture-check` now produces actionable file-and-line failures for representative policy violations.
+- Core backend SQL is easier to trace from call site to `.sql` file.
+- The repository can extend policy enforcement incrementally without a sprawling custom framework.
+
 ## 2026-06-12 — Add server-side pagination to the transaction API
 
 ### Context

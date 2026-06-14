@@ -1,16 +1,12 @@
 from __future__ import annotations
 
 import json
-import re
 from contextlib import contextmanager
-from pathlib import Path
 from threading import RLock
 from typing import Any, Iterator
 from uuid import UUID
 
 import duckdb
-
-from dojo.schema import bootstrap_sql, migrate_sql
 
 
 def _json_default(value: Any) -> Any:
@@ -31,14 +27,9 @@ def json_dumps(value: Any) -> str:
 
 class Database:
     def __init__(self, path: str) -> None:
-        db_path = Path(path)
-        if path != ":memory:":
-            db_path.parent.mkdir(parents=True, exist_ok=True)
         self._connection = duckdb.connect(path)
         self._connection.execute("SET TimeZone = 'UTC'")
         self._lock = RLock()
-        self._connection.execute(bootstrap_sql())
-        self._run_schema_migrations()
 
     @property
     def connection(self) -> duckdb.DuckDBPyConnection:
@@ -79,23 +70,3 @@ class Database:
                 raise
             else:
                 self._connection.execute("COMMIT")
-
-    def _run_schema_migrations(self) -> None:
-        transaction_table = self.fetch_one(
-            "SELECT sql FROM duckdb_tables() WHERE table_name = 'transactions'"
-        )
-        if transaction_table is None:
-            return
-        sql = str(transaction_table.get("sql") or "")
-        normalized_sql = re.sub(r"\s+", " ", sql).casefold()
-        has_legacy_constraint = (
-            "category_id is not null" in normalized_sql
-            and "system_category is null" in normalized_sql
-            and "category_id is null" in normalized_sql
-            and "system_category is not null" in normalized_sql
-            and "not (category_id is not null and system_category is not null)" not in normalized_sql
-        )
-        if not has_legacy_constraint:
-            return
-        for statement in migrate_sql():
-            self._connection.execute(statement)

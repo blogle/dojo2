@@ -18,6 +18,7 @@ from dojo.google import (
     fetch_sheet_named_ranges,
 )
 from dojo.importer import consumed_named_range_aliases, extract_sheet_id
+from dojo.migrations import provision_database
 from dojo.service import DojoService
 
 DEFAULT_TOKEN_CACHE = Path("/tmp/dojo-google-sheet-token.json")
@@ -100,6 +101,7 @@ def main() -> int:
         duckdb_path.unlink()
     duckdb_path.parent.mkdir(parents=True, exist_ok=True)
 
+    provision_database(str(duckdb_path))
     service = DojoService(str(duckdb_path))
     try:
         result = service.import_sheet_data(
@@ -177,7 +179,9 @@ def exchange_authorization_response(
 ) -> dict[str, Any]:
     cached_state = load_json_file(auth_state_cache)
     if cached_state is None or not isinstance(cached_state.get("state"), str):
-        raise SystemExit("No pending OAuth state was found; run the harness once without a token first")
+        raise SystemExit(
+            "No pending OAuth state was found; run the harness once without a token first"
+        )
 
     parsed = urlparse(authorization_response.strip())
     query = parse_qs(parsed.query)
@@ -205,7 +209,9 @@ def exchange_authorization_response(
     return token
 
 
-def refresh_cached_token(*, settings: Any, token: dict[str, Any], token_cache: Path) -> dict[str, Any]:
+def refresh_cached_token(
+    *, settings: Any, token: dict[str, Any], token_cache: Path
+) -> dict[str, Any]:
     refresh_token = token.get("refresh_token")
     if not isinstance(refresh_token, str) or not refresh_token.strip():
         return token
@@ -241,9 +247,7 @@ def token_is_fresh(token: dict[str, Any]) -> bool:
     return expires_at - timedelta(minutes=5) > datetime.now(UTC)
 
 
-def print_live_import_diagnostics(
-    exc: Exception, named_ranges: dict[str, list[list[str]]]
-) -> None:
+def print_live_import_diagnostics(exc: Exception, named_ranges: dict[str, list[list[str]]]) -> None:
     message = str(exc)
     print(f"Import failed: {message}")
     row_match = re.search(r"row (\d+)", message)
@@ -284,7 +288,9 @@ def print_live_import_diagnostics(
         )
 
 
-def value_at(named_ranges: dict[str, list[list[str]]], range_name: str, row_index: int) -> str | None:
+def value_at(
+    named_ranges: dict[str, list[list[str]]], range_name: str, row_index: int
+) -> str | None:
     rows = named_ranges.get(range_name)
     if rows is None or row_index < 0 or row_index >= len(rows):
         return None

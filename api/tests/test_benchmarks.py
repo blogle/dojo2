@@ -24,6 +24,7 @@ from dojo.benchmarks import (
     profile_import,
     run_backend_benchmarks,
 )
+from dojo.migrations import provision_database
 
 
 class TestBackendBenchmarks:
@@ -49,7 +50,9 @@ class TestBackendBenchmarks:
         with Timer() as t:
             service = _create_benchmark_service(dataset_config)
         service.close()
-        print(f"\nImport {dataset_config.label}: {t.elapsed_ms:.2f}ms for {dataset_config.num_transactions} tx")
+        print(
+            f"\nImport {dataset_config.label}: {t.elapsed_ms:.2f}ms for {dataset_config.num_transactions} tx"
+        )
 
     @pytest.mark.parametrize("dataset_config", [DATASET_SMALL, DATASET_MEDIUM], ids=["1K", "10K"])
     def test_import_profile(self, dataset_config) -> None:
@@ -57,7 +60,9 @@ class TestBackendBenchmarks:
         profile = profile_import(dataset_config)
         phase_lines = ", ".join(
             f"{name}={duration:.2f}ms"
-            for name, duration in sorted(profile.phase_timings_ms.items(), key=lambda item: item[1], reverse=True)
+            for name, duration in sorted(
+                profile.phase_timings_ms.items(), key=lambda item: item[1], reverse=True
+            )
         )
         print(
             f"\nImport profile {profile.dataset_label}: {profile.total_ms:.2f}ms total "
@@ -112,9 +117,7 @@ class TestBackendBenchmarks:
         month = service.default_budget_month()
         with Timer() as t:
             result = service.list_categories(month=month, show_hidden=True)
-        print(
-            f"\nlist_categories: {t.elapsed_ms:.2f}ms ({len(result)} categories)"
-        )
+        print(f"\nlist_categories: {t.elapsed_ms:.2f}ms ({len(result)} categories)")
         assert len(result) == dataset_config.num_categories
         service.close()
 
@@ -169,9 +172,7 @@ class TestBackendBenchmarks:
 
         # Measure total handler time for same query
         with Timer() as t:
-            rows = service.db.fetch_all(
-                "SELECT * FROM current_transactions ORDER BY date DESC"
-            )
+            rows = service.db.fetch_all("SELECT * FROM current_transactions ORDER BY date DESC")
         print(f"Total fetch + serialize: {t.elapsed_ms:.2f}ms ({len(rows)} rows)")
         service.close()
 
@@ -202,9 +203,7 @@ class TestBackendBenchmarks:
 
         with Timer() as t:
             result = service.get_net_worth()
-        print(
-            f"\nget_net_worth: {t.elapsed_ms:.2f}ms ({len(result.get('items', []))} items)"
-        )
+        print(f"\nget_net_worth: {t.elapsed_ms:.2f}ms ({len(result.get('items', []))} items)")
         service.close()
 
     @pytest.mark.parametrize("dataset_config", [DATASET_SMALL, DATASET_MEDIUM], ids=["1K", "10K"])
@@ -237,10 +236,15 @@ class TestApiBenchmarks:
 
     def _build_environ(self, tmp_path) -> None:
         import os
-        os.environ["DUCKDB_PATH"] = str(tmp_path / "bench-api.duckdb")
+
+        duckdb_path = tmp_path / "bench-api.duckdb"
+        os.environ["DUCKDB_PATH"] = str(duckdb_path)
         os.environ["SESSION_SECRET"] = "bench-secret"
         os.environ["DEV_FIXTURE_MODE"] = "true"
-        os.environ["GOOGLE_OAUTH_REDIRECT_URI"] = "http://localhost:8000/api/onboarding/google/callback"
+        os.environ["GOOGLE_OAUTH_REDIRECT_URI"] = (
+            "http://localhost:8000/api/onboarding/google/callback"
+        )
+        provision_database(str(duckdb_path))
         get_settings.cache_clear()
         reload(main_module)
 
@@ -265,67 +269,100 @@ class TestApiBenchmarks:
 
     def test_api_transactions_benchmark(self, tmp_path) -> None:
         """Benchmark GET /api/transactions with endpoint timing and payload size."""
+
         def run(client):
             client.post("/api/import/google-sheet", json={"sheet_url_or_id": "fixture://default"})
             for limit in (20, 100, 500):
                 self._bench_get(
-                    client, "/api/transactions", f"GET /api/transactions?limit={limit}",
+                    client,
+                    "/api/transactions",
+                    f"GET /api/transactions?limit={limit}",
                     params={"limit": limit, "show_hidden": "true"},
                 )
+
         self._run_with_client(tmp_path, run)
 
     def test_api_budget_benchmark(self, tmp_path) -> None:
         """Benchmark GET /api/budget."""
+
         def run(client):
             client.post("/api/import/google-sheet", json={"sheet_url_or_id": "fixture://default"})
             self._bench_get(
-                client, "/api/budget", "GET /api/budget",
+                client,
+                "/api/budget",
+                "GET /api/budget",
                 params={"month": "2026-02", "show_hidden": "true"},
             )
+
         self._run_with_client(tmp_path, run)
 
     def test_api_accounts_benchmark(self, tmp_path) -> None:
         """Benchmark GET /api/accounts."""
+
         def run(client):
             client.post("/api/import/google-sheet", json={"sheet_url_or_id": "fixture://default"})
-            self._bench_get(client, "/api/accounts", "GET /api/accounts", params={"show_hidden": "true"})
+            self._bench_get(
+                client, "/api/accounts", "GET /api/accounts", params={"show_hidden": "true"}
+            )
+
         self._run_with_client(tmp_path, run)
 
     def test_api_categories_benchmark(self, tmp_path) -> None:
         """Benchmark GET /api/categories."""
+
         def run(client):
             client.post("/api/import/google-sheet", json={"sheet_url_or_id": "fixture://default"})
             self._bench_get(
-                client, "/api/categories", "GET /api/categories",
+                client,
+                "/api/categories",
+                "GET /api/categories",
                 params={"month": "2026-02", "show_hidden": "true"},
             )
+
         self._run_with_client(tmp_path, run)
 
     def test_api_net_worth_benchmark(self, tmp_path) -> None:
         """Benchmark GET /api/net-worth."""
+
         def run(client):
             client.post("/api/import/google-sheet", json={"sheet_url_or_id": "fixture://default"})
             self._bench_get(client, "/api/net-worth", "GET /api/net-worth")
+
         self._run_with_client(tmp_path, run)
 
     def test_api_bootstrap_benchmark(self, tmp_path) -> None:
         """Benchmark GET /api/bootstrap (the most expensive initial load)."""
+
         def run(client):
             client.post("/api/import/google-sheet", json={"sheet_url_or_id": "fixture://default"})
             self._bench_get(client, "/api/bootstrap", "GET /api/bootstrap")
+
         self._run_with_client(tmp_path, run)
 
     def test_api_payload_size_report(self, tmp_path) -> None:
         """Print payload sizes for all major endpoints."""
+
         def run(client):
             client.post("/api/import/google-sheet", json={"sheet_url_or_id": "fixture://default"})
 
             endpoints = [
-                ("GET /api/transactions?limit=50", "/api/transactions", {"limit": "50", "show_hidden": "true"}),
-                ("GET /api/transactions?limit=500", "/api/transactions", {"limit": "500", "show_hidden": "true"}),
+                (
+                    "GET /api/transactions?limit=50",
+                    "/api/transactions",
+                    {"limit": "50", "show_hidden": "true"},
+                ),
+                (
+                    "GET /api/transactions?limit=500",
+                    "/api/transactions",
+                    {"limit": "500", "show_hidden": "true"},
+                ),
                 ("GET /api/budget", "/api/budget", {"month": "2026-02", "show_hidden": "true"}),
                 ("GET /api/accounts", "/api/accounts", {"show_hidden": "true"}),
-                ("GET /api/categories", "/api/categories", {"month": "2026-02", "show_hidden": "true"}),
+                (
+                    "GET /api/categories",
+                    "/api/categories",
+                    {"month": "2026-02", "show_hidden": "true"},
+                ),
                 ("GET /api/net-worth", "/api/net-worth", None),
                 ("GET /api/bootstrap", "/api/bootstrap", None),
             ]
@@ -340,4 +377,5 @@ class TestApiBenchmarks:
                 items = body.get("items") or body.get("groups") or [body]
                 row_count = len(items) if isinstance(items, list) else 1
                 print(f"{label:<50} {row_count:<10} {len(body_str):<10}")
+
         self._run_with_client(tmp_path, run)

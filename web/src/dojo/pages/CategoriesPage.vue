@@ -26,14 +26,15 @@ function updateSortOrder(category: Category, sortOrder: number): void {
       subtitle="Manage groups, categories, order, and hidden state."
     />
     <div class="editor-grid">
-      <Panel
-        ><CategoryGroupEditor @submit="app.saveCategoryGroup($event)"
-      /></Panel>
-      <Panel
-        ><CategoryEditor
+      <Panel>
+        <CategoryGroupEditor @submit="app.saveCategoryGroup($event)" />
+      </Panel>
+      <Panel>
+        <CategoryEditor
           :groups="app.state.categoryGroups"
           @submit="app.saveCategory($event)"
-      /></Panel>
+        />
+      </Panel>
     </div>
     <Panel>
       <table class="category-table">

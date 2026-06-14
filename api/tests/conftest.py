@@ -3,11 +3,18 @@ from __future__ import annotations
 import pytest
 
 from dojo.service import DojoService
+from tests.support.clock import MutableClock, default_test_clock
+from tests.support.database import build_service
 
 
 @pytest.fixture
-def service(tmp_path) -> DojoService:
-    dojo_service = DojoService(str(tmp_path / "dojo-test.duckdb"))
+def clock() -> MutableClock:
+    return default_test_clock()
+
+
+@pytest.fixture
+def service(tmp_path, clock: MutableClock) -> DojoService:
+    dojo_service = build_service(tmp_path, clock)
     yield dojo_service
     dojo_service.close()
 

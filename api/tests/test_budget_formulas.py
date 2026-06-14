@@ -4,6 +4,7 @@ from datetime import date
 
 from dojo.fixture_data import DEFAULT_FIXTURE
 from dojo.service import DojoService
+from tests.support.clock import MutableClock
 
 
 def test_fixture_import_succeeds(imported_service: DojoService) -> None:
@@ -103,7 +104,9 @@ def test_status_toggle_changes_pending_and_cleared_without_changing_actual(
     assert before["cleared_balance_minor"] - 4000 == after["cleared_balance_minor"]
 
 
-def test_transaction_edit_and_delete_preserve_history(imported_service: DojoService) -> None:
+def test_transaction_edit_and_delete_preserve_history(
+    imported_service: DojoService, clock: MutableClock
+) -> None:
     account_id = imported_service.list_accounts(show_hidden=True)[0]["account_id"]
     created = imported_service.create_transaction(
         {
@@ -123,6 +126,7 @@ def test_transaction_edit_and_delete_preserve_history(imported_service: DojoServ
     assert original is not None
     original_valid_from = original["valid_from"]
 
+    clock.advance(seconds=1)
     imported_service.update_transaction(
         transaction_id,
         {
@@ -147,6 +151,7 @@ def test_transaction_edit_and_delete_preserve_history(imported_service: DojoServ
     assert as_of_before_edit == {"amount_minor": -1234, "status": "PENDING"}
     assert current == {"amount_minor": -999, "status": "CLEARED"}
 
+    clock.advance(seconds=1)
     imported_service.delete_transaction(transaction_id)
     assert (
         imported_service.db.fetch_one(

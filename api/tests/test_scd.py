@@ -8,6 +8,7 @@ import duckdb
 
 from dojo.constants import MAX_TS
 from dojo.database import Database
+from dojo.migrations import apply_migrations
 from dojo.scd import (
     as_of_predicate,
     close_current_version,
@@ -26,6 +27,7 @@ def ts(value: str) -> datetime:
 def test_scd_current_and_as_of_query_semantics() -> None:
     database = Database(":memory:")
     try:
+        apply_migrations(database.connection)
         with database.transaction() as connection:
             insert_version(
                 connection,
@@ -80,6 +82,7 @@ def test_scd_current_and_as_of_query_semantics() -> None:
 def test_scd_edit_semantics() -> None:
     database = Database(":memory:")
     try:
+        apply_migrations(database.connection)
         with database.transaction() as connection:
             insert_version(
                 connection,
@@ -126,6 +129,7 @@ def test_scd_edit_semantics() -> None:
 def test_scd_delete_semantics() -> None:
     database = Database(":memory:")
     try:
+        apply_migrations(database.connection)
         with database.transaction() as connection:
             insert_version(
                 connection,
@@ -189,6 +193,12 @@ CREATE TABLE transactions (
 )
 """
         )
+    finally:
+        connection.close()
+
+    connection = duckdb.connect(str(db_path))
+    try:
+        apply_migrations(connection)
     finally:
         connection.close()
 
