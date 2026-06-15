@@ -1,3 +1,12 @@
+---
+name: dojo-nix-boundaries
+description: Rules for working within the dojo project's Nix-based hermetic build environment. Use when encountering build failures, linker errors, missing dependencies, or when setting up the development environment.
+license: MIT
+metadata:
+  scope: dojo
+  environment: nix
+---
+
 # Dojo Nix Boundaries
 
 1. Always enter the Nix dev shell before running repo commands.
