@@ -301,12 +301,12 @@ def check_sql_construction(paths: Iterable[Path]) -> list[Violation]:
                 )
                 continue
             query_literal = _string_literal(query_arg)
-            if query_literal and len(query_literal) >= 120 and SQL_KEYWORD.search(query_literal):
+            if query_literal and SQL_KEYWORD.search(query_literal):
                 violations.append(
                     Violation(
                         rel,
                         query_arg.lineno,
-                        "large inline SQL must live in api/src/dojo/sql/*.sql",
+                        "SQL queries must live in api/src/dojo/sql/*.sql",
                     )
                 )
         for node in ast.walk(tree):
@@ -410,7 +410,7 @@ def collect_repository_policy_violations() -> list[Violation]:
         SRC_ROOT / "aggregate_validation.py",
         SRC_ROOT / "importer.py",
     ]
-    sql_files = sql_files_under(REPO_ROOT)
+    sql_files = sql_files_under(APPROVED_SQL_ROOT)
 
     violations = [
         *check_direct_duckdb_connect(python_files),

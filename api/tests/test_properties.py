@@ -12,6 +12,7 @@ from hypothesis import strategies as st
 from dojo.constants import STATUS_CLEARED, STATUS_PENDING, SYSTEM_ATB_BUCKET_ID
 from dojo.migrations import provision_database
 from dojo.service import DojoService
+from dojo.sql import render_sql
 from tests.support.clock import MutableClock, default_test_clock
 from tests.support.scd_invariants import (
     assert_history_preserved_after_edit,
@@ -165,7 +166,13 @@ def test_transfers_preserve_current_net_worth(amount_minor: int) -> None:
         assert after == before
 
         rows = imported_service.db.fetch_all(
-            "SELECT transaction_id, amount_minor, valid_from FROM current_transactions WHERE transaction_id IN (?, ?) ORDER BY transaction_id",
+            render_sql(
+                "templates/select_columns_where_ordered",
+                columns="transaction_id, amount_minor, valid_from",
+                table="current_transactions",
+                predicate="transaction_id IN (?, ?)",
+                order_by="transaction_id",
+            ),
             (result["source_transaction_id"], result["destination_transaction_id"]),
         )
         assert sorted(row["amount_minor"] for row in rows) == [-amount_minor, amount_minor]
@@ -201,7 +208,12 @@ def test_transaction_edits_and_voids_preserve_scd_history(
         )
         transaction_id = str(created["transaction_id"])
         original_row = imported_service.db.fetch_one(
-            "SELECT valid_from, amount_minor, status FROM current_transactions WHERE transaction_id = ?",
+            render_sql(
+                "templates/select_columns_where",
+                columns="valid_from, amount_minor, status",
+                table="current_transactions",
+                predicate="transaction_id = ?",
+            ),
             (transaction_id,),
         )
         assert original_row is not None

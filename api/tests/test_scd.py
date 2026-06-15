@@ -16,6 +16,7 @@ from dojo.scd import (
     insert_version,
     replace_current_version,
 )
+from dojo.sql import load_sql, render_sql
 
 ACCOUNT_ID = "11111111-1111-1111-1111-111111111111"
 
@@ -62,13 +63,30 @@ def test_scd_current_and_as_of_query_semantics() -> None:
                 },
             )
 
-        current = database.fetch_one(f"SELECT name FROM accounts WHERE {current_predicate()}")
+        current = database.fetch_one(
+            render_sql(
+                "templates/select_columns_where",
+                columns="name",
+                table="accounts",
+                predicate=current_predicate(),
+            )
+        )
         january = database.fetch_one(
-            f"SELECT name FROM accounts WHERE {as_of_predicate(alias='accounts', as_of_placeholder='?')}",
+            render_sql(
+                "templates/select_columns_where",
+                columns="name",
+                table="accounts",
+                predicate=as_of_predicate(alias="accounts", as_of_placeholder="?"),
+            ),
             (ts("2026-01-15T00:00:00+00:00"), ts("2026-01-15T00:00:00+00:00")),
         )
         february = database.fetch_one(
-            f"SELECT name FROM accounts WHERE {as_of_predicate(alias='accounts', as_of_placeholder='?')}",
+            render_sql(
+                "templates/select_columns_where",
+                columns="name",
+                table="accounts",
+                predicate=as_of_predicate(alias="accounts", as_of_placeholder="?"),
+            ),
             (ts("2026-02-15T00:00:00+00:00"), ts("2026-02-15T00:00:00+00:00")),
         )
 
@@ -118,7 +136,14 @@ def test_scd_edit_semantics() -> None:
                 now=ts("2026-02-01T00:00:00+00:00"),
             )
 
-        rows = database.fetch_all("SELECT name, valid_to FROM accounts ORDER BY valid_from")
+        rows = database.fetch_all(
+            render_sql(
+                "templates/select_columns_ordered",
+                columns="name, valid_to",
+                table="accounts",
+                order_by="valid_from",
+            )
+        )
         assert rows[0]["name"] == "Checking"
         assert rows[1]["name"] == "Checking Prime"
         assert rows[1]["valid_to"] == ts(MAX_TS.replace(" ", "T"))
@@ -155,9 +180,24 @@ def test_scd_delete_semantics() -> None:
                 now=ts("2026-02-01T00:00:00+00:00"),
             )
 
-        assert database.fetch_one(f"SELECT name FROM accounts WHERE {current_predicate()}") is None
+        assert (
+            database.fetch_one(
+                render_sql(
+                    "templates/select_columns_where",
+                    columns="name",
+                    table="accounts",
+                    predicate=current_predicate(),
+                )
+            )
+            is None
+        )
         historical = database.fetch_one(
-            f"SELECT name FROM accounts WHERE {as_of_predicate(alias='accounts', as_of_placeholder='?')}",
+            render_sql(
+                "templates/select_columns_where",
+                columns="name",
+                table="accounts",
+                predicate=as_of_predicate(alias="accounts", as_of_placeholder="?"),
+            ),
             (ts("2026-01-15T00:00:00+00:00"), ts("2026-01-15T00:00:00+00:00")),
         )
         assert historical == {"name": "Checking"}
@@ -169,30 +209,7 @@ def test_database_migrates_legacy_transaction_category_constraint(tmp_path: Path
     db_path = tmp_path / "legacy-transactions.duckdb"
     connection = duckdb.connect(str(db_path))
     try:
-        connection.execute(
-            """
-CREATE TABLE transactions (
-    row_id UUID PRIMARY KEY,
-    transaction_id UUID NOT NULL,
-    date DATE NOT NULL,
-    account_id UUID NOT NULL,
-    amount_minor BIGINT NOT NULL,
-    category_id UUID,
-    system_category TEXT,
-    status TEXT NOT NULL,
-    memo TEXT,
-    valid_from TIMESTAMPTZ NOT NULL,
-    valid_to TIMESTAMPTZ NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL,
-    created_by_user_id UUID,
-    CHECK (
-        (category_id IS NOT NULL AND system_category IS NULL)
-        OR
-        (category_id IS NULL AND system_category IS NOT NULL)
-    )
-)
-"""
-        )
+        connection.execute(load_sql("tests/create_legacy_transactions_table"))
     finally:
         connection.close()
 
@@ -205,7 +222,8 @@ CREATE TABLE transactions (
     database = Database(str(db_path))
     try:
         transaction_table = database.fetch_one(
-            "SELECT sql FROM duckdb_tables() WHERE table_name = 'transactions'"
+            load_sql("queries/duckdb_table_sql_by_name"),
+            ("transactions",),
         )
         assert transaction_table is not None
         sql = re.sub(r"\s+", " ", str(transaction_table["sql"]))

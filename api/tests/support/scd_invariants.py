@@ -4,11 +4,18 @@ from datetime import datetime
 from typing import Any
 
 from dojo.constants import MAX_TS
+from dojo.sql import render_sql
 
 
 def _rows(db: Any, table: str, logical_column: str, logical_id: str) -> list[dict[str, Any]]:
     return db.fetch_all(
-        f"SELECT * FROM {table} WHERE {logical_column} = ? ORDER BY valid_from, created_at, row_id",
+        render_sql(
+            "templates/select_columns_where_ordered",
+            columns="*",
+            table=table,
+            predicate=f"{logical_column} = ?",
+            order_by="valid_from, created_at, row_id",
+        ),
         (logical_id,),
     )
 
@@ -28,7 +35,12 @@ def assert_single_current_version(
     db: Any, table: str, logical_column: str, logical_id: str
 ) -> dict[str, Any]:
     rows = db.fetch_all(
-        f"SELECT * FROM {table} WHERE {logical_column} = ? AND valid_to = TIMESTAMPTZ '{MAX_TS}'",
+        render_sql(
+            "templates/select_columns_where",
+            columns="*",
+            table=table,
+            predicate=f"{logical_column} = ? AND valid_to = TIMESTAMPTZ '{MAX_TS}'",
+        ),
         (logical_id,),
     )
     assert (
@@ -39,7 +51,12 @@ def assert_single_current_version(
 
 def assert_no_current_version(db: Any, table: str, logical_column: str, logical_id: str) -> None:
     rows = db.fetch_all(
-        f"SELECT * FROM {table} WHERE {logical_column} = ? AND valid_to = TIMESTAMPTZ '{MAX_TS}'",
+        render_sql(
+            "templates/select_columns_where",
+            columns="*",
+            table=table,
+            predicate=f"{logical_column} = ? AND valid_to = TIMESTAMPTZ '{MAX_TS}'",
+        ),
         (logical_id,),
     )
     assert (
@@ -56,7 +73,12 @@ def assert_as_of_version(
     expected: dict[str, Any],
 ) -> dict[str, Any]:
     row = db.fetch_one(
-        f"SELECT * FROM {table} WHERE {logical_column} = ? AND valid_from <= ? AND ? < valid_to",
+        render_sql(
+            "templates/select_columns_where",
+            columns="*",
+            table=table,
+            predicate=f"{logical_column} = ? AND valid_from <= ? AND ? < valid_to",
+        ),
         (logical_id, as_of, as_of),
     )
     assert (

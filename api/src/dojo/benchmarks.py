@@ -11,6 +11,7 @@ from dojo.clock import SystemClock
 from dojo.database import Database, json_dumps
 from dojo.migrations import apply_migrations
 from dojo.service import DojoService
+from dojo.sql import load_sql, render_sql
 
 
 @dataclass
@@ -56,9 +57,9 @@ class Timer:
 
 def explain_analyze(db: Database, query: str, params: tuple[Any, ...] = ()) -> ExplainAnalyzeResult:
     plan_rows = (
-        db.fetch_all(f"EXPLAIN ANALYZE {query}", params)
+        db.fetch_all(render_sql("templates/explain_analyze", query=query), params)
         if params
-        else db.fetch_all(f"EXPLAIN ANALYZE {query}")
+        else db.fetch_all(render_sql("templates/explain_analyze", query=query))
     )
     plan_text = "\n".join(
         row.get("explain_key", "") if "explain_key" in row else list(row.values())[0]
@@ -105,7 +106,7 @@ def profile_import(config: Any) -> ImportProfile:
                 service.snapshot_for_validation(list(dataset_description["months"]))
             with Timer() as record_timer:
                 connection.execute(
-                    "INSERT INTO import_batches (import_batch_id, spreadsheet_id, spreadsheet_title, imported_at, cutover_at, summary) VALUES (?, ?, ?, ?, ?, CAST(? AS JSON))",
+                    load_sql("queries/insert_import_batch"),
                     (
                         str(uuid4()),
                         bundle.spreadsheet_id,

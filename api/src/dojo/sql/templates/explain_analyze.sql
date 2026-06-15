@@ -1,0 +1,1 @@
+EXPLAIN ANALYZE {query}

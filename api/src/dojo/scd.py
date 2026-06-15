@@ -7,16 +7,21 @@ from uuid import uuid4
 from duckdb import DuckDBPyConnection
 
 from dojo.constants import MAX_TS
+from dojo.sql import render_sql
 
 
 def current_predicate(alias: str = "") -> str:
     prefix = f"{alias}." if alias else ""
-    return f"{prefix}valid_to = TIMESTAMPTZ '{MAX_TS}'"
+    return render_sql("templates/current_predicate", prefix=prefix, max_ts=MAX_TS)
 
 
 def as_of_predicate(as_of_placeholder: str = "?", alias: str = "") -> str:
     prefix = f"{alias}." if alias else ""
-    return f"{prefix}valid_from <= {as_of_placeholder} AND {as_of_placeholder} < {prefix}valid_to"
+    return render_sql(
+        "templates/as_of_predicate",
+        prefix=prefix,
+        as_of_placeholder=as_of_placeholder,
+    )
 
 
 def insert_version(
@@ -29,7 +34,13 @@ def insert_version(
     columns = ", ".join(data.keys())
     placeholders = ", ".join(["?"] * len(data))
     connection.execute(
-        f"INSERT INTO {table} ({columns}) VALUES ({placeholders})", tuple(data.values())
+        render_sql(
+            "templates/insert_version",
+            table=table,
+            columns=columns,
+            placeholders=placeholders,
+        ),
+        tuple(data.values()),
     )
 
 
@@ -59,7 +70,14 @@ def batch_insert_versions(
         values_clause = ", ".join(
             "(" + ", ".join(_sql_literal(v) for v in row.values()) + ")" for row in batch
         )
-        connection.execute(f"INSERT INTO {table} ({columns}) VALUES {values_clause}")
+        connection.execute(
+            render_sql(
+                "templates/batch_insert_versions",
+                table=table,
+                columns=columns,
+                values_clause=values_clause,
+            )
+        )
 
 
 def replace_current_version(
@@ -72,7 +90,12 @@ def replace_current_version(
     now: datetime,
 ) -> None:
     connection.execute(
-        f"UPDATE {table} SET valid_to = ? WHERE {logical_column} = ? AND valid_to = TIMESTAMPTZ '{MAX_TS}'",
+        render_sql(
+            "templates/close_current_version",
+            table=table,
+            logical_column=logical_column,
+            max_ts=MAX_TS,
+        ),
         (now, logical_id),
     )
     insert_version(connection, table, replacement | {"valid_from": now, "valid_to": MAX_TS})
@@ -87,6 +110,11 @@ def close_current_version(
     now: datetime,
 ) -> None:
     connection.execute(
-        f"UPDATE {table} SET valid_to = ? WHERE {logical_column} = ? AND valid_to = TIMESTAMPTZ '{MAX_TS}'",
+        render_sql(
+            "templates/close_current_version",
+            table=table,
+            logical_column=logical_column,
+            max_ts=MAX_TS,
+        ),
         (now, logical_id),
     )

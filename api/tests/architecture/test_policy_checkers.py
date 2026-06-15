@@ -23,6 +23,13 @@ def write_source(tmp_path: Path, relative_path: str, source: str) -> Path:
     return path
 
 
+FIXTURE_ROOT = Path(__file__).resolve().parents[1] / "fixtures"
+
+
+def read_fixture(name: str) -> str:
+    return (FIXTURE_ROOT / name).read_text(encoding="utf-8")
+
+
 def messages(violations: list[Violation]) -> str:
     return format_violations(violations)
 
@@ -70,7 +77,7 @@ def test_sql_construction_checker_catches_fstrings(tmp_path: Path) -> None:
     path = write_source(
         tmp_path,
         "api/src/dojo/service.py",
-        "def bad(db, table_name):\n    db.fetch_all(f'SELECT * FROM {table_name}')\n",
+        read_fixture("bad_sql_fstring_source.py.txt"),
     )
     violations = check_sql_construction([path])
     assert len(violations) == 1
@@ -81,7 +88,7 @@ def test_money_schema_checker_catches_float_money_columns(tmp_path: Path) -> Non
     path = write_source(
         tmp_path,
         "api/src/dojo/sql/schema/bad.sql",
-        "CREATE TABLE IF NOT EXISTS budgets (\n    budget_id UUID,\n    amount_minor DOUBLE,\n    notes TEXT\n);\n",
+        read_fixture("bad_money_schema.sql"),
     )
     violations = check_money_schema([path])
     assert len(violations) == 1

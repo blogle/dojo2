@@ -6,6 +6,7 @@ import dojo.api.main as main_module
 from dojo.api.settings import get_settings
 from dojo.database import Database
 from dojo.migrations import provision_database
+from dojo.sql import load_sql
 
 
 def test_current_migration_set_provisions_fresh_database(tmp_path) -> None:
@@ -14,8 +15,7 @@ def test_current_migration_set_provisions_fresh_database(tmp_path) -> None:
     database = Database(str(duckdb_path))
     try:
         tables = {
-            row["table_name"]
-            for row in database.fetch_all("SELECT table_name FROM duckdb_tables()")
+            row["table_name"] for row in database.fetch_all(load_sql("queries/duckdb_table_names"))
         }
         assert {
             "import_runs",

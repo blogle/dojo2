@@ -72,9 +72,7 @@ class DojoService:
 
     def _assert_schema_ready(self) -> None:
         try:
-            row = self.db.fetch_one(
-                "SELECT table_name FROM duckdb_tables() WHERE table_name = 'import_runs'"
-            )
+            row = self.db.fetch_one(load_sql("queries/schema_has_import_runs"))
         except duckdb.Error as exc:
             raise RuntimeError(
                 "Failed to inspect the DuckDB schema before service startup"
@@ -88,7 +86,7 @@ class DojoService:
         now = self.clock.now()
         with self.db.transaction() as connection:
             group_count_row = connection.execute(
-                "SELECT COUNT(*) FROM current_category_groups WHERE group_id = ?",
+                load_sql("queries/count_current_category_group_by_id"),
                 (str(SYSTEM_CREDIT_CARD_GROUP_ID),),
             ).fetchone()
             if group_count_row is not None and group_count_row[0] == 0:
@@ -109,7 +107,7 @@ class DojoService:
                     },
                 )
             bucket_count_row = connection.execute(
-                "SELECT COUNT(*) FROM current_budget_buckets WHERE bucket_id = ?",
+                load_sql("queries/count_current_budget_bucket_by_id"),
                 (str(SYSTEM_ATB_BUCKET_ID),),
             ).fetchone()
             if bucket_count_row is not None and bucket_count_row[0] == 0:
@@ -130,9 +128,7 @@ class DojoService:
                 )
 
     def get_app_status(self) -> dict[str, Any]:
-        latest_batch = self.db.fetch_one(
-            "SELECT * FROM import_batches ORDER BY imported_at DESC LIMIT 1"
-        )
+        latest_batch = self.db.fetch_one(load_sql("queries/latest_import_batch"))
         latest_run = self.get_import_status()
         return {
             "app": "dojo",
@@ -144,7 +140,7 @@ class DojoService:
         }
 
     def get_import_status(self) -> dict[str, Any] | None:
-        row = self.db.fetch_one("SELECT * FROM import_runs ORDER BY started_at DESC LIMIT 1")
+        row = self.db.fetch_one(load_sql("queries/latest_import_run"))
         if row is None:
             return None
         decoded = self._decode_json_fields(row, {"summary", "validation_report"})
@@ -242,9 +238,7 @@ class DojoService:
         )
         return {
             "ok": True,
-            "import_batch": self.db.fetch_one(
-                "SELECT * FROM import_batches ORDER BY imported_at DESC LIMIT 1"
-            ),
+            "import_batch": self.db.fetch_one(load_sql("queries/latest_import_batch")),
             "validation_report": validation_report,
             "app_status": self.get_app_status(),
         }
@@ -282,7 +276,7 @@ class DojoService:
             "accounts",
             "import_batches",
         ):
-            connection.execute(f"DELETE FROM {table}")
+            connection.execute(render_sql("templates/delete_from_table", table=table))
 
     def _insert_bundle(
         self,
@@ -663,7 +657,7 @@ class DojoService:
             ),
             "category_count": len(default_categories),
             "net_worth_valuation_rows": len(
-                self.db.fetch_all("SELECT * FROM current_net_worth_valuations")
+                self.db.fetch_all(load_sql("queries/current_net_worth_valuations"))
             ),
             "account_balances": account_balances,
             "atb_available_minor": self.compute_available_to_budget(),
@@ -784,23 +778,31 @@ class DojoService:
             hidden_account_ids = {aid for aid, a in accounts.items() if a["is_hidden"]}
             hidden_category_ids = {cid for cid, c in categories.items() if c["is_hidden"]}
 
-        where_clause = ""
+        account_placeholders = ",".join("?" for _ in hidden_account_ids)
+        category_placeholders = ",".join("?" for _ in hidden_category_ids)
+        total_query_name = "queries/list_transactions_count_all"
+        page_query_name = "queries/list_transactions_page_all"
         total_params: tuple[str, ...] = ()
-        if hidden_account_ids or hidden_category_ids:
-            filters: list[str] = []
-            params: list[str] = []
-            if hidden_account_ids:
-                placeholders = ",".join("?" for _ in hidden_account_ids)
-                filters.append(f"account_id NOT IN ({placeholders})")
-                params.extend(str(h) for h in hidden_account_ids)
-            if hidden_category_ids:
-                placeholders = ",".join("?" for _ in hidden_category_ids)
-                filters.append(f"(category_id IS NULL OR category_id NOT IN ({placeholders}))")
-                params.extend(str(h) for h in hidden_category_ids)
-            where_clause = "WHERE " + " AND ".join(filters)
-            total_params = tuple(params)
+        if hidden_account_ids and hidden_category_ids:
+            total_query_name = "queries/list_transactions_count_hidden_accounts_and_categories"
+            page_query_name = "queries/list_transactions_page_hidden_accounts_and_categories"
+            total_params = tuple(
+                [*(str(h) for h in hidden_account_ids), *(str(h) for h in hidden_category_ids)]
+            )
+        elif hidden_account_ids:
+            total_query_name = "queries/list_transactions_count_hidden_accounts"
+            page_query_name = "queries/list_transactions_page_hidden_accounts"
+            total_params = tuple(str(h) for h in hidden_account_ids)
+        elif hidden_category_ids:
+            total_query_name = "queries/list_transactions_count_hidden_categories"
+            page_query_name = "queries/list_transactions_page_hidden_categories"
+            total_params = tuple(str(h) for h in hidden_category_ids)
         total = self.db.fetch_one(
-            render_sql("queries/list_transactions_count", where_clause=where_clause),
+            render_sql(
+                total_query_name,
+                account_placeholders=account_placeholders,
+                category_placeholders=category_placeholders,
+            ),
             total_params,
         )
         total_count = total["cnt"] if total else 0
@@ -810,8 +812,9 @@ class DojoService:
         query_params.append(offset)
         rows = self.db.fetch_all(
             render_sql(
-                "queries/list_transactions_page",
-                where_clause=where_clause,
+                page_query_name,
+                account_placeholders=account_placeholders,
+                category_placeholders=category_placeholders,
                 sort_expression=sort_expression,
             ),
             tuple(query_params),
@@ -902,9 +905,7 @@ class DojoService:
         tx_by_category: dict[str, int] = defaultdict(int)
         tx_month_activity: dict[str, int] = defaultdict(int)
         tx_pre_month: dict[str, int] = defaultdict(int)
-        for t in self.db.fetch_all(
-            "SELECT category_id, amount_minor, date FROM current_transactions WHERE category_id IS NOT NULL"
-        ):
+        for t in self.db.fetch_all(load_sql("queries/current_transactions_category_amount_date")):
             cid = t["category_id"]
             amt = t["amount_minor"]
             tx_by_category[cid] += amt
@@ -920,9 +921,7 @@ class DojoService:
         alloc_month_from: dict[str, int] = defaultdict(int)
         alloc_pre_to: dict[str, int] = defaultdict(int)
         alloc_pre_from: dict[str, int] = defaultdict(int)
-        for a in self.db.fetch_all(
-            "SELECT from_bucket_id, to_bucket_id, amount_minor, date FROM current_allocations"
-        ):
+        for a in self.db.fetch_all(load_sql("queries/current_allocations_amount_date")):
             amt = a["amount_minor"]
             alloc_to_bucket[a["to_bucket_id"]] += amt
             alloc_from_bucket[a["from_bucket_id"]] += amt
@@ -939,12 +938,12 @@ class DojoService:
         for cid, setting in settings.items():
             account_id = setting["account_id"]
             for t in self.db.fetch_all(
-                "SELECT amount_minor, system_category FROM current_transactions WHERE account_id = ? AND category_id IS NOT NULL",
+                load_sql("queries/current_transactions_by_account_categorized"),
                 (account_id,),
             ):
                 cc_spend_by_cat[cid] += -t["amount_minor"]
             for t in self.db.fetch_all(
-                "SELECT amount_minor FROM current_transactions WHERE account_id = ? AND system_category = ? AND amount_minor > 0",
+                load_sql("queries/current_transactions_by_account_positive_system_category"),
                 (account_id, SYSTEM_CATEGORY_TRANSFER),
             ):
                 cc_transfer_adj_by_cat[cid] += -t["amount_minor"]
@@ -1169,7 +1168,7 @@ class DojoService:
     def update_transaction(self, transaction_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         self._validate_transaction_payload(payload)
         current = self.db.fetch_one(
-            "SELECT * FROM current_transactions WHERE transaction_id = ?",
+            load_sql("queries/current_transaction_by_id"),
             (transaction_id,),
         )
         if current is None:
@@ -1302,7 +1301,8 @@ class DojoService:
 
     def update_account(self, account_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         current = self.db.fetch_one(
-            "SELECT * FROM current_accounts WHERE account_id = ?", (account_id,)
+            load_sql("queries/current_account_by_id"),
+            (account_id,),
         )
         if current is None:
             raise ValueError("Account not found")
@@ -1349,7 +1349,8 @@ class DojoService:
 
     def update_category_group(self, group_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         current = self.db.fetch_one(
-            "SELECT * FROM current_category_groups WHERE group_id = ?", (group_id,)
+            load_sql("queries/current_category_group_by_id"),
+            (group_id,),
         )
         if current is None:
             raise ValueError("Category group not found")
@@ -1418,7 +1419,8 @@ class DojoService:
 
     def update_category(self, category_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         current = self.db.fetch_one(
-            "SELECT * FROM current_categories WHERE category_id = ?", (category_id,)
+            load_sql("queries/current_category_by_id"),
+            (category_id,),
         )
         if current is None:
             raise ValueError("Category not found")
@@ -1460,9 +1462,7 @@ class DojoService:
                 SYSTEM_CATEGORY_BALANCE_ADJUSTMENT,
             ),
         )
-        allocations = self.db.fetch_all(
-            "SELECT from_bucket_id, to_bucket_id, amount_minor FROM current_allocations"
-        )
+        allocations = self.db.fetch_all(load_sql("queries/current_allocations_amount_only"))
         total = 0
         for transaction in transactions:
             if transaction["system_category"] == SYSTEM_CATEGORY_STARTING_BALANCE:
@@ -1479,15 +1479,14 @@ class DojoService:
 
     def compute_category_available(self, category_id: str) -> int:
         category = self.db.fetch_one(
-            "SELECT * FROM current_categories WHERE category_id = ?", (category_id,)
+            load_sql("queries/current_category_by_id"),
+            (category_id,),
         )
         if category is None:
             raise ValueError("Category not found")
         bucket_id = self._bucket_id_for_category(category_id)
-        allocations = self.db.fetch_all(
-            "SELECT from_bucket_id, to_bucket_id, amount_minor FROM current_allocations"
-        )
-        transactions = self.db.fetch_all("SELECT * FROM current_transactions")
+        allocations = self.db.fetch_all(load_sql("queries/current_allocations_amount_only"))
+        transactions = self.db.fetch_all(load_sql("queries/current_transactions"))
         if category["category_kind"] == CATEGORY_KIND_STANDARD:
             return self._standard_category_available(
                 category_id, bucket_id, transactions, allocations
@@ -1498,7 +1497,7 @@ class DojoService:
 
     def compute_month_activity(self, category_id: str, month_start: date, month_end: date) -> int:
         transactions = self.db.fetch_all(
-            "SELECT amount_minor, date FROM current_transactions WHERE category_id = ?",
+            load_sql("queries/current_transactions_by_category_amount_date"),
             (category_id,),
         )
         return sum(
@@ -1508,9 +1507,7 @@ class DojoService:
         )
 
     def compute_month_budgeted(self, bucket_id: str, month_start: date, month_end: date) -> int:
-        allocations = self.db.fetch_all(
-            "SELECT from_bucket_id, to_bucket_id, amount_minor, date FROM current_allocations"
-        )
+        allocations = self.db.fetch_all(load_sql("queries/current_allocations_amount_date"))
         total = 0
         for allocation in allocations:
             if not month_start <= allocation["date"] <= month_end:
@@ -1523,12 +1520,10 @@ class DojoService:
 
     def compute_carried_over(self, category_id: str, bucket_id: str, month_start: date) -> int:
         transactions = self.db.fetch_all(
-            "SELECT amount_minor, date FROM current_transactions WHERE category_id = ?",
+            load_sql("queries/current_transactions_by_category_amount_date"),
             (category_id,),
         )
-        allocations = self.db.fetch_all(
-            "SELECT from_bucket_id, to_bucket_id, amount_minor, date FROM current_allocations"
-        )
+        allocations = self.db.fetch_all(load_sql("queries/current_allocations_amount_date"))
         total = int(
             sum(
                 int(transaction["amount_minor"])
@@ -1547,7 +1542,7 @@ class DojoService:
 
     def compute_reportable_income(self, month_start: date, month_end: date) -> int:
         transactions = self.db.fetch_all(
-            "SELECT amount_minor, date FROM current_transactions WHERE system_category = ?",
+            load_sql("queries/current_transactions_by_system_category_amount_date"),
             (SYSTEM_CATEGORY_ATB,),
         )
         return sum(
@@ -1558,10 +1553,11 @@ class DojoService:
 
     def compute_spent(self, month_start: date, month_end: date, *, show_hidden: bool) -> int:
         categories = {
-            row["category_id"]: row for row in self.db.fetch_all("SELECT * FROM current_categories")
+            row["category_id"]: row
+            for row in self.db.fetch_all(load_sql("queries/current_categories"))
         }
         transactions = self.db.fetch_all(
-            "SELECT amount_minor, date, category_id FROM current_transactions WHERE category_id IS NOT NULL"
+            load_sql("queries/current_transactions_amount_date_category")
         )
         spent = 0
         refunds = 0
@@ -1608,7 +1604,7 @@ class DojoService:
         allocations: list[dict[str, Any]],
     ) -> int:
         setting = self.db.fetch_one(
-            "SELECT * FROM current_budget_account_settings WHERE linked_payment_category_id = ?",
+            load_sql("queries/current_budget_account_setting_by_payment_category"),
             (category_id,),
         )
         if setting is None:

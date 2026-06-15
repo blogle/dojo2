@@ -1,0 +1,2 @@
+def bad(db, table_name):
+    db.fetch_all(f'SELECT * FROM {table_name}')

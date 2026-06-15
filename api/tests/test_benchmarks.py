@@ -25,6 +25,7 @@ from dojo.benchmarks import (
     run_backend_benchmarks,
 )
 from dojo.migrations import provision_database
+from dojo.sql import load_sql
 
 
 class TestBackendBenchmarks:
@@ -166,13 +167,15 @@ class TestBackendBenchmarks:
         # Measure raw query time
         explain = explain_analyze(
             service.db,
-            "SELECT * FROM current_transactions ORDER BY date DESC",
+            load_sql("queries/current_transactions_ordered_by_date_desc"),
         )
         print(f"\nEXPLAIN ANALYZE (full tx scan): {explain.duration_ms:.2f}ms query")
 
         # Measure total handler time for same query
         with Timer() as t:
-            rows = service.db.fetch_all("SELECT * FROM current_transactions ORDER BY date DESC")
+            rows = service.db.fetch_all(
+                load_sql("queries/current_transactions_ordered_by_date_desc")
+            )
         print(f"Total fetch + serialize: {t.elapsed_ms:.2f}ms ({len(rows)} rows)")
         service.close()
 

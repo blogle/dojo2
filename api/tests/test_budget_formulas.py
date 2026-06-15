@@ -4,6 +4,7 @@ from datetime import date
 
 from dojo.fixture_data import DEFAULT_FIXTURE
 from dojo.service import DojoService
+from dojo.sql import render_sql
 from tests.support.clock import MutableClock
 
 
@@ -121,7 +122,13 @@ def test_transaction_edit_and_delete_preserve_history(
     )
     transaction_id = created["transaction_id"]
     original = imported_service.db.fetch_one(
-        "SELECT valid_from FROM current_transactions WHERE transaction_id = ?", (transaction_id,)
+        render_sql(
+            "templates/select_columns_where",
+            columns="valid_from",
+            table="current_transactions",
+            predicate="transaction_id = ?",
+        ),
+        (transaction_id,),
     )
     assert original is not None
     original_valid_from = original["valid_from"]
@@ -141,11 +148,21 @@ def test_transaction_edit_and_delete_preserve_history(
     )
 
     as_of_before_edit = imported_service.db.fetch_one(
-        "SELECT amount_minor, status FROM transactions WHERE transaction_id = ? AND valid_from <= ? AND ? < valid_to",
+        render_sql(
+            "templates/select_columns_where",
+            columns="amount_minor, status",
+            table="transactions",
+            predicate="transaction_id = ? AND valid_from <= ? AND ? < valid_to",
+        ),
         (transaction_id, original_valid_from, original_valid_from),
     )
     current = imported_service.db.fetch_one(
-        "SELECT amount_minor, status FROM current_transactions WHERE transaction_id = ?",
+        render_sql(
+            "templates/select_columns_where",
+            columns="amount_minor, status",
+            table="current_transactions",
+            predicate="transaction_id = ?",
+        ),
         (transaction_id,),
     )
     assert as_of_before_edit == {"amount_minor": -1234, "status": "PENDING"}
@@ -155,7 +172,12 @@ def test_transaction_edit_and_delete_preserve_history(
     imported_service.delete_transaction(transaction_id)
     assert (
         imported_service.db.fetch_one(
-            "SELECT transaction_id FROM current_transactions WHERE transaction_id = ?",
+            render_sql(
+                "templates/select_columns_where",
+                columns="transaction_id",
+                table="current_transactions",
+                predicate="transaction_id = ?",
+            ),
             (transaction_id,),
         )
         is None

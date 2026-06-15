@@ -16,6 +16,7 @@ from dojo.constants import (
     SYSTEM_CATEGORY_TRANSFER,
 )
 from dojo.importer import ParsedImportBundle
+from dojo.sql import load_sql
 
 ACCOUNT_RANGE_REFS = [
     "trx_Dates",
@@ -80,9 +81,7 @@ def build_validation_report(service: Any, bundle: ParsedImportBundle) -> dict[st
     actual_categories = _actual_category_snapshots(service, months)
     actual_group_names = [
         row["name"]
-        for row in service.db.fetch_all(
-            "SELECT * FROM current_category_groups ORDER BY sort_order, name"
-        )
+        for row in service.db.fetch_all(load_sql("queries/current_category_groups_ordered"))
     ]
     actual_group_totals = _category_group_totals(actual_group_names, actual_categories, months)
     actual_budget_summaries = _actual_budget_summaries(
@@ -467,23 +466,21 @@ def _collect_months(bundle: ParsedImportBundle) -> list[str]:
 def _actual_category_snapshots(
     service: Any, months: list[str]
 ) -> dict[str, SourceCategorySnapshot]:
-    categories = service.db.fetch_all("SELECT * FROM current_categories ORDER BY sort_order, name")
+    categories = service.db.fetch_all(load_sql("queries/current_categories_ordered"))
     groups = {
         row["group_id"]: row
-        for row in service.db.fetch_all(
-            "SELECT * FROM current_category_groups ORDER BY sort_order, name"
-        )
+        for row in service.db.fetch_all(load_sql("queries/current_category_groups_ordered"))
     }
     accounts = {
-        row["account_id"]: row for row in service.db.fetch_all("SELECT * FROM current_accounts")
+        row["account_id"]: row for row in service.db.fetch_all(load_sql("queries/current_accounts"))
     }
     settings = {
         row["linked_payment_category_id"]: row
-        for row in service.db.fetch_all("SELECT * FROM current_budget_account_settings")
+        for row in service.db.fetch_all(load_sql("queries/current_budget_account_settings"))
         if row["linked_payment_category_id"] is not None
     }
-    transactions = service.db.fetch_all("SELECT * FROM current_transactions")
-    allocations = service.db.fetch_all("SELECT * FROM current_allocations")
+    transactions = service.db.fetch_all(load_sql("queries/current_transactions"))
+    allocations = service.db.fetch_all(load_sql("queries/current_allocations"))
 
     category_name_by_id = {row["category_id"]: row["name"] for row in categories}
     category_kind_by_id = {row["category_id"]: row["category_kind"] for row in categories}
@@ -633,10 +630,11 @@ def _actual_budget_summaries(
     show_hidden: bool,
 ) -> dict[str, dict[str, int]]:
     transactions = service.db.fetch_all(
-        "SELECT amount_minor, date, category_id, system_category FROM current_transactions"
+        load_sql("queries/current_transactions_amount_date_category_system")
     )
     category_rows = {
-        row["category_id"]: row for row in service.db.fetch_all("SELECT * FROM current_categories")
+        row["category_id"]: row
+        for row in service.db.fetch_all(load_sql("queries/current_categories"))
     }
     summaries: dict[str, dict[str, int]] = {}
     for month in months:

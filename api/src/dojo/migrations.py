@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 import duckdb
@@ -19,7 +18,7 @@ def provision_database(path: str) -> None:
         db_path.parent.mkdir(parents=True, exist_ok=True)
     connection = duckdb.connect(path)
     try:
-        connection.execute("SET TimeZone = 'UTC'")
+        connection.execute(load_sql("control/set_timezone_utc"))
         apply_migrations(connection)
     finally:
         connection.close()
@@ -27,12 +26,13 @@ def provision_database(path: str) -> None:
 
 def _migrate_legacy_transaction_constraint(connection: duckdb.DuckDBPyConnection) -> None:
     transaction_table = connection.execute(
-        "SELECT sql FROM duckdb_tables() WHERE table_name = 'transactions'"
+        load_sql("queries/duckdb_table_sql_by_name"),
+        ("transactions",),
     ).fetchone()
     if transaction_table is None:
         return
     sql = str(transaction_table[0] or "")
-    normalized_sql = re.sub(r"\s+", " ", sql).casefold()
+    normalized_sql = " ".join(sql.split()).casefold()
     has_legacy_constraint = (
         "category_id is not null" in normalized_sql
         and "system_category is null" in normalized_sql

@@ -8,6 +8,8 @@ from uuid import UUID
 
 import duckdb
 
+from dojo.sql import load_sql
+
 
 def _json_default(value: Any) -> Any:
     if hasattr(value, "isoformat"):
@@ -28,7 +30,7 @@ def json_dumps(value: Any) -> str:
 class Database:
     def __init__(self, path: str) -> None:
         self._connection = duckdb.connect(path)
-        self._connection.execute("SET TimeZone = 'UTC'")
+        self._connection.execute(load_sql("control/set_timezone_utc"))
         self._lock = RLock()
 
     @property
@@ -62,11 +64,11 @@ class Database:
     @contextmanager
     def transaction(self) -> Iterator[duckdb.DuckDBPyConnection]:
         with self._lock:
-            self._connection.execute("BEGIN")
+            self._connection.execute(load_sql("control/begin"))
             try:
                 yield self._connection
             except Exception:
-                self._connection.execute("ROLLBACK")
+                self._connection.execute(load_sql("control/rollback"))
                 raise
             else:
-                self._connection.execute("COMMIT")
+                self._connection.execute(load_sql("control/commit"))
