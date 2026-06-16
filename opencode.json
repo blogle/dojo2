@@ -4,6 +4,16 @@
     "penpot": {
       "type": "remote",
       "url": "https://penpot.thejeffer.net/mcp/stream?userToken={env:PENPOT_API_KEY}"
+    },
+    "chrome-devtools": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "chrome-devtools-mcp@latest",
+        "--executablePath",
+        "/home/ogle/.nix-profile/bin/google-chrome"
+      ]
     }
   }
 }
