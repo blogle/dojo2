@@ -35,6 +35,7 @@
       {
         devShells.default = pkgs.mkShell {
           packages = with pkgs; [
+            cypress
             python
             uv
             nodejs_22
@@ -54,6 +55,9 @@
             pkgs.stdenv.cc.cc
             pkgs.zlib
           ];
+          CYPRESS_INSTALL_BINARY = 0;
+          DOJO_CYPRESS_APP_DIR = "${pkgs.cypress}/opt/cypress";
+          GSETTINGS_SCHEMA_DIR = "${pkgs.gsettings-desktop-schemas}/share/gsettings-schemas/${pkgs.gsettings-desktop-schemas.name}/glib-2.0/schemas";
         };
 
         packages.container = pkgs.dockerTools.buildLayeredImage {

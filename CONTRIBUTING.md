@@ -31,8 +31,8 @@ Use the root `justfile` as the only routine command interface.
 | `just test-unit` | Run backend unit tests |
 | `just test-property` | Run backend Hypothesis property tests |
 | `just test-integration` | Run backend integration tests with real DuckDB |
-| `just test-web` | Run frontend unit/component tests |
-| `just test-e2e` | Reserved e2e entrypoint; currently reports the missing Cypress gap explicitly |
+| `just test-web` | Run frontend Vitest and Cypress component tests |
+| `just test-e2e` | Reserved e2e entrypoint; browser-level deterministic Cypress coverage is still not implemented |
 | `just test` | Run the normal backend and frontend test suites |
 | `just bench` | Run backend and frontend benchmark commands |
 | `just docs` | Build the mdBook documentation |
@@ -58,7 +58,8 @@ Before finishing a change, run `just check`. For CI-equivalent verification, run
 - `api/src/dojo/sql/`: native SQL resources
 - `api/tests/`: backend tests, including architecture checks and support helpers
 - `web/src/dojo/`: Vue application code
-- `web/tests/`: frontend tests
+- `web/tests/`: frontend Vitest tests
+- `web/cypress/`: frontend Cypress component tests
 - `docs/`: mdBook user documentation
 - `agents/`: compact repository guidance and templates
 - `plans/`: task-scoped ExecPlans for non-trivial implementation work
@@ -130,7 +131,7 @@ Use the smallest deterministic test that enforces the rule.
 - Property tests: money movement, transfers, SCD2 history changes, and generated operation sequences
 - Integration tests: real DuckDB provisioning plus service/API behavior
 - Architecture tests: AST-backed repository policy enforcement under `api/tests/architecture/`
-- Web tests: frontend component and state behavior under `web/tests/`
+- Web tests: frontend component and state behavior under `web/tests/` and `web/cypress/`
 
 When adding a new repository rule, prefer:
 

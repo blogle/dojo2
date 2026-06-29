@@ -56,7 +56,7 @@ test-integration:
 	cd api && uv run python -m pytest tests/test_health.py tests/test_api_endpoints.py tests/test_budget_formulas.py tests/test_scd.py tests/test_migrations.py
 
 test-e2e:
-	@printf 'No Cypress suite is configured yet; deterministic browser e2e coverage remains a known gap in this repository.\n'
+	@printf 'No deterministic Cypress browser e2e suite is configured yet; Cypress component testing is available under `just test-web`.\n'
 
 lint: lint-api lint-web
 

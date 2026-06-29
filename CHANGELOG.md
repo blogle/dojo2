@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added a checked-in Cypress component-testing harness for the Vue frontend, wired `just test-web` through both Vitest and Cypress component runs, and left `just test-e2e` reserved for the still-missing deterministic browser e2e layer.
 - Added explicit DuckDB provisioning through `api/src/dojo/migrations.py`, moved schema SQL into native `.sql` files, and stopped `Database(...)` from creating or migrating schema as a hidden side effect.
 - Added a central backend clock abstraction plus deterministic test clocks, reusable SCD2 invariant assertions, fresh-database provisioning tests, and Hypothesis coverage for real allocation, transfer, status-change, and transaction-history behavior.
 - Added repository architecture and policy checks for direct DuckDB connections, direct wall-clock usage, router boundary violations, large inline SQL, SQL f-strings, SQL file location, test-only imports, and persisted money type rules.

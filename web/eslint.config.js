@@ -44,10 +44,22 @@ export default [
     },
   },
   {
-    files: ["tests/**/*.ts", "vite.config.ts"],
+    files: ["tests/**/*.ts", "vite.config.ts", "cypress.config.mjs"],
     languageOptions: {
       globals: {
         ...globals.node,
+      },
+    },
+  },
+  {
+    files: ["cypress/**/*.ts"],
+    languageOptions: {
+      globals: {
+        ...globals.browser,
+        ...globals.mocha,
+        ...globals.node,
+        cy: "readonly",
+        Cypress: "readonly",
       },
     },
   },

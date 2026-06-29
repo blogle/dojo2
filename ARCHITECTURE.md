@@ -79,9 +79,10 @@ Core read-path SQL such as account listing, transaction paging, account balances
 - `api/tests/test_migrations.py` proves that the current schema provisions a fresh database and that importing `dojo.api.main` does not create or migrate the database as a side effect.
 - `api/tests/architecture/` contains repository policy checks for direct DuckDB usage, wall-clock usage, router boundaries, SQL patterns, SQL file location, and persisted money types.
 - `api/tests/test_properties.py` uses Hypothesis against real repository behavior for allocations, transfers, status changes, and transaction history.
-- `web/tests/` covers frontend state and component behavior.
+- `web/tests/` covers focused frontend state behavior with Vitest.
+- `web/cypress/` provides the checked-in Cypress component-testing harness for Vue components.
 
-There is currently no checked-in deterministic Cypress harness. `just test-e2e` is reserved and reports that gap explicitly.
+There is still no checked-in deterministic Cypress browser e2e harness. `just test-e2e` remains reserved and reports that narrower gap explicitly.
 
 ## Import Architecture
 
