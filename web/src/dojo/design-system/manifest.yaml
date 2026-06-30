@@ -44,3 +44,63 @@ sections:
     entries:
       - component: NavigationRail
         fixture: navigation/NavigationRail.fixtures.ts
+      - component: Tabs
+        fixture: navigation/Tabs.fixtures.ts
+
+  - id: actions
+    title: Actions
+    entries:
+      - component: Button
+        fixture: actions/Button.fixtures.ts
+      - component: DropdownButton
+        fixture: actions/DropdownButton.fixtures.ts
+
+  - id: form-controls
+    title: Form Controls
+    entries:
+      - component: TextField
+        fixture: forms/TextField.fixtures.ts
+      - component: SelectField
+        fixture: forms/SelectField.fixtures.ts
+      - component: CurrencyField
+        fixture: forms/CurrencyField.fixtures.ts
+
+  - id: page-data
+    title: Page Data
+    entries:
+      - component: PageHeader
+        fixture: data/PageHeader.fixtures.ts
+      - component: MetricStrip
+        fixture: data/MetricStrip.fixtures.ts
+      - component: PeriodSelector
+        fixture: data/PeriodSelector.fixtures.ts
+
+  - id: display
+    title: Display
+    entries:
+      - component: StateBadge
+        fixture: display/StateBadge.fixtures.ts
+
+  - id: tables
+    title: Tables
+    entries:
+      - component: TableShell
+        fixture: tables/TableShell.fixtures.ts
+      - component: HierarchicalCategoryTable
+        fixture: tables/HierarchicalCategoryTable.fixtures.ts
+
+  - id: feedback
+    title: Feedback
+    entries:
+      - component: PersistentWarningBanner
+        fixture: feedback/PersistentWarningBanner.fixtures.ts
+      - component: HistoricalBanner
+        fixture: feedback/HistoricalBanner.fixtures.ts
+
+  - id: overlays
+    title: Overlays
+    entries:
+      - component: FormModal
+        fixture: overlays/FormModal.fixtures.ts
+      - component: LargeDetailModal
+        fixture: overlays/LargeDetailModal.fixtures.ts

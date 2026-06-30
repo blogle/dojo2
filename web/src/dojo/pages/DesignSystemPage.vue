@@ -74,13 +74,31 @@ const sections = computed<CatalogSection[]>(() =>
   })),
 );
 
+const quickNavIcon = (sectionId: string) => {
+  const icons: Record<string, string> = {
+    foundations: "foundations",
+    "layout-primitives": "layout",
+    "navigation-rail": "navigation",
+    actions: "budget",
+    "form-controls": "transactions",
+    "page-data": "assets",
+    display: "foundations",
+    tables: "layout",
+    "budget-components": "budget",
+    feedback: "layout",
+    overlays: "navigation",
+  };
+
+  return icons[sectionId] ?? "navigation";
+};
+
 const quickNavItems = computed(() =>
   sections.value.map((section, index) => ({
     kind: "anchor" as const,
     key: section.id,
     label: `${index + 1}. ${section.title}`,
     visibleLabel: section.title,
-    icon: index === 0 ? "foundations" : index === 1 ? "layout" : "navigation",
+    icon: quickNavIcon(section.id),
     href: `#${section.id}`,
   })),
 );
