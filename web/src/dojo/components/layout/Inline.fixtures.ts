@@ -7,7 +7,7 @@ type InlineProps = InstanceType<typeof Inline>["$props"];
 export default defineFixtures<InlineProps>({
   component: Inline,
   title: "Inline",
-  description: "Horizontal primitive for chips, actions, and compact clusters.",
+  description: "",
   scenarios: [
     {
       name: "default",
@@ -17,10 +17,10 @@ export default defineFixtures<InlineProps>({
       },
       slots: {
         default: `
-          <div style="border:1px solid var(--color-outline);background:var(--color-surface);padding:0 var(--space-sm);height:28px;display:flex;align-items:center;">Item 1</div>
-          <div style="border:1px solid var(--color-outline);background:var(--color-surface);padding:0 var(--space-sm);height:28px;display:flex;align-items:center;">Item 2</div>
-          <div style="border:1px solid var(--color-outline);background:var(--color-surface);padding:0 var(--space-sm);height:28px;display:flex;align-items:center;">Item 3</div>
-          <div style="border:1px solid var(--color-outline);background:var(--color-surface);padding:0 var(--space-sm);height:28px;display:flex;align-items:center;">Item 4</div>
+          <div style="border:1px solid var(--color-outline);background:var(--color-surface);padding:0 var(--space-sm);min-width:52px;height:28px;display:flex;align-items:center;justify-content:center;">Item 1</div>
+          <div style="border:1px solid var(--color-outline);background:var(--color-surface);padding:0 var(--space-sm);min-width:52px;height:28px;display:flex;align-items:center;justify-content:center;">Item 2</div>
+          <div style="border:1px solid var(--color-outline);background:var(--color-surface);padding:0 var(--space-sm);min-width:52px;height:28px;display:flex;align-items:center;justify-content:center;">Item 3</div>
+          <div style="border:1px solid var(--color-outline);background:var(--color-surface);padding:0 var(--space-sm);min-width:52px;height:28px;display:flex;align-items:center;justify-content:center;">Item 4</div>
         `,
       },
     },

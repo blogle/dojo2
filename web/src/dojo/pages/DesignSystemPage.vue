@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref } from "vue";
 
 import type {
   ComponentFixtureScenario,
@@ -26,6 +26,10 @@ interface CatalogSection {
 }
 
 const introFixture = fixtureRegistry[manifest.page_shell.intro.fixture];
+const railExpanded = ref(false);
+const railWidth = computed(() =>
+  railExpanded.value ? "var(--space-nav-expanded)" : "var(--space-nav-collapsed)",
+);
 
 const sections = computed<CatalogSection[]>(() =>
   manifest.sections.map((section) => ({
@@ -43,7 +47,9 @@ const quickNavItems = computed(() =>
     kind: "anchor" as const,
     key: section.id,
     label: `${index + 1}. ${section.title}`,
-    icon: section.title.charAt(0),
+    visibleLabel: section.title,
+    icon:
+      index === 0 ? "foundations" : index === 1 ? "layout" : "navigation",
     href: `#${section.id}`,
   })),
 );
@@ -70,17 +76,23 @@ const scenarioClasses = (presentation: FixturePresentation) => [
     ? `design-system-page__scenario-canvas--${presentation.container}`
     : "",
 ];
+
+const showScenarioName = (
+  fixture: ComponentFixtureSet,
+  scenario: ComponentFixtureScenario,
+) => !(fixture.scenarios.length === 1 && scenario.name === "default");
 </script>
 
 <template>
   <main class="design-system-page" data-cy="design-system-page-root">
-    <aside class="design-system-page__nav-shell">
+    <aside class="design-system-page__nav-shell" :style="{ '--rail-width': railWidth }">
       <NavigationRail
         :items="quickNavItems"
-        :expanded="false"
-        :compact="manifest.page_shell.quick_nav.icon_only"
-        :width="manifest.page_shell.quick_nav.width"
+        :expanded="railExpanded"
+        :collapsible="true"
+        :full-height="true"
         aria-label="Design system sections"
+        @toggle="railExpanded = !railExpanded"
       />
     </aside>
 
@@ -88,6 +100,7 @@ const scenarioClasses = (presentation: FixturePresentation) => [
       class="design-system-page__container"
       :style="{
         maxWidth: manifest.page_shell.container_max_width,
+        marginLeft: 'calc(var(--space-nav-collapsed) + var(--space-sm))',
         '--section-gap': manifest.page_shell.section_gap,
         '--section-heading-gap': manifest.page_shell.section_heading_gap ?? 'var(--space-xl)',
       }"
@@ -96,8 +109,7 @@ const scenarioClasses = (presentation: FixturePresentation) => [
         <p class="design-system-page__eyebrow">dojo</p>
         <h1 class="design-system-page__title">Dojo Design System</h1>
         <p class="design-system-page__summary">
-          Tokens, layout primitives, and representative component states for
-          future financial workflows.
+          Tokens, layout primitives, and shared component specimens.
         </p>
       </header>
 
@@ -135,7 +147,7 @@ const scenarioClasses = (presentation: FixturePresentation) => [
           >
             <div class="design-system-page__entry-copy">
               <h3 class="design-system-page__entry-title">{{ entry.fixture.title }}</h3>
-              <p class="design-system-page__entry-description">
+              <p v-if="entry.fixture.description" class="design-system-page__entry-description">
                 {{ entry.fixture.description }}
               </p>
             </div>
@@ -147,7 +159,9 @@ const scenarioClasses = (presentation: FixturePresentation) => [
                 class="design-system-page__scenario"
               >
                 <div class="design-system-page__scenario-header">
-                  <p class="design-system-page__scenario-name">{{ scenario.name }}</p>
+                  <p v-if="showScenarioName(entry.fixture, scenario)" class="design-system-page__scenario-name">
+                    {{ scenario.name }}
+                  </p>
                   <p
                     v-if="scenario.description"
                     class="design-system-page__scenario-description"
@@ -187,14 +201,17 @@ const scenarioClasses = (presentation: FixturePresentation) => [
   min-height: 100vh;
   padding: var(--space-page-block) var(--space-page-inline) var(--space-3xl);
   display: flex;
-  justify-content: center;
+  justify-content: flex-start;
   background: var(--color-background);
 }
 
 .design-system-page__nav-shell {
   position: fixed;
-  top: var(--space-page-block);
-  left: var(--layout-quick-nav-offset);
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: var(--rail-width);
+  display: flex;
   z-index: 1;
 }
 
@@ -318,12 +335,18 @@ const scenarioClasses = (presentation: FixturePresentation) => [
 }
 
 .design-system-page__scenario-canvas {
-  padding: var(--space-sm);
-  border: 1px solid var(--color-outline);
-  background: var(--color-surface);
+  width: 100%;
+}
+
+.design-system-page__scenario-canvas--none {
+  width: auto;
+  display: inline-flex;
+  align-items: flex-start;
 }
 
 .design-system-page__scenario-canvas--card {
+  padding: var(--space-sm);
+  border: 1px solid var(--color-outline);
   background: var(--color-surface);
 }
 
@@ -348,26 +371,18 @@ const scenarioClasses = (presentation: FixturePresentation) => [
 }
 
 @media (max-width: 960px) {
-  .design-system-page {
-    padding-left: max(
-      var(--space-page-inline),
-      calc(var(--layout-quick-nav-width) + (2 * var(--space-page-inline)))
-    );
+  .design-system-page__container {
+    margin-left: calc(var(--space-nav-collapsed) + var(--space-sm));
   }
 }
 
 @media (max-width: 720px) {
-  .design-system-page {
-    padding: var(--space-lg);
-  }
-
   .design-system-page__nav-shell {
-    position: sticky;
-    top: var(--space-sm);
-    align-self: start;
+    width: var(--space-nav-collapsed);
   }
 
   .design-system-page__container {
+    margin-left: calc(var(--space-nav-collapsed) + var(--space-sm));
     width: 100%;
   }
 }

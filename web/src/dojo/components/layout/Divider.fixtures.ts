@@ -7,7 +7,7 @@ type DividerProps = InstanceType<typeof Divider>["$props"];
 export default defineFixtures<DividerProps>({
   component: Divider,
   title: "Divider",
-  description: "Simple rule primitive for separating adjacent content blocks.",
+  description: "",
   scenarios: [
     {
       name: "horizontal",

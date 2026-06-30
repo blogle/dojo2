@@ -7,7 +7,7 @@ type SpacingScaleProps = InstanceType<typeof SpacingScale>["$props"];
 export default defineFixtures<SpacingScaleProps>({
   component: SpacingScale,
   title: "Spacing",
-  description: "Primary spacing steps surfaced directly from generated spacing tokens.",
+  description: "",
   scenarios: [
     {
       name: "default",

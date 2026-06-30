@@ -7,7 +7,7 @@ type ColorSwatchGridProps = InstanceType<typeof ColorSwatchGrid>["$props"];
 export default defineFixtures<ColorSwatchGridProps>({
   component: ColorSwatchGrid,
   title: "Colors",
-  description: "Rendered directly from generated color tokens.",
+  description: "",
   scenarios: [
     {
       name: "default",

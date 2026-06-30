@@ -7,7 +7,7 @@ type StackProps = InstanceType<typeof Stack>["$props"];
 export default defineFixtures<StackProps>({
   component: Stack,
   title: "Stack",
-  description: "Vertical primitive for grouped content with controlled rhythm.",
+  description: "",
   scenarios: [
     {
       name: "default",
@@ -16,9 +16,9 @@ export default defineFixtures<StackProps>({
       },
       slots: {
         default: `
-          <div style="border:1px solid var(--color-outline);background:var(--color-primary-container);padding:var(--space-sm);">Row 1</div>
-          <div style="border:1px solid var(--color-outline);background:var(--color-primary-container);padding:var(--space-sm);">Row 2</div>
-          <div style="border:1px solid var(--color-outline);background:var(--color-primary-container);padding:var(--space-sm);">Row 3</div>
+          <div style="border:1px solid var(--color-outline);background:var(--color-primary-container);padding:var(--space-sm);text-align:center;">Row 1</div>
+          <div style="border:1px solid var(--color-outline);background:var(--color-primary-container);padding:var(--space-sm);text-align:center;">Row 2</div>
+          <div style="border:1px solid var(--color-outline);background:var(--color-primary-container);padding:var(--space-sm);text-align:center;">Row 3</div>
         `,
       },
     },

@@ -27,7 +27,6 @@ const tokenValue = (token: string) => rootStyles.getPropertyValue(token).trim();
           <div class="swatch-card__chip" :style="{ backgroundColor: `var(${swatch.token})` }" />
           <div class="swatch-card__meta">
             <p class="swatch-card__label">{{ swatch.label }}</p>
-            <p class="swatch-card__token">{{ swatch.token }}</p>
             <p class="swatch-card__value">{{ tokenValue(swatch.token) }}</p>
           </div>
         </article>
@@ -58,18 +57,20 @@ const tokenValue = (token: string) => rootStyles.getPropertyValue(token).trim();
 }
 
 .swatch-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+  display: flex;
+  flex-wrap: wrap;
   gap: var(--space-sm);
 }
 
 .swatch-card {
   display: grid;
   gap: var(--space-xs);
+  width: 92px;
+  align-content: start;
 }
 
 .swatch-card__chip {
-  min-height: 56px;
+  height: 48px;
   border: 1px solid var(--color-outline);
 }
 
@@ -79,7 +80,6 @@ const tokenValue = (token: string) => rootStyles.getPropertyValue(token).trim();
 }
 
 .swatch-card__label,
-.swatch-card__token,
 .swatch-card__value {
   margin: 0;
 }
@@ -92,7 +92,6 @@ const tokenValue = (token: string) => rootStyles.getPropertyValue(token).trim();
   line-height: var(--text-label-sm-line-height);
 }
 
-.swatch-card__token,
 .swatch-card__value {
   color: var(--color-on-surface-muted);
   font-family: var(--text-caption-font-family);

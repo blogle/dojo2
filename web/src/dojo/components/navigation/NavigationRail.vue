@@ -1,12 +1,23 @@
 <script setup lang="ts">
+const emit = defineEmits<{
+  toggle: [];
+}>();
+
+interface IconPart {
+  tag: "path" | "rect" | "circle";
+  attrs: Record<string, number | string>;
+}
+
 export interface NavigationRailItem {
   kind: "route" | "anchor";
   key: string;
   label: string;
+  visibleLabel?: string;
   icon: string;
   href: string;
   badge?: string | number;
   current?: boolean;
+  interactive?: boolean;
 }
 
 withDefaults(
@@ -14,16 +25,53 @@ withDefaults(
     items: NavigationRailItem[];
     expanded?: boolean;
     ariaLabel?: string;
-    compact?: boolean;
     width?: string;
+    fullHeight?: boolean;
+    collapsible?: boolean;
   }>(),
   {
     expanded: false,
     ariaLabel: "Navigation rail",
-    compact: false,
     width: undefined,
+    fullHeight: false,
+    collapsible: false,
   },
 );
+
+const iconParts = (icon: string): IconPart[] => {
+  const glyphs: Record<string, IconPart[]> = {
+    foundations: [
+      { tag: "rect", attrs: { x: 4, y: 4, width: 6, height: 6, rx: 1 } },
+      { tag: "rect", attrs: { x: 14, y: 4, width: 6, height: 6, rx: 1 } },
+      { tag: "rect", attrs: { x: 4, y: 14, width: 6, height: 6, rx: 1 } },
+      { tag: "rect", attrs: { x: 14, y: 14, width: 6, height: 6, rx: 1 } },
+    ],
+    layout: [
+      { tag: "rect", attrs: { x: 4, y: 5, width: 16, height: 3, rx: 1.5 } },
+      { tag: "rect", attrs: { x: 4, y: 11, width: 16, height: 3, rx: 1.5 } },
+      { tag: "rect", attrs: { x: 4, y: 17, width: 16, height: 3, rx: 1.5 } },
+    ],
+    navigation: [
+      { tag: "rect", attrs: { x: 4, y: 4, width: 4, height: 16, rx: 1 } },
+      { tag: "rect", attrs: { x: 11, y: 6, width: 9, height: 2.5, rx: 1.25 } },
+      { tag: "rect", attrs: { x: 11, y: 11, width: 9, height: 2.5, rx: 1.25 } },
+      { tag: "rect", attrs: { x: 11, y: 16, width: 9, height: 2.5, rx: 1.25 } },
+    ],
+    transactions: [{ tag: "path", attrs: { d: "M5 7h14M12 7v10" } }],
+    budget: [
+      { tag: "path", attrs: { d: "M7 18h10M8 18V6h8v12" } },
+      { tag: "path", attrs: { d: "M10 10h4M10 13h4" } },
+    ],
+    assets: [{ tag: "path", attrs: { d: "M5 15h4l2-6 3 9 2-5h3" } }],
+    expand: [{ tag: "path", attrs: { d: "M9 6l6 6-6 6" } }],
+    collapse: [{ tag: "path", attrs: { d: "M15 6l-6 6 6 6" } }],
+  };
+
+  return glyphs[icon] ?? [{ tag: "circle", attrs: { cx: 12, cy: 12, r: 4 } }];
+};
+
+const itemTag = (item: NavigationRailItem) =>
+  item.interactive === false ? "button" : "a";
 </script>
 
 <template>
@@ -31,25 +79,73 @@ withDefaults(
     class="navigation-rail"
     :class="{
       'navigation-rail--expanded': expanded,
-      'navigation-rail--compact': compact,
+      'navigation-rail--full-height': fullHeight,
     }"
-    :style="width ? { width } : undefined"
+    :style="width && !expanded ? { width } : undefined"
     :aria-label="ariaLabel"
     data-cy="navigation-rail-root"
   >
-    <a
-      v-for="item in items"
-      :key="item.key"
-      :href="item.href"
-      class="navigation-rail__item"
-      :class="{ 'navigation-rail__item--current': item.current }"
-      :aria-label="item.label"
-      :aria-current="item.current ? 'page' : undefined"
+    <div class="navigation-rail__items">
+      <component
+        :is="itemTag(item)"
+        v-for="item in items"
+        :key="item.key"
+        :href="item.interactive === false ? undefined : item.href"
+        :type="item.interactive === false ? 'button' : undefined"
+        class="navigation-rail__item"
+        :class="{ 'navigation-rail__item--current': item.current }"
+        :data-cy="`navigation-rail-item-${item.key}`"
+        :aria-label="item.label"
+        :aria-current="item.current ? 'page' : undefined"
+      >
+        <span class="navigation-rail__icon" aria-hidden="true">
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <component
+              :is="part.tag"
+              v-for="(part, index) in iconParts(item.icon)"
+              :key="`${item.key}-${index}`"
+              v-bind="part.attrs"
+            />
+          </svg>
+        </span>
+        <span v-if="expanded" class="navigation-rail__label">{{ item.visibleLabel ?? item.label }}</span>
+        <span v-if="item.badge !== undefined && expanded" class="navigation-rail__badge">{{ item.badge }}</span>
+      </component>
+    </div>
+
+    <button
+      v-if="collapsible"
+      type="button"
+      class="navigation-rail__toggle"
+      data-cy="navigation-rail-toggle"
+      :aria-label="expanded ? 'Collapse navigation rail' : 'Expand navigation rail'"
+      @click="emit('toggle')"
     >
-      <span class="navigation-rail__icon" aria-hidden="true">{{ item.icon }}</span>
-      <span v-if="expanded" class="navigation-rail__label">{{ item.label }}</span>
-      <span v-if="item.badge !== undefined" class="navigation-rail__badge">{{ item.badge }}</span>
-    </a>
+      <span class="navigation-rail__icon" aria-hidden="true">
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.8"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <component
+            :is="part.tag"
+            v-for="(part, index) in iconParts(expanded ? 'collapse' : 'expand')"
+            :key="`toggle-${index}`"
+            v-bind="part.attrs"
+          />
+        </svg>
+      </span>
+    </button>
   </nav>
 </template>
 
@@ -57,36 +153,60 @@ withDefaults(
 .navigation-rail {
   width: var(--space-nav-collapsed);
   display: grid;
-  gap: var(--space-xs);
-  padding: var(--space-sm);
+  gap: 0;
+  padding: 0;
   border: 1px solid var(--color-outline);
   background: var(--color-surface);
+  overflow: hidden;
 }
 
 .navigation-rail--expanded {
   width: var(--space-nav-expanded);
 }
 
-.navigation-rail--compact {
-  width: var(--layout-quick-nav-width);
-  padding: 0;
-  gap: 6px;
-  border: 0;
-  background: transparent;
+.navigation-rail--full-height {
+  height: 100%;
+  grid-template-rows: 1fr auto;
 }
 
-.navigation-rail__item {
+.navigation-rail__items {
+  display: grid;
+  gap: var(--space-xs);
+  align-content: start;
+  min-width: 0;
+  padding: var(--space-sm) 0;
+}
+
+.navigation-rail__item,
+.navigation-rail__toggle {
   min-height: 40px;
   display: flex;
   align-items: center;
   gap: var(--space-sm);
   padding: 0 10px;
-  border-radius: var(--radius-all);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   color: var(--color-on-surface-muted);
   text-decoration: none;
 }
 
-.navigation-rail__item:hover {
+.navigation-rail:not(.navigation-rail--expanded) .navigation-rail__item,
+.navigation-rail:not(.navigation-rail--expanded) .navigation-rail__toggle {
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.navigation-rail__toggle {
+  width: 100%;
+  cursor: pointer;
+  justify-content: center;
+  border-top: 1px solid var(--color-outline);
+}
+
+.navigation-rail__item:hover,
+.navigation-rail__toggle:hover {
   background: var(--color-surface-muted);
   color: var(--color-on-surface);
 }
@@ -96,23 +216,16 @@ withDefaults(
   color: var(--color-on-primary-container);
 }
 
-.navigation-rail--compact .navigation-rail__item {
-  min-height: var(--layout-quick-nav-item-size);
-  justify-content: center;
-  padding: 0;
-  border: 1px solid var(--color-outline);
-  background: var(--color-surface);
-}
-
-.navigation-rail--compact .navigation-rail__item:hover {
-  background: var(--color-surface-muted);
-}
-
 .navigation-rail__icon {
   width: 20px;
   display: inline-flex;
   justify-content: center;
   flex: 0 0 20px;
+}
+
+.navigation-rail__icon :deep(svg) {
+  width: 16px;
+  height: 16px;
 }
 
 .navigation-rail__label {

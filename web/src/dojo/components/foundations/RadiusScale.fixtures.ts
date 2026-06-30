@@ -7,7 +7,7 @@ type RadiusScaleProps = InstanceType<typeof RadiusScale>["$props"];
 export default defineFixtures<RadiusScaleProps>({
   component: RadiusScale,
   title: "Rounded Corners",
-  description: "Radius tokens presented as simple shape references.",
+  description: "",
   scenarios: [
     {
       name: "default",

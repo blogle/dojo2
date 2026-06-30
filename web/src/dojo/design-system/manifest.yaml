@@ -38,3 +38,9 @@ sections:
         fixture: layout/Surface.fixtures.ts
       - component: Divider
         fixture: layout/Divider.fixtures.ts
+
+  - id: navigation-rail
+    title: Navigation Rail
+    entries:
+      - component: NavigationRail
+        fixture: navigation/NavigationRail.fixtures.ts

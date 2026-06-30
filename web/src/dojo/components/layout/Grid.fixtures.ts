@@ -7,7 +7,7 @@ type GridProps = InstanceType<typeof Grid>["$props"];
 export default defineFixtures<GridProps>({
   component: Grid,
   title: "Grid",
-  description: "Grid primitive for multi-column layouts and repeatable cards.",
+  description: "",
   scenarios: [
     {
       name: "default",
@@ -16,12 +16,12 @@ export default defineFixtures<GridProps>({
       },
       slots: {
         default: `
-          <div style="border:1px solid var(--color-outline);background:var(--color-primary-container);padding:var(--space-sm);min-height:48px;">Cell 1</div>
-          <div style="border:1px solid var(--color-outline);background:var(--color-primary-container);padding:var(--space-sm);min-height:48px;">Cell 2</div>
-          <div style="border:1px solid var(--color-outline);background:var(--color-primary-container);padding:var(--space-sm);min-height:48px;">Cell 3</div>
-          <div style="border:1px solid var(--color-outline);background:var(--color-primary-container);padding:var(--space-sm);min-height:48px;">Cell 4</div>
-          <div style="border:1px solid var(--color-outline);background:var(--color-primary-container);padding:var(--space-sm);min-height:48px;">Cell 5</div>
-          <div style="border:1px solid var(--color-outline);background:var(--color-primary-container);padding:var(--space-sm);min-height:48px;">Cell 6</div>
+          <div style="border:1px solid var(--color-outline);background:var(--color-primary-container);padding:var(--space-sm);min-height:48px;text-align:center;">Card 1</div>
+          <div style="border:1px solid var(--color-outline);background:var(--color-primary-container);padding:var(--space-sm);min-height:48px;text-align:center;">Card 2</div>
+          <div style="border:1px solid var(--color-outline);background:var(--color-primary-container);padding:var(--space-sm);min-height:48px;text-align:center;">Card 3</div>
+          <div style="border:1px solid var(--color-outline);background:var(--color-primary-container);padding:var(--space-sm);min-height:48px;text-align:center;">Card 4</div>
+          <div style="border:1px solid var(--color-outline);background:var(--color-primary-container);padding:var(--space-sm);min-height:48px;text-align:center;">Card 5</div>
+          <div style="border:1px solid var(--color-outline);background:var(--color-primary-container);padding:var(--space-sm);min-height:48px;text-align:center;">Card 6</div>
         `,
       },
     },

@@ -7,16 +7,16 @@ type NavigationRailProps = InstanceType<typeof NavigationRail>["$props"];
 export default defineFixtures<NavigationRailProps>({
   component: NavigationRail,
   title: "Navigation Rail",
-  description: "Generic rail primitive that can be populated with route or anchor entries.",
+  description: "",
   scenarios: [
     {
       name: "collapsed",
       props: {
         expanded: false,
         items: [
-          { kind: "route", key: "transactions", label: "Transactions", icon: "T", href: "/transactions", current: true },
-          { kind: "route", key: "budget", label: "Budget", icon: "B", href: "/budget" },
-          { kind: "route", key: "assets", label: "Assets", icon: "A", href: "/assets", badge: 3 },
+          { kind: "route", key: "transactions", label: "Transactions", icon: "transactions", href: "#", current: true, interactive: false },
+          { kind: "route", key: "budget", label: "Budget", icon: "budget", href: "#", interactive: false },
+          { kind: "route", key: "assets", label: "Assets", icon: "assets", href: "#", badge: 3, interactive: false },
         ],
       },
       presentation: {
@@ -28,9 +28,9 @@ export default defineFixtures<NavigationRailProps>({
       props: {
         expanded: true,
         items: [
-          { kind: "route", key: "transactions", label: "Transactions", icon: "T", href: "/transactions", current: true },
-          { kind: "route", key: "budget", label: "Budget", icon: "B", href: "/budget" },
-          { kind: "route", key: "assets", label: "Assets & Liabilities", icon: "A", href: "/assets", badge: 3 },
+          { kind: "route", key: "transactions", label: "Transactions", icon: "transactions", href: "#", current: true, interactive: false },
+          { kind: "route", key: "budget", label: "Budget", icon: "budget", href: "#", interactive: false },
+          { kind: "route", key: "assets", label: "Assets & Liabilities", icon: "assets", href: "#", badge: 3, interactive: false },
         ],
       },
       presentation: {
