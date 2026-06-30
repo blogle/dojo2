@@ -64,6 +64,12 @@ sections:
         fixture: forms/SelectField.fixtures.ts
       - component: CurrencyField
         fixture: forms/CurrencyField.fixtures.ts
+      - component: RadioGroup
+        fixture: forms/RadioGroup.fixtures.ts
+      - component: DatePicker
+        fixture: forms/DatePicker.fixtures.ts
+      - component: Slider
+        fixture: forms/Slider.fixtures.ts
 
   - id: page-data
     title: Page Data
@@ -80,6 +86,14 @@ sections:
     entries:
       - component: StateBadge
         fixture: display/StateBadge.fixtures.ts
+      - component: ProgressBar
+        fixture: display/ProgressBar.fixtures.ts
+      - component: ProgressRing
+        fixture: display/ProgressRing.fixtures.ts
+      - component: KeyValueList
+        fixture: display/KeyValueList.fixtures.ts
+      - component: Tooltip
+        fixture: display/Tooltip.fixtures.ts
 
   - id: tables
     title: Tables
@@ -96,6 +110,10 @@ sections:
         fixture: feedback/PersistentWarningBanner.fixtures.ts
       - component: HistoricalBanner
         fixture: feedback/HistoricalBanner.fixtures.ts
+      - component: PreviewBox
+        fixture: feedback/PreviewBox.fixtures.ts
+      - component: ReorderModeBanner
+        fixture: feedback/ReorderModeBanner.fixtures.ts
 
   - id: overlays
     title: Overlays
