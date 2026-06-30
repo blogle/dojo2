@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref } from "vue";
 
 import StateBadge from "@/dojo/components/display/StateBadge.vue";
 
@@ -55,6 +55,7 @@ const props = withDefaults(
 const emit = defineEmits<{
   toggle: [key: string];
   select: [key: string];
+  reorder: [key: string, targetKey: string, position: "before" | "after"];
 }>();
 
 const flattenRows = (rows: HierarchicalCategoryRow[]): HierarchicalCategoryRow[] => {
@@ -76,6 +77,52 @@ const flattenRows = (rows: HierarchicalCategoryRow[]): HierarchicalCategoryRow[]
 const visibleRows = computed(() => flattenRows(props.rows));
 
 const isSelected = (key: string) => props.selectedKeys.includes(key);
+
+const dragKey = ref<string | null>(null);
+const dropTarget = ref<string | null>(null);
+const dropPosition = ref<"before" | "after">("after");
+
+const onDragStart = (key: string, event: DragEvent) => {
+  dragKey.value = key;
+  event.dataTransfer!.effectAllowed = "move";
+};
+
+const onDragOver = (key: string, event: DragEvent) => {
+  event.preventDefault();
+  event.dataTransfer!.dropEffect = "move";
+
+  const target = event.currentTarget as HTMLElement;
+  const rect = target.getBoundingClientRect();
+  const midY = rect.top + rect.height / 2;
+
+  dropPosition.value = event.clientY < midY ? "before" : "after";
+  dropTarget.value = key;
+};
+
+const onDragEnter = (key: string, event: DragEvent) => {
+  event.preventDefault();
+  dropTarget.value = key;
+};
+
+const onDragLeave = () => {
+  dropTarget.value = null;
+};
+
+const onDrop = (key: string) => {
+  if (dragKey.value && dragKey.value !== key) {
+    emit("reorder", dragKey.value, key, dropPosition.value);
+  }
+  dragKey.value = null;
+  dropTarget.value = null;
+};
+
+const onDragEnd = () => {
+  dragKey.value = null;
+  dropTarget.value = null;
+};
+
+const isDragTarget = (key: string) => dropTarget.value === key;
+const isDragging = (key: string) => dragKey.value === key;
 </script>
 
 <template>
@@ -105,8 +152,17 @@ const isSelected = (key: string) => props.selectedKeys.includes(key);
           :class="{
             'hierarchical-category-table__row--group': row.group,
             'hierarchical-category-table__row--selected': isSelected(row.key),
+            'hierarchical-category-table__row--drag-target': isDragTarget(row.key),
+            'hierarchical-category-table__row--dragging': isDragging(row.key),
           }"
+          :draggable="reorderable"
           @click="emit('select', row.key)"
+          @dragstart="onDragStart(row.key, $event)"
+          @dragover="onDragOver(row.key, $event)"
+          @dragenter="onDragEnter(row.key, $event)"
+          @dragleave="onDragLeave()"
+          @drop="onDrop(row.key)"
+          @dragend="onDragEnd()"
         >
           <td class="hierarchical-category-table__cell">
             <div
@@ -120,7 +176,18 @@ const isSelected = (key: string) => props.selectedKeys.includes(key);
                 :aria-label="row.expanded === false ? 'Expand row' : 'Collapse row'"
                 @click.stop="emit('toggle', row.key)"
               >
-                {{ row.expanded === false ? '+' : '-' }}
+                <svg
+                  class="hierarchical-category-table__chevron"
+                  :class="{ 'hierarchical-category-table__chevron--collapsed': row.expanded === false }"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M6 9l6 6 6-6" />
+                </svg>
               </button>
               <span
                 v-else
@@ -131,7 +198,14 @@ const isSelected = (key: string) => props.selectedKeys.includes(key);
                 class="hierarchical-category-table__drag-handle"
                 aria-hidden="true"
               >
-                ::
+                <svg viewBox="0 0 24 24" fill="currentColor">
+                  <circle cx="9" cy="5" r="1.5" />
+                  <circle cx="15" cy="5" r="1.5" />
+                  <circle cx="9" cy="12" r="1.5" />
+                  <circle cx="15" cy="12" r="1.5" />
+                  <circle cx="9" cy="19" r="1.5" />
+                  <circle cx="15" cy="19" r="1.5" />
+                </svg>
               </span>
               <span
                 v-if="row.icon"
@@ -210,6 +284,7 @@ const isSelected = (key: string) => props.selectedKeys.includes(key);
   background: var(--color-surface);
   border-bottom: 1px solid var(--color-outline);
   cursor: pointer;
+  transition: background var(--transition-fast) var(--transition-ease-out);
 }
 
 .hierarchical-category-table__row:hover,
@@ -219,6 +294,14 @@ const isSelected = (key: string) => props.selectedKeys.includes(key);
 
 .hierarchical-category-table__row--group {
   font-weight: 600;
+}
+
+.hierarchical-category-table__row--dragging {
+  opacity: 0.4;
+}
+
+.hierarchical-category-table__row--drag-target {
+  box-shadow: inset 0 -2px 0 var(--color-positive);
 }
 
 .hierarchical-category-table__cell {
@@ -240,20 +323,50 @@ const isSelected = (key: string) => props.selectedKeys.includes(key);
 }
 
 .hierarchical-category-table__disclosure {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-width: 18px;
+  min-height: 18px;
   border: 0;
   background: transparent;
   color: var(--color-on-surface-muted);
   cursor: pointer;
+  padding: 0;
+}
+
+.hierarchical-category-table__disclosure:hover {
+  color: var(--color-on-surface);
 }
 
 .hierarchical-category-table__disclosure--spacer {
   display: inline-block;
 }
 
+.hierarchical-category-table__chevron {
+  width: 16px;
+  height: 16px;
+  transition: transform var(--transition-fast) var(--transition-ease-out);
+}
+
+.hierarchical-category-table__chevron--collapsed {
+  transform: rotate(-90deg);
+}
+
 .hierarchical-category-table__drag-handle {
+  display: inline-flex;
+  align-items: center;
   color: var(--color-on-surface-muted);
   cursor: grab;
+}
+
+.hierarchical-category-table__drag-handle:active {
+  cursor: grabbing;
+}
+
+.hierarchical-category-table__drag-handle svg {
+  width: 16px;
+  height: 16px;
 }
 
 .hierarchical-category-table__label {
