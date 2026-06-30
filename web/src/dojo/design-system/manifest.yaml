@@ -1,0 +1,40 @@
+page_shell:
+  container_max_width: var(--layout-page-max-width)
+  quick_nav:
+    position: fixed-left
+    icon_only: true
+    width: var(--layout-quick-nav-width)
+    offset: var(--layout-quick-nav-offset)
+  intro:
+    component: IntroCallout
+    fixture: content/IntroCallout.fixtures.ts
+  section_heading_format: "{index}. {title}"
+  section_gap: var(--layout-section-gap)
+  section_heading_gap: var(--layout-section-heading-gap)
+
+sections:
+  - id: foundations
+    title: Foundations
+    entries:
+      - component: TypographySpecimen
+        fixture: foundations/TypographySpecimen.fixtures.ts
+      - component: ColorSwatchGrid
+        fixture: foundations/ColorSwatchGrid.fixtures.ts
+      - component: SpacingScale
+        fixture: foundations/SpacingScale.fixtures.ts
+      - component: RadiusScale
+        fixture: foundations/RadiusScale.fixtures.ts
+
+  - id: layout-primitives
+    title: Layout Primitives
+    entries:
+      - component: Stack
+        fixture: layout/Stack.fixtures.ts
+      - component: Inline
+        fixture: layout/Inline.fixtures.ts
+      - component: Grid
+        fixture: layout/Grid.fixtures.ts
+      - component: Surface
+        fixture: layout/Surface.fixtures.ts
+      - component: Divider
+        fixture: layout/Divider.fixtures.ts

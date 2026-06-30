@@ -117,7 +117,23 @@ typography:
     fontFeature: '"tnum" 1, "zero" 1'
 
 rounded:
+  none: 0
   all: 2px
+  sm: 4px
+  md: 6px
+  lg: 10px
+  xl: 14px
+  full: 9999px
+
+layout:
+  page-max-width: 760px
+  quick-nav-offset: 12px
+  quick-nav-width: 32px
+  quick-nav-item-size: 24px
+  intro-padding: "{spacing.lg}"
+  section-gap: "{spacing.section-gap}"
+  section-heading-gap: "{spacing.xl}"
+  entry-gap: "{spacing.lg}"
 
 spacing:
   micro: 2px
@@ -977,11 +993,20 @@ Depth is conveyed primarily through tonal separation, borders, and placement. Th
 ## 6. Shapes
 
 ### Border Radius
-The system exposes a **single 2px radius** (`{rounded.all}`) for every component. No exceptions.
+The system centers on a crisp **2px default radius** (`{rounded.all}`) while
+still exposing a small, deliberate scale for the few places where larger curves
+communicate grouping or emphasis more clearly.
 
-**Why a single radius:** A uniform corner radius avoids visual noise, keeps the interface crisp, and eliminates the need to choose between variants. Every component — buttons, inputs, navigation items, menus, cards, modals, panels, state indicators, table containers, tooltips, overlays — uses `2px`.
+**Recommended use:**
+- `{rounded.none}` for true square edges
+- `{rounded.all}` for most controls and containers
+- `{rounded.sm}` / `{rounded.md}` / `{rounded.lg}` for grouped surfaces and
+  larger content blocks when needed
+- `{rounded.full}` for explicit pill or circular treatments only when the
+  component semantics truly call for it
 
-**What NOT to use:** Pill shapes (9999px), circular controls (50%), variable radii per component.
+**What NOT to do:** invent one-off radii between tokens or mix many different
+corner treatments in the same cluster of UI.
 
 ### Icons
 - Simple outlined style with consistent 1.75–2px strokes

@@ -1,2 +1,2 @@
-import "../../src/dojo/styles/tokens.css";
+import "../../src/dojo/design-system/tokens.css";
 import "../../src/dojo/styles/main.css";

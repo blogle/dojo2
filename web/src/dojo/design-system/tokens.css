@@ -1,0 +1,151 @@
+/* tokens.css
+ * Generated from DESIGN.md front matter by generate_tokens.py.
+ * Do not hand-edit; update DESIGN.md and regenerate. */
+
+:root {
+  /* colors */
+  --color-primary: #34483B;
+  --color-primary-hover: #293A30;
+  --color-primary-active: #1E2B22;
+  --color-on-primary: #FFFFFF;
+  --color-primary-container: #DCE7DD;
+  --color-on-primary-container: #243229;
+  --color-secondary: #66756A;
+  --color-on-secondary: #FFFFFF;
+  --color-accent: #9A5F43;
+  --color-on-accent: #FFFFFF;
+  --color-background: #F4F1E9;
+  --color-surface: #FCFBF7;
+  --color-surface-raised: #FFFFFF;
+  --color-surface-muted: #ECE8DE;
+  --color-surface-selected: #E3EADF;
+  --color-on-surface: #202923;
+  --color-on-surface-muted: #616B64;
+  --color-outline: #CFC9BC;
+  --color-outline-strong: #A9A294;
+  --color-positive: #3F6B50;
+  --color-positive-container: #DDEADE;
+  --color-warning: #835C25;
+  --color-warning-container: #F2E4C8;
+  --color-error: #934B42;
+  --color-error-container: #F3DCD8;
+  --color-info: #4E6C70;
+  --color-info-container: #DCE9E9;
+  --color-historical: #735F44;
+  --color-historical-container: #E9E0D2;
+  --color-scrim: rgba(31, 38, 33, 0.42);
+
+  /* spacing */
+  --space-micro: 2px;
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 12px;
+  --space-lg: 16px;
+  --space-xl: 24px;
+  --space-2xl: 32px;
+  --space-3xl: 48px;
+  --space-page-inline: 24px;
+  --space-page-block: 20px;
+  --space-section-gap: 24px;
+  --space-control-gap: 8px;
+  --space-row-height-compact: 36px;
+  --space-row-height-default: 42px;
+  --space-nav-collapsed: 56px;
+  --space-nav-expanded: 208px;
+
+  /* rounded */
+  --radius-none: 0;
+  --radius-all: 2px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+  --radius-full: 9999px;
+
+  /* typography */
+  --text-display-lg-font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  --text-display-lg-font-size: 32px;
+  --text-display-lg-font-weight: 700;
+  --text-display-lg-line-height: 1.15;
+  --text-display-lg-letter-spacing: -0.025em;
+  --text-headline-lg-font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  --text-headline-lg-font-size: 24px;
+  --text-headline-lg-font-weight: 700;
+  --text-headline-lg-line-height: 1.2;
+  --text-headline-lg-letter-spacing: -0.018em;
+  --text-headline-md-font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  --text-headline-md-font-size: 19px;
+  --text-headline-md-font-weight: 600;
+  --text-headline-md-line-height: 1.3;
+  --text-headline-md-letter-spacing: -0.01em;
+  --text-headline-sm-font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  --text-headline-sm-font-size: 16px;
+  --text-headline-sm-font-weight: 600;
+  --text-headline-sm-line-height: 1.35;
+  --text-body-lg-font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  --text-body-lg-font-size: 16px;
+  --text-body-lg-font-weight: 400;
+  --text-body-lg-line-height: 1.5;
+  --text-body-md-font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  --text-body-md-font-size: 14px;
+  --text-body-md-font-weight: 400;
+  --text-body-md-line-height: 1.45;
+  --text-body-sm-font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  --text-body-sm-font-size: 13px;
+  --text-body-sm-font-weight: 400;
+  --text-body-sm-line-height: 1.4;
+  --text-label-lg-font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  --text-label-lg-font-size: 14px;
+  --text-label-lg-font-weight: 600;
+  --text-label-lg-line-height: 1.25;
+  --text-label-md-font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  --text-label-md-font-size: 13px;
+  --text-label-md-font-weight: 600;
+  --text-label-md-line-height: 1.25;
+  --text-label-sm-font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  --text-label-sm-font-size: 12px;
+  --text-label-sm-font-weight: 600;
+  --text-label-sm-line-height: 1.25;
+  --text-label-sm-letter-spacing: 0.01em;
+  --text-caption-font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  --text-caption-font-size: 11px;
+  --text-caption-font-weight: 500;
+  --text-caption-line-height: 1.35;
+  --text-caption-letter-spacing: 0.01em;
+  --text-metric-lg-font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  --text-metric-lg-font-size: 28px;
+  --text-metric-lg-font-weight: 700;
+  --text-metric-lg-line-height: 1.1;
+  --text-metric-lg-letter-spacing: -0.02em;
+  --text-metric-lg-font-feature: "tnum" 1, "zero" 1;
+  --text-metric-md-font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  --text-metric-md-font-size: 18px;
+  --text-metric-md-font-weight: 600;
+  --text-metric-md-line-height: 1.2;
+  --text-metric-md-font-feature: "tnum" 1, "zero" 1;
+  --text-numeric-font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  --text-numeric-font-size: 14px;
+  --text-numeric-font-weight: 500;
+  --text-numeric-line-height: 1.35;
+  --text-numeric-font-feature: "tnum" 1, "zero" 1;
+
+  /* layout */
+  --layout-page-max-width: 760px;
+  --layout-quick-nav-offset: 12px;
+  --layout-quick-nav-width: 32px;
+  --layout-quick-nav-item-size: 24px;
+  --layout-intro-padding: var(--space-lg);
+  --layout-section-gap: var(--space-section-gap);
+  --layout-section-heading-gap: var(--space-xl);
+  --layout-entry-gap: var(--space-lg);
+
+  /* shadows */
+  --shadow-popover: 0 1px 2px rgba(32, 41, 35, 0.08);
+  --shadow-modal: 0 12px 32px rgba(32, 41, 35, 0.16);
+
+  /* transitions */
+  --transition-fast: 120ms;
+  --transition-normal: 160ms;
+  --transition-slow: 200ms;
+  --transition-ease-out: cubic-bezier(0.4, 0, 0.2, 1);
+}

@@ -1,3 +1,5 @@
+import { fileURLToPath, URL } from "node:url";
+
 import vue from "@vitejs/plugin-vue";
 import { defineConfig } from "cypress";
 
@@ -9,6 +11,11 @@ export default defineConfig({
       bundler: "vite",
       viteConfig: {
         plugins: [vue()],
+        resolve: {
+          alias: {
+            "@": fileURLToPath(new URL("./src", import.meta.url)),
+          },
+        },
         server: {
           port: 0,
         },

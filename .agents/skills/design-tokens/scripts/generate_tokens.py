@@ -33,7 +33,6 @@ FAMILY_PREFIXES = {
     "layout": "layout",
     "shadows": "shadow",
     "transitions": "transition",
-    "components": "component",
 }
 REQUIRED_FAMILIES = ("colors", "spacing", "rounded", "typography")
 TOKEN_REF_RE = re.compile(r"\{([a-zA-Z0-9_-]+(?:\.[a-zA-Z0-9_-]+)+)\}")
