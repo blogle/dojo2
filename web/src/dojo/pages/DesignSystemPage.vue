@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 
 import type {
   ComponentFixtureScenario,
@@ -27,8 +27,40 @@ interface CatalogSection {
 
 const introFixture = fixtureRegistry[manifest.page_shell.intro.fixture];
 const railExpanded = ref(false);
+const isCompactRail = ref(false);
+
+const compactRailMediaQuery = "(max-width: 720px)";
+let compactRailMatcher: MediaQueryList | null = null;
+
+const syncCompactRail = (matches: boolean) => {
+  isCompactRail.value = matches;
+
+  if (matches) {
+    railExpanded.value = false;
+  }
+};
+
+const handleCompactRailChange = (event: MediaQueryListEvent) => {
+  syncCompactRail(event.matches);
+};
+
+onMounted(() => {
+  compactRailMatcher = window.matchMedia(compactRailMediaQuery);
+  syncCompactRail(compactRailMatcher.matches);
+  compactRailMatcher.addEventListener("change", handleCompactRailChange);
+});
+
+onBeforeUnmount(() => {
+  compactRailMatcher?.removeEventListener("change", handleCompactRailChange);
+});
+
+const railIsExpanded = computed(
+  () => railExpanded.value && !isCompactRail.value,
+);
 const railWidth = computed(() =>
-  railExpanded.value ? "var(--space-nav-expanded)" : "var(--space-nav-collapsed)",
+  railIsExpanded.value
+    ? "var(--space-nav-expanded)"
+    : "var(--space-nav-collapsed)",
 );
 
 const sections = computed<CatalogSection[]>(() =>
@@ -48,8 +80,7 @@ const quickNavItems = computed(() =>
     key: section.id,
     label: `${index + 1}. ${section.title}`,
     visibleLabel: section.title,
-    icon:
-      index === 0 ? "foundations" : index === 1 ? "layout" : "navigation",
+    icon: index === 0 ? "foundations" : index === 1 ? "layout" : "navigation",
     href: `#${section.id}`,
   })),
 );
@@ -84,12 +115,19 @@ const showScenarioName = (
 </script>
 
 <template>
-  <main class="design-system-page" data-cy="design-system-page-root">
-    <aside class="design-system-page__nav-shell" :style="{ '--rail-width': railWidth }">
+  <main
+    class="design-system-page"
+    data-cy="design-system-page-root"
+    :style="{ '--rail-width': railWidth }"
+  >
+    <aside
+      class="design-system-page__nav-shell"
+      data-cy="design-system-page-nav-shell"
+    >
       <NavigationRail
         :items="quickNavItems"
-        :expanded="railExpanded"
-        :collapsible="true"
+        :expanded="railIsExpanded"
+        :collapsible="!isCompactRail"
         :full-height="true"
         aria-label="Design system sections"
         @toggle="railExpanded = !railExpanded"
@@ -98,11 +136,12 @@ const showScenarioName = (
 
     <div
       class="design-system-page__container"
+      data-cy="design-system-page-container"
       :style="{
         maxWidth: manifest.page_shell.container_max_width,
-        marginLeft: 'calc(var(--space-nav-collapsed) + var(--space-sm))',
         '--section-gap': manifest.page_shell.section_gap,
-        '--section-heading-gap': manifest.page_shell.section_heading_gap ?? 'var(--space-xl)',
+        '--section-heading-gap':
+          manifest.page_shell.section_heading_gap ?? 'var(--space-xl)',
       }"
     >
       <header class="design-system-page__header">
@@ -146,8 +185,13 @@ const showScenarioName = (
             class="design-system-page__entry"
           >
             <div class="design-system-page__entry-copy">
-              <h3 class="design-system-page__entry-title">{{ entry.fixture.title }}</h3>
-              <p v-if="entry.fixture.description" class="design-system-page__entry-description">
+              <h3 class="design-system-page__entry-title">
+                {{ entry.fixture.title }}
+              </h3>
+              <p
+                v-if="entry.fixture.description"
+                class="design-system-page__entry-description"
+              >
                 {{ entry.fixture.description }}
               </p>
             </div>
@@ -159,7 +203,10 @@ const showScenarioName = (
                 class="design-system-page__scenario"
               >
                 <div class="design-system-page__scenario-header">
-                  <p v-if="showScenarioName(entry.fixture, scenario)" class="design-system-page__scenario-name">
+                  <p
+                    v-if="showScenarioName(entry.fixture, scenario)"
+                    class="design-system-page__scenario-name"
+                  >
                     {{ scenario.name }}
                   </p>
                   <p
@@ -171,9 +218,11 @@ const showScenarioName = (
                 </div>
 
                 <div
-                  :class="scenarioClasses(
-                    scenarioPresentation(entry.fixture, scenario),
-                  )"
+                  :class="
+                    scenarioClasses(
+                      scenarioPresentation(entry.fixture, scenario),
+                    )
+                  "
                 >
                   <FixtureScenarioRenderer
                     :fixture="entry.fixture"
@@ -219,6 +268,8 @@ const showScenarioName = (
   width: min(100%, var(--layout-page-max-width));
   display: grid;
   gap: var(--section-gap);
+  margin-left: calc(var(--rail-width) + var(--space-page-inline));
+  transition: margin-left var(--motion-normal) var(--motion-ease-out);
 }
 
 .design-system-page__header {
@@ -372,7 +423,7 @@ const showScenarioName = (
 
 @media (max-width: 960px) {
   .design-system-page__container {
-    margin-left: calc(var(--space-nav-collapsed) + var(--space-sm));
+    margin-left: calc(var(--space-nav-collapsed) + var(--space-page-inline));
   }
 }
 
@@ -382,7 +433,7 @@ const showScenarioName = (
   }
 
   .design-system-page__container {
-    margin-left: calc(var(--space-nav-collapsed) + var(--space-sm));
+    margin-left: calc(var(--space-nav-collapsed) + var(--space-page-inline));
     width: 100%;
   }
 }

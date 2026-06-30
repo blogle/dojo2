@@ -19,12 +19,17 @@ describe("NavigationRail", () => {
     const Harness = defineComponent({
       setup() {
         const expanded = ref(false);
-        const collapsed = fixtures.scenarios.find((scenario) => scenario.name === "collapsed");
-        const expandedScenario = fixtures.scenarios.find((scenario) => scenario.name === "expanded");
+        const collapsed = fixtures.scenarios.find(
+          (scenario) => scenario.name === "collapsed",
+        );
+        const expandedScenario = fixtures.scenarios.find(
+          (scenario) => scenario.name === "expanded",
+        );
 
         return {
           expanded,
-          items: expandedScenario?.props?.items ?? collapsed?.props?.items ?? [],
+          items:
+            expandedScenario?.props?.items ?? collapsed?.props?.items ?? [],
         };
       },
       render() {
@@ -96,5 +101,39 @@ describe("NavigationRail", () => {
       "not.contain.text",
       "1. Foundations",
     );
+  });
+
+  it("keeps demo items inert while rendering the same anchor markup", () => {
+    mount(fixtures.component, {
+      props: {
+        expanded: true,
+        items: [
+          {
+            kind: "anchor",
+            key: "budget",
+            label: "Budget",
+            icon: "budget",
+            href: "#budget",
+            current: true,
+            interactive: false,
+          },
+        ],
+      },
+    });
+
+    cy.window().then((window) => {
+      window.history.replaceState(
+        {},
+        "",
+        window.location.pathname + window.location.search,
+      );
+    });
+
+    cy.get("[data-cy=navigation-rail-item-budget]")
+      .should("have.prop", "tagName", "A")
+      .and("have.attr", "aria-disabled", "true")
+      .click();
+
+    cy.location("hash").should("eq", "");
   });
 });

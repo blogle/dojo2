@@ -70,8 +70,11 @@ const iconParts = (icon: string): IconPart[] => {
   return glyphs[icon] ?? [{ tag: "circle", attrs: { cx: 12, cy: 12, r: 4 } }];
 };
 
-const itemTag = (item: NavigationRailItem) =>
-  item.interactive === false ? "button" : "a";
+const onItemClick = (event: MouseEvent, item: NavigationRailItem) => {
+  if (item.interactive === false) {
+    event.preventDefault();
+  }
+};
 </script>
 
 <template>
@@ -86,17 +89,17 @@ const itemTag = (item: NavigationRailItem) =>
     data-cy="navigation-rail-root"
   >
     <div class="navigation-rail__items">
-      <component
-        :is="itemTag(item)"
+      <a
         v-for="item in items"
         :key="item.key"
-        :href="item.interactive === false ? undefined : item.href"
-        :type="item.interactive === false ? 'button' : undefined"
+        :href="item.href"
         class="navigation-rail__item"
         :class="{ 'navigation-rail__item--current': item.current }"
         :data-cy="`navigation-rail-item-${item.key}`"
         :aria-label="item.label"
         :aria-current="item.current ? 'page' : undefined"
+        :aria-disabled="item.interactive === false ? 'true' : undefined"
+        @click="onItemClick($event, item)"
       >
         <span class="navigation-rail__icon" aria-hidden="true">
           <svg
@@ -115,9 +118,15 @@ const itemTag = (item: NavigationRailItem) =>
             />
           </svg>
         </span>
-        <span v-if="expanded" class="navigation-rail__label">{{ item.visibleLabel ?? item.label }}</span>
-        <span v-if="item.badge !== undefined && expanded" class="navigation-rail__badge">{{ item.badge }}</span>
-      </component>
+        <span v-if="expanded" class="navigation-rail__label">{{
+          item.visibleLabel ?? item.label
+        }}</span>
+        <span
+          v-if="item.badge !== undefined && expanded"
+          class="navigation-rail__badge"
+          >{{ item.badge }}</span
+        >
+      </a>
     </div>
 
     <button
@@ -125,7 +134,9 @@ const itemTag = (item: NavigationRailItem) =>
       type="button"
       class="navigation-rail__toggle"
       data-cy="navigation-rail-toggle"
-      :aria-label="expanded ? 'Collapse navigation rail' : 'Expand navigation rail'"
+      :aria-label="
+        expanded ? 'Collapse navigation rail' : 'Expand navigation rail'
+      "
       @click="emit('toggle')"
     >
       <span class="navigation-rail__icon" aria-hidden="true">
@@ -179,6 +190,7 @@ const itemTag = (item: NavigationRailItem) =>
 
 .navigation-rail__item,
 .navigation-rail__toggle {
+  appearance: none;
   min-height: 40px;
   display: flex;
   align-items: center;
