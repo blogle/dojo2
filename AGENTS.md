@@ -13,6 +13,7 @@ dojo is a local-first personal finance repository with a FastAPI API in `api/`, 
 - Overview: `README.md`
 - Development workflow: `CONTRIBUTING.md`
 - Product behavior: `SPEC.md`
+- Visual and interaction design: `DESIGN.md`
 - Current implementation: `ARCHITECTURE.md`
 - Durable technical tradeoffs: `DECISIONS.md`
 
@@ -21,6 +22,7 @@ dojo is a local-first personal finance repository with a FastAPI API in `api/`, 
 | Change type | Update |
 | --- | --- |
 | Product behavior or acceptance criteria | `SPEC.md` |
+| Visual design tokens, interaction patterns, or shared component specs | `DESIGN.md` |
 | Runtime structure, persistence model, SQL organization, testing architecture | `ARCHITECTURE.md` |
 | Durable technical decision or tradeoff | `DECISIONS.md` |
 | Workflow, commands, repository policy guidance | `CONTRIBUTING.md` |
