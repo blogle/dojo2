@@ -1,0 +1,16 @@
+# terms.yaml
+#
+# Keep this list small and confirmed. Each entry is a literal banned phrase,
+# not a rephrasing of the entire SPEC.md terminology model.
+
+banned_phrases:
+  - phrase: "last status change"
+    reason: >
+      Status (Cleared/Pending) and Reconciliation are different concepts.
+      The "changes since X" toggle refers to reconciliation diffs, not the
+      upstream bank-sync status of a row. Use "last reconciliation."
+
+  - phrase: "unreconciled"
+    reason: >
+      Do not relabel the transaction Status column or badges with
+      reconciliation vocabulary. Status values are Cleared/Pending.
