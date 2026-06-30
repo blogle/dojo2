@@ -25,10 +25,12 @@ export interface HierarchicalCategoryState {
 export interface HierarchicalCategoryRow {
   key: string;
   label: string;
+  icon?: string;
   group?: boolean;
   expanded?: boolean;
   depth?: number;
   cells: Record<string, string>;
+  cellVariants?: Record<string, "positive" | "warning" | "error">;
   states?: HierarchicalCategoryState[];
   children?: HierarchicalCategoryRow[];
 }
@@ -131,6 +133,13 @@ const isSelected = (key: string) => props.selectedKeys.includes(key);
               >
                 ::
               </span>
+              <span
+                v-if="row.icon"
+                class="hierarchical-category-table__row-icon"
+                aria-hidden="true"
+              >
+                {{ row.icon }}
+              </span>
               <span class="hierarchical-category-table__label">{{ row.label }}</span>
               <div v-if="row.states?.length" class="hierarchical-category-table__states">
                 <StateBadge
@@ -148,7 +157,12 @@ const isSelected = (key: string) => props.selectedKeys.includes(key);
             v-for="column in columns.slice(1)"
             :key="`${row.key}-${column.key}`"
             class="hierarchical-category-table__cell"
-            :class="{ 'hierarchical-category-table__cell--end': column.align === 'end' }"
+            :class="{
+              'hierarchical-category-table__cell--end': column.align === 'end',
+              'hierarchical-category-table__cell--positive': row.cellVariants?.[column.key] === 'positive',
+              'hierarchical-category-table__cell--warning': row.cellVariants?.[column.key] === 'warning',
+              'hierarchical-category-table__cell--error': row.cellVariants?.[column.key] === 'error',
+            }"
           >
             {{ row.cells[column.key] }}
           </td>
@@ -251,5 +265,22 @@ const isSelected = (key: string) => props.selectedKeys.includes(key);
   flex-wrap: wrap;
   gap: var(--space-xs);
   margin-left: var(--space-xs);
+}
+
+.hierarchical-category-table__row-icon {
+  color: var(--color-on-surface-muted);
+  font-size: var(--text-body-sm-font-size);
+}
+
+.hierarchical-category-table__cell--positive {
+  color: var(--color-positive);
+}
+
+.hierarchical-category-table__cell--warning {
+  color: var(--color-warning);
+}
+
+.hierarchical-category-table__cell--error {
+  color: var(--color-error);
 }
 </style>

@@ -68,6 +68,14 @@ watch(
         <header class="form-modal__header">
           <h2 v-if="title" class="form-modal__title">{{ title }}</h2>
           <slot name="header" />
+          <button
+            type="button"
+            class="form-modal__close"
+            aria-label="Close"
+            @click="emit('close')"
+          >
+            ×
+          </button>
         </header>
 
         <div class="form-modal__body">
@@ -123,10 +131,30 @@ watch(
 }
 
 .form-modal__header {
-  display: grid;
-  gap: var(--space-xs);
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-md);
   padding: var(--space-lg) var(--space-xl);
   border-bottom: 1px solid var(--color-outline);
+}
+
+.form-modal__close {
+  flex-shrink: 0;
+  min-width: 28px;
+  min-height: 28px;
+  border: 0;
+  border-radius: var(--radius-all);
+  background: transparent;
+  color: var(--color-on-surface-muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.form-modal__close:hover {
+  background: var(--color-surface-muted);
+  color: var(--color-on-surface);
 }
 
 .form-modal__title {
