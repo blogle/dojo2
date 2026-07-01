@@ -387,7 +387,7 @@ class DojoService:
                         "sort_order": category.sort_order,
                         "is_hidden": category.is_hidden,
                         "is_active": category.is_active,
-                        "target_amount_minor": category.target_amount_minor,
+                        "target_amount_minor": None,
                         "due_date_rule": category.due_date_rule,
                         "metadata": json_dumps(
                             {"linked_account_name": category.linked_account_name}
