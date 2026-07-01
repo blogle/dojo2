@@ -41,7 +41,9 @@ if (!manifest.page_shell) {
 }
 
 if (!Array.isArray(manifest.sections) || manifest.sections.length === 0) {
-  throw new Error("design-system manifest must declare at least one populated section");
+  throw new Error(
+    "design-system manifest must declare at least one populated section",
+  );
 }
 
 export default manifest;

@@ -240,9 +240,7 @@ export async function updateCategory(
   });
 }
 
-export async function fetchCategoryGoal(
-  categoryId: string,
-): Promise<{
+export async function fetchCategoryGoal(categoryId: string): Promise<{
   category_id: string;
   goal_type: string | null;
   goal_amount_minor: number | null;

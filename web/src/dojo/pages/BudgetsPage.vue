@@ -24,14 +24,8 @@ import CategoryDetailModal from "../components/budget/CategoryDetailModal.vue";
 import MoveFundsModal from "../components/budget/MoveFundsModal.vue";
 import FundGroupModal from "../components/budget/FundGroupModal.vue";
 
-
-const {
-  state,
-  initialize,
-  setMonth,
-  saveCategory,
-  saveCategoryGroup,
-} = useAppState();
+const { state, initialize, setMonth, saveCategory, saveCategoryGroup } =
+  useAppState();
 
 const selectedMonth = ref("");
 const isReordering = ref(false);
@@ -64,7 +58,8 @@ const currentMonth = computed(() => {
 });
 
 const isHistorical = computed(
-  () => selectedMonth.value !== "" && selectedMonth.value !== currentMonth.value,
+  () =>
+    selectedMonth.value !== "" && selectedMonth.value !== currentMonth.value,
 );
 
 const navItems = computed(() => [
@@ -132,9 +127,10 @@ function computeVariants(
   return variants;
 }
 
-function computeStates(
-  cat: Category,
-): Array<{ label: string; variant: "positive" | "warning" | "error" | "info" }> {
+function computeStates(cat: Category): Array<{
+  label: string;
+  variant: "positive" | "warning" | "error" | "info";
+}> {
   const states: Array<{
     label: string;
     variant: "positive" | "warning" | "error" | "info";
@@ -166,7 +162,9 @@ const tableRows = computed<HierarchicalCategoryRow[]>(() => {
       key: cat.category_id,
       label: cat.name,
       cells: {
-        goal: cat.goal_type ? formatCurrency(cat.goal_amount_minor ?? 0) : "\u2014",
+        goal: cat.goal_type
+          ? formatCurrency(cat.goal_amount_minor ?? 0)
+          : "\u2014",
         dueDate: formatGoalDueDate(cat),
         available: formatCurrency(cat.available_minor),
         activity: formatCurrency(cat.month_activity_minor),
@@ -226,8 +224,7 @@ const unconfiguredGoalCount = computed(
 );
 
 const negativeAtb = computed(
-  () =>
-    state.budget != null && state.budget.available_to_budget_minor < 0,
+  () => state.budget != null && state.budget.available_to_budget_minor < 0,
 );
 
 const retiredCategories = computed(() =>
@@ -248,8 +245,15 @@ function toggleReorder() {
   if (!isReordering.value) reorderChanges.value = [];
 }
 
-function handleReorder(key: string, targetKey: string, position: "before" | "after") {
-  reorderChanges.value = [...reorderChanges.value, { key, targetKey, position }];
+function handleReorder(
+  key: string,
+  targetKey: string,
+  position: "before" | "after",
+) {
+  reorderChanges.value = [
+    ...reorderChanges.value,
+    { key, targetKey, position },
+  ];
 }
 
 function handleRowSelect(key: string) {
@@ -335,7 +339,10 @@ async function submitFundGroup(
   items: Array<{ categoryId: string; monthlyGoalMinor: number }>,
 ) {
   for (const item of items) {
-    await saveCategory({ monthly_funding_minor: item.monthlyGoalMinor }, item.categoryId);
+    await saveCategory(
+      { monthly_funding_minor: item.monthlyGoalMinor },
+      item.categoryId,
+    );
   }
   closeModal();
 }
@@ -501,20 +508,34 @@ onMounted(() => {
       subtitle="Categories you've retired from your budget."
       @close="closeModal"
     >
-      <p style="color: var(--color-on-surface-muted); margin: 0;">
-        Retired categories are hidden from the budget table. Use Restore to bring them back.
+      <p style="color: var(--color-on-surface-muted); margin: 0">
+        Retired categories are hidden from the budget table. Use Restore to
+        bring them back.
       </p>
-      <div v-if="retiredCategories.length === 0" style="padding: var(--space-lg) 0; color: var(--color-on-surface-muted);">
+      <div
+        v-if="retiredCategories.length === 0"
+        style="padding: var(--space-lg) 0; color: var(--color-on-surface-muted)"
+      >
         No retired categories.
       </div>
-      <div v-else style="display: grid; gap: var(--space-sm);">
+      <div v-else style="display: grid; gap: var(--space-sm)">
         <div
           v-for="cat in retiredCategories"
           :key="cat.category_id"
-          style="display: flex; align-items: center; justify-content: space-between; padding: var(--space-sm); border: 1px solid var(--color-outline);"
+          style="
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: var(--space-sm);
+            border: 1px solid var(--color-outline);
+          "
         >
           <span>{{ cat.name }}</span>
-          <Button variant="tertiary" size="sm" @click="restoreCategory(cat.category_id)">
+          <Button
+            variant="tertiary"
+            size="sm"
+            @click="restoreCategory(cat.category_id)"
+          >
             Restore
           </Button>
         </div>

@@ -31,6 +31,11 @@ export default defineComponent({
     },
   },
   setup(props) {
-    return () => h(props.fixture.component, props.scenario.props ?? {}, createSlots(props.scenario.slots));
+    return () =>
+      h(
+        props.fixture.component,
+        props.scenario.props ?? {},
+        createSlots(props.scenario.slots),
+      );
   },
 });
