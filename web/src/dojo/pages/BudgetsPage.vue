@@ -20,6 +20,7 @@ import FormModal from "../components/overlays/FormModal.vue";
 import LargeDetailModal from "../components/overlays/LargeDetailModal.vue";
 import TextField from "../components/forms/TextField.vue";
 import SelectField from "../components/forms/SelectField.vue";
+import CategoryDetailModal from "../components/budget/CategoryDetailModal.vue";
 
 
 const {
@@ -445,6 +446,12 @@ onMounted(() => {
         @update:goal-due-date="goalDueDate = $event"
       />
     </FormModal>
+
+    <CategoryDetailModal
+      :visible="activeModal === 'category-detail'"
+      :category="selectedCategory"
+      @close="closeModal"
+    />
 
     <LargeDetailModal
       :visible="activeModal === 'retired'"

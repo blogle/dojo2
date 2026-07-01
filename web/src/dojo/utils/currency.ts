@@ -16,3 +16,12 @@ export function formatMonth(month: string): string {
   const date = new Date(year, monthNum - 1);
   return date.toLocaleDateString("en-US", { month: "long", year: "numeric" });
 }
+
+export function formatGoalType(type: string): string {
+  const labels: Record<string, string> = {
+    ONE_TIME: "One-time",
+    RECURRING: "Recurring",
+    DISCRETIONARY: "Discretionary",
+  };
+  return labels[type] ?? type;
+}
