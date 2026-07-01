@@ -21,6 +21,8 @@ import LargeDetailModal from "../components/overlays/LargeDetailModal.vue";
 import TextField from "../components/forms/TextField.vue";
 import SelectField from "../components/forms/SelectField.vue";
 import CategoryDetailModal from "../components/budget/CategoryDetailModal.vue";
+import MoveFundsModal from "../components/budget/MoveFundsModal.vue";
+import FundGroupModal from "../components/budget/FundGroupModal.vue";
 
 
 const {
@@ -313,6 +315,31 @@ async function submitAddCategory() {
   closeModal();
 }
 
+async function submitMoveFunds(payload: {
+  from: string;
+  to: string;
+  amountMinor: number;
+}) {
+  const fromCat = state.categories.find((c) => c.category_id === payload.from);
+  const toCat = state.categories.find((c) => c.category_id === payload.to);
+  if (!fromCat || !toCat) return;
+  const available = fromCat.available_minor;
+  const newAvailable = available - payload.amountMinor;
+  await saveCategory({ available_minor: newAvailable }, payload.from);
+  const toAvailable = toCat.available_minor + payload.amountMinor;
+  await saveCategory({ available_minor: toAvailable }, payload.to);
+  closeModal();
+}
+
+async function submitFundGroup(
+  items: Array<{ categoryId: string; monthlyGoalMinor: number }>,
+) {
+  for (const item of items) {
+    await saveCategory({ monthly_funding_minor: item.monthlyGoalMinor }, item.categoryId);
+  }
+  closeModal();
+}
+
 onMounted(() => {
   initialize().then(() => {
     selectedMonth.value = state.month || currentMonth.value;
@@ -451,6 +478,21 @@ onMounted(() => {
       :visible="activeModal === 'category-detail'"
       :category="selectedCategory"
       @close="closeModal"
+    />
+
+    <FundGroupModal
+      :visible="activeModal === 'fund-group'"
+      :group="selectedGroup"
+      :categories="state.categories"
+      @close="closeModal"
+      @submit="submitFundGroup"
+    />
+
+    <MoveFundsModal
+      :visible="activeModal === 'move-funds'"
+      :categories="state.categories"
+      @close="closeModal"
+      @submit="submitMoveFunds"
     />
 
     <LargeDetailModal
