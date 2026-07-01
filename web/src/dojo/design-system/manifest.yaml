@@ -122,3 +122,9 @@ sections:
         fixture: overlays/FormModal.fixtures.ts
       - component: LargeDetailModal
         fixture: overlays/LargeDetailModal.fixtures.ts
+
+  - id: budget
+    title: Budget Components
+    entries:
+      - component: GoalEditor
+        fixture: budget/GoalEditor.fixtures.ts
