@@ -12,14 +12,22 @@ import PageHeader from "../components/data/PageHeader.vue";
 import PersistentWarningBanner from "../components/feedback/PersistentWarningBanner.vue";
 import HistoricalBanner from "../components/feedback/HistoricalBanner.vue";
 import ReorderModeBanner from "../components/feedback/ReorderModeBanner.vue";
+import GoalEditor from "../components/budget/GoalEditor.vue";
 import NavigationRail from "../components/navigation/NavigationRail.vue";
 import HierarchicalCategoryTable from "../components/tables/HierarchicalCategoryTable.vue";
 import type { HierarchicalCategoryRow } from "../components/tables/HierarchicalCategoryTable.vue";
+import FormModal from "../components/overlays/FormModal.vue";
+import LargeDetailModal from "../components/overlays/LargeDetailModal.vue";
+import TextField from "../components/forms/TextField.vue";
+import SelectField from "../components/forms/SelectField.vue";
+
 
 const {
   state,
   initialize,
   setMonth,
+  saveCategory,
+  saveCategoryGroup,
 } = useAppState();
 
 const selectedMonth = ref("");
@@ -38,6 +46,14 @@ const activeModal = ref<
 >(null);
 const selectedCategory = ref<Category | null>(null);
 const selectedGroup = ref<CategoryGroup | null>(null);
+
+const groupName = ref("");
+const categoryName = ref("");
+const categoryGroupId = ref("");
+const goalType = ref<string | null>(null);
+const goalAmountMinor = ref<number | null>(null);
+const goalFrequency = ref<string | null>(null);
+const goalDueDate = ref<string | null>(null);
 
 const currentMonth = computed(() => {
   const now = new Date();
@@ -211,6 +227,14 @@ const negativeAtb = computed(
     state.budget != null && state.budget.available_to_budget_minor < 0,
 );
 
+const retiredCategories = computed(() =>
+  state.categories.filter((c) => c.is_hidden),
+);
+
+async function restoreCategory(categoryId: string) {
+  await saveCategory({ is_hidden: false }, categoryId);
+}
+
 function handleAdd(key: string) {
   if (key === "add-group") activeModal.value = "add-group";
   else if (key === "add-category") activeModal.value = "add-category";
@@ -252,6 +276,40 @@ function handleMonthSelect() {
 function returnToCurrent() {
   selectedMonth.value = currentMonth.value;
   setMonth(currentMonth.value);
+}
+
+function closeModal() {
+  activeModal.value = null;
+  selectedCategory.value = null;
+  selectedGroup.value = null;
+  groupName.value = "";
+  categoryName.value = "";
+  categoryGroupId.value = "";
+  goalType.value = null;
+  goalAmountMinor.value = null;
+  goalFrequency.value = null;
+  goalDueDate.value = null;
+}
+
+async function submitAddGroup() {
+  if (!groupName.value.trim()) return;
+  await saveCategoryGroup({ name: groupName.value.trim() });
+  closeModal();
+}
+
+async function submitAddCategory() {
+  if (!categoryName.value.trim() || !categoryGroupId.value) return;
+  const sort_order = Date.now();
+  await saveCategory({
+    group_id: categoryGroupId.value,
+    name: categoryName.value.trim(),
+    sort_order,
+    goal_type: goalType.value,
+    goal_amount_minor: goalAmountMinor.value,
+    goal_frequency: goalFrequency.value,
+    goal_due_date: goalDueDate.value,
+  });
+  closeModal();
 }
 
 onMounted(() => {
@@ -338,6 +396,84 @@ onMounted(() => {
         @reorder="handleReorder"
       />
     </main>
+
+    <FormModal
+      :visible="activeModal === 'add-group'"
+      title="Add category group"
+      submit-text="Save"
+      @submit="submitAddGroup"
+      @cancel="closeModal"
+      @close="closeModal"
+    >
+      <TextField
+        v-model="groupName"
+        label="Group name"
+        placeholder="e.g. Housing"
+        helper="Empty category groups are valid. You can add categories later."
+      />
+    </FormModal>
+
+    <FormModal
+      :visible="activeModal === 'add-category'"
+      title="Add category"
+      submit-text="Save"
+      @submit="submitAddCategory"
+      @cancel="closeModal"
+      @close="closeModal"
+    >
+      <SelectField
+        v-model="categoryGroupId"
+        label="Parent group"
+        :options="[
+          { value: '', label: 'Choose a group...' },
+          ...state.categoryGroups.map((g) => ({
+            value: g.group_id,
+            label: g.name,
+          })),
+        ]"
+        helper="Choose where this category belongs."
+      />
+      <GoalEditor
+        :goal-type="goalType"
+        :goal-amount-minor="goalAmountMinor"
+        :goal-frequency="goalFrequency"
+        :goal-due-date="goalDueDate"
+        :monthly-funding-minor="0"
+        @update:goal-type="goalType = $event"
+        @update:goal-amount-minor="goalAmountMinor = $event"
+        @update:goal-frequency="goalFrequency = $event"
+        @update:goal-due-date="goalDueDate = $event"
+      />
+    </FormModal>
+
+    <LargeDetailModal
+      :visible="activeModal === 'retired'"
+      title="Retired categories"
+      subtitle="Categories you've retired from your budget."
+      @close="closeModal"
+    >
+      <p style="color: var(--color-on-surface-muted); margin: 0;">
+        Retired categories are hidden from the budget table. Use Restore to bring them back.
+      </p>
+      <div v-if="retiredCategories.length === 0" style="padding: var(--space-lg) 0; color: var(--color-on-surface-muted);">
+        No retired categories.
+      </div>
+      <div v-else style="display: grid; gap: var(--space-sm);">
+        <div
+          v-for="cat in retiredCategories"
+          :key="cat.category_id"
+          style="display: flex; align-items: center; justify-content: space-between; padding: var(--space-sm); border: 1px solid var(--color-outline);"
+        >
+          <span>{{ cat.name }}</span>
+          <Button variant="tertiary" size="sm" @click="restoreCategory(cat.category_id)">
+            Restore
+          </Button>
+        </div>
+      </div>
+      <template #footer>
+        <Button variant="secondary" @click="closeModal">Close</Button>
+      </template>
+    </LargeDetailModal>
   </div>
 </template>
 
