@@ -389,6 +389,10 @@ class DojoService:
                         "is_active": category.is_active,
                         "target_amount_minor": category.target_amount_minor,
                         "due_date_rule": category.due_date_rule,
+                        "goal_type": getattr(category, "goal_type", None),
+                        "goal_amount_minor": getattr(category, "goal_amount_minor", None),
+                        "goal_frequency": getattr(category, "goal_frequency", None),
+                        "goal_due_date": getattr(category, "goal_due_date", None),
                         "metadata": json_dumps(
                             {"linked_account_name": category.linked_account_name}
                         ),
@@ -1034,7 +1038,7 @@ class DojoService:
             "unconfigured_goal_count": sum(
                 1
                 for c in categories
-                if c["category_kind"] == CATEGORY_KIND_STANDARD and c["goal_type"] is None
+                if c["category_kind"] == CATEGORY_KIND_STANDARD and c.get("goal_type") is None
             ),
         }
 
