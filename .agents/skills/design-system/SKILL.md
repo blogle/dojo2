@@ -121,6 +121,68 @@ Examples already aligned with the current docs include:
 The design-system page may use `NavigationRail` with table-of-contents entries;
 the same shared component can be used elsewhere with route-oriented items.
 
+## Catalog entry criteria
+
+Before adding a component to `manifest.yaml`, evaluate whether it belongs in
+the design system catalog. The catalog is for reusable design primitives and
+complex bespoke components — not page-specific compositions of already-cataloged
+atoms.
+
+### Decision checklist
+
+Run through these questions before adding an entry:
+
+1. **Is it atomic and reused across multiple pages/screens?**
+   If yes, it belongs in the catalog. These are the building blocks: `Button`,
+   `TextField`, `Stack`, `Tabs`, etc.
+
+2. **Does it have nontrivial internal logic, layout, or interaction that isn't
+   just a stack of pre-existing atoms?**
+   If yes, it belongs in the catalog even if it is page-specific. Nontrivial
+   means custom state machines, complex responsive behavior, multi-step
+   workflows, or interaction patterns that cannot be assembled from the
+   existing atom set without significant glue code.
+
+3. **Can it be fully described as "atom A + atom B + atom C" with no added
+   behavior, state, or layout complexity beyond wrapping?**
+   If yes, do not catalog it. It is a page-level composition, not a design
+   primitive. The atoms it composes should speak for themselves on the catalog
+   page.
+
+### Include examples (belong in catalog)
+
+- **`FormModal`** — Wraps a dialog with focus trapping, keyboard dismissal,
+  form submission wiring, and validation error layout. The internal behavior
+  (focus management, close-on-escape, submit-on-enter) is not trivially
+  assembled from a generic dialog + a form.
+- **`LargeDetailModal`** — Responsive full-height panel with header, scrollable
+  body slots, footer, and tab slot. The layout contract and slot structure
+  represent a reusable pattern beyond a simple dialog wrapper.
+- **`HierarchicalCategoryTable`** — Tree-structured table with expand/collapse,
+  indentation, and row-level actions. The hierarchical data handling and
+  interaction model are not derivable from `TableShell` alone.
+
+### Exclude examples (page-level compositions, not catalog entries)
+
+- **`MoveFundsModal`** — Two `SelectField` dropdowns + one `CurrencyField` +
+  a submit button inside `FormModal`. No tabs, no custom state, no layout
+  complexity beyond vertical stacking. This is "atoms A + B + C."
+- **`FundGroupModal`** — A dynamic-length list of `CurrencyField` inputs
+  inside `FormModal` with a computed total. The aggregation logic is trivial
+  (`parseFloat` + sum) and the layout is a flat grid. Compose it from
+  `FormModal` + `CurrencyField` on the page.
+- **`CategoryDetailModal`** — `LargeDetailModal` with a `Tabs` slot containing
+  `KeyValueList` (overview), a stub (transactions), a read-only `GoalEditor`
+  (goals), and another stub (funding). The tab-switching is just a `ref` keyed
+  to `Tabs`; the content sections delegate to already-cataloged atoms.
+
+### Rule of thumb
+
+If a colleague can look at the catalog page and immediately understand the
+component's visual and behavioral contract without seeing the source, it belongs
+in the catalog. If it is just a wiring diagram of other catalog entries, it
+does not.
+
 ## Fixture philosophy
 
 Fixtures are for representative visual/design review states, not exhaustive
