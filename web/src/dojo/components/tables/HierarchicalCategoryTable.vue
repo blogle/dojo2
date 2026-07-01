@@ -82,10 +82,14 @@ const initState = () => {
 
 initState();
 
-const flattenRows = (rows: HierarchicalCategoryRow[]): HierarchicalCategoryRow[] => {
+const flattenRows = (
+  rows: HierarchicalCategoryRow[],
+): HierarchicalCategoryRow[] => {
   const order = topOrder.value.length ? topOrder.value : rows.map((r) => r.key);
   const byKey = new Map(rows.map((r) => [r.key, r]));
-  const ordered = order.map((k) => byKey.get(k)).filter(Boolean) as HierarchicalCategoryRow[];
+  const ordered = order
+    .map((k) => byKey.get(k))
+    .filter(Boolean) as HierarchicalCategoryRow[];
   const flattened: HierarchicalCategoryRow[] = [];
 
   const visit = (row: HierarchicalCategoryRow, depth: number) => {
@@ -96,7 +100,9 @@ const flattenRows = (rows: HierarchicalCategoryRow[]): HierarchicalCategoryRow[]
       const cOrder = childOrder.value[row.key];
       const cByKey = new Map(row.children.map((c) => [c.key, c]));
       const cOrdered = cOrder
-        ? cOrder.map((k) => cByKey.get(k)).filter(Boolean) as HierarchicalCategoryRow[]
+        ? (cOrder
+            .map((k) => cByKey.get(k))
+            .filter(Boolean) as HierarchicalCategoryRow[])
         : row.children;
       cOrdered.forEach((child) => visit(child, depth + 1));
     }
@@ -162,8 +168,12 @@ const onDrop = (key: string) => {
       if (pos === "after") tgtIdx++;
       topOrder.value.splice(tgtIdx, 0, src);
     } else if (!srcRow?.group && !tgtRow?.group) {
-      const srcParent = visible.find((r) => r.children?.some((c) => c.key === src))?.key;
-      const tgtParent = visible.find((r) => r.children?.some((c) => c.key === tgt))?.key;
+      const srcParent = visible.find((r) =>
+        r.children?.some((c) => c.key === src),
+      )?.key;
+      const tgtParent = visible.find((r) =>
+        r.children?.some((c) => c.key === tgt),
+      )?.key;
       if (srcParent && tgtParent && srcParent === tgtParent) {
         const siblings = childOrder.value[srcParent];
         if (siblings) {
@@ -192,7 +202,10 @@ const isDragging = (key: string) => dragKey.value === key;
 </script>
 
 <template>
-  <div class="hierarchical-category-table" data-cy="hierarchical-category-table-root">
+  <div
+    class="hierarchical-category-table"
+    data-cy="hierarchical-category-table-root"
+  >
     <table class="hierarchical-category-table__table">
       <thead>
         <tr>
@@ -217,9 +230,12 @@ const isDragging = (key: string) => dragKey.value === key;
           class="hierarchical-category-table__row"
           :class="{
             'hierarchical-category-table__row--group': row.group,
-            'hierarchical-category-table__row--group-expanded': row.group && row.expanded !== false,
+            'hierarchical-category-table__row--group-expanded':
+              row.group && row.expanded !== false,
             'hierarchical-category-table__row--selected': isSelected(row.key),
-            'hierarchical-category-table__row--drag-target': isDragTarget(row.key),
+            'hierarchical-category-table__row--drag-target': isDragTarget(
+              row.key,
+            ),
             'hierarchical-category-table__row--dragging': isDragging(row.key),
           }"
           :draggable="reorderable"
@@ -240,12 +256,19 @@ const isDragging = (key: string) => dragKey.value === key;
                 v-if="expandable && row.children?.length"
                 type="button"
                 class="hierarchical-category-table__disclosure"
-                :aria-label="expandedState[row.key] === false ? 'Expand row' : 'Collapse row'"
+                :aria-label="
+                  expandedState[row.key] === false
+                    ? 'Expand row'
+                    : 'Collapse row'
+                "
                 @click.stop="handleToggle(row.key)"
               >
                 <svg
                   class="hierarchical-category-table__chevron"
-                  :class="{ 'hierarchical-category-table__chevron--collapsed': expandedState[row.key] === false }"
+                  :class="{
+                    'hierarchical-category-table__chevron--collapsed':
+                      expandedState[row.key] === false,
+                  }"
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
@@ -281,8 +304,13 @@ const isDragging = (key: string) => dragKey.value === key;
               >
                 {{ row.icon }}
               </span>
-              <span class="hierarchical-category-table__label">{{ row.label }}</span>
-              <div v-if="row.states?.length" class="hierarchical-category-table__states">
+              <span class="hierarchical-category-table__label">{{
+                row.label
+              }}</span>
+              <div
+                v-if="row.states?.length"
+                class="hierarchical-category-table__states"
+              >
                 <StateBadge
                   v-for="state in row.states"
                   :key="`${row.key}-${state.label}`"
@@ -300,9 +328,12 @@ const isDragging = (key: string) => dragKey.value === key;
             class="hierarchical-category-table__cell"
             :class="{
               'hierarchical-category-table__cell--end': column.align === 'end',
-              'hierarchical-category-table__cell--positive': row.cellVariants?.[column.key] === 'positive',
-              'hierarchical-category-table__cell--warning': row.cellVariants?.[column.key] === 'warning',
-              'hierarchical-category-table__cell--error': row.cellVariants?.[column.key] === 'error',
+              'hierarchical-category-table__cell--positive':
+                row.cellVariants?.[column.key] === 'positive',
+              'hierarchical-category-table__cell--warning':
+                row.cellVariants?.[column.key] === 'warning',
+              'hierarchical-category-table__cell--error':
+                row.cellVariants?.[column.key] === 'error',
             }"
           >
             {{ row.cells[column.key] }}

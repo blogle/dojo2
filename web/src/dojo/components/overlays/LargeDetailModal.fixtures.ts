@@ -7,7 +7,8 @@ type LargeDetailModalProps = InstanceType<typeof LargeDetailModal>["$props"];
 export default defineFixtures<LargeDetailModalProps>({
   component: LargeDetailModal,
   title: "Large Detail Modal",
-  description: "Large detail modal shell with header, optional tabs, scrollable body, and footer.",
+  description:
+    "Large detail modal shell with header, optional tabs, scrollable body, and footer.",
   scenarios: [
     {
       name: "default",

@@ -7,7 +7,8 @@ type TabsProps = InstanceType<typeof Tabs>["$props"];
 export default defineFixtures<TabsProps>({
   component: Tabs,
   title: "Tabs",
-  description: "Compact in-surface navigation for detail sections and modal panes.",
+  description:
+    "Compact in-surface navigation for detail sections and modal panes.",
   presentation: {
     container: "none",
   },

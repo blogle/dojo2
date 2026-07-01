@@ -9,7 +9,8 @@ type HierarchicalCategoryTableProps = InstanceType<
 export default defineFixtures<HierarchicalCategoryTableProps>({
   component: HierarchicalCategoryTable,
   title: "Hierarchical Category Table",
-  description: "Unified budget table with groups, category rows, additive states, and reorder mode support.",
+  description:
+    "Unified budget table with groups, category rows, additive states, and reorder mode support.",
   scenarios: [
     {
       name: "default",

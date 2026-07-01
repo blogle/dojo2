@@ -8,6 +8,10 @@ const router = createRouter({
       component: () => import("./pages/DesignSystemPage.vue"),
     },
     {
+      path: "/onboarding",
+      component: () => import("./pages/OnboardingPage.vue"),
+    },
+    {
       path: "/",
       component: () => import("./pages/BudgetsPage.vue"),
     },

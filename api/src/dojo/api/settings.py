@@ -23,7 +23,9 @@ class Settings(BaseSettings):
     )
     session_secret: str = Field(default="dev-only-change-me", alias="SESSION_SECRET")
     log_level: str = Field(default="debug", alias="LOG_LEVEL")
-    cors_allowed_origins: str = Field(default="http://localhost:5173", alias="CORS_ALLOWED_ORIGINS")
+    cors_allowed_origins: str = Field(
+        default="http://localhost:5173,http://localhost:5174", alias="CORS_ALLOWED_ORIGINS"
+    )
     dev_fixture_mode: bool = Field(default=False, alias="DEV_FIXTURE_MODE")
 
     @property

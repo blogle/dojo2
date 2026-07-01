@@ -7,7 +7,8 @@ type TableShellProps = InstanceType<typeof TableShell>["$props"];
 export default defineFixtures<TableShellProps>({
   component: TableShell,
   title: "Table Shell",
-  description: "Shared header, row, and empty-state table styling for budget and history surfaces.",
+  description:
+    "Shared header, row, and empty-state table styling for budget and history surfaces.",
   scenarios: [
     {
       name: "default",

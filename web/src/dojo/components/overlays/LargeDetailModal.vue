@@ -88,7 +88,10 @@ watch(
           <slot />
         </div>
 
-        <footer v-if="$slots.footer || $slots.actions" class="large-detail-modal__footer">
+        <footer
+          v-if="$slots.footer || $slots.actions"
+          class="large-detail-modal__footer"
+        >
           <slot name="footer">
             <slot name="actions" />
           </slot>

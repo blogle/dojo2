@@ -83,14 +83,12 @@ watch(
         </div>
 
         <footer class="form-modal__footer">
-          <Button
-            v-if="dangerText"
-            variant="tertiary"
-            @click="emit('danger')"
-          >
+          <Button v-if="dangerText" variant="tertiary" @click="emit('danger')">
             {{ dangerText }}
           </Button>
-          <Button variant="secondary" @click="emit('cancel')">{{ cancelText }}</Button>
+          <Button variant="secondary" @click="emit('cancel')">{{
+            cancelText
+          }}</Button>
           <Button
             :disabled="submitDisabled"
             :loading="loading"
