@@ -4,7 +4,7 @@ import { computed } from "vue";
 const props = withDefaults(
   defineProps<{
     value: number;
-    variant?: "positive" | "warning" | "error" | "neutral";
+    variant?: "positive" | "warning" | "error" | "partial" | "neutral";
     label?: string;
     showValue?: boolean;
   }>(),
@@ -87,6 +87,10 @@ const clampedValue = computed(() => Math.min(100, Math.max(0, props.value)));
 
 .progress-bar__fill--error {
   background: var(--color-error);
+}
+
+.progress-bar__fill--partial {
+  background: var(--color-partial-funding);
 }
 
 .progress-bar__fill--neutral {

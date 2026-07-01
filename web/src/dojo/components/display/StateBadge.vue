@@ -4,16 +4,19 @@ export type StateBadgeVariant =
   | "warning"
   | "error"
   | "info"
-  | "historical";
+  | "historical"
+  | "partial-funding";
 
 withDefaults(
   defineProps<{
     variant?: StateBadgeVariant;
     size?: "sm" | "md";
+    icon?: string;
   }>(),
   {
     variant: "info",
     size: "sm",
+    icon: undefined,
   },
 );
 </script>
@@ -23,6 +26,20 @@ withDefaults(
     :class="['state-badge', `state-badge--${variant}`, `state-badge--${size}`]"
     data-cy="state-badge-root"
   >
+    <svg
+      v-if="icon"
+      class="state-badge__icon"
+      viewBox="0 0 16 16"
+      fill="none"
+      aria-hidden="true"
+    >
+      <circle v-if="icon === 'check'" cx="8" cy="8" r="6" fill="currentColor" opacity="0.15" />
+      <path v-if="icon === 'check'" d="M5.5 8l2 2 3.5-3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+      <circle v-if="icon === 'clock'" cx="8" cy="8" r="6" fill="currentColor" opacity="0.15" />
+      <path v-if="icon === 'clock'" d="M8 5v3l2 1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+      <circle v-if="icon === 'alert'" cx="8" cy="8" r="6" fill="currentColor" opacity="0.15" />
+      <path v-if="icon === 'alert'" d="M8 5v3M8 10.5v.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+    </svg>
     <slot />
   </span>
 </template>
@@ -76,5 +93,16 @@ withDefaults(
 .state-badge--historical {
   background: var(--color-historical-container);
   color: var(--color-historical);
+}
+
+.state-badge--partial-funding {
+  background: var(--color-partial-funding-container);
+  color: var(--color-partial-funding);
+}
+
+.state-badge__icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
 }
 </style>

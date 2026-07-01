@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 
-import Button from "@/dojo/components/actions/Button.vue";
 import { useDismissableLayer } from "@/dojo/composables/useDismissableLayer";
 
 const props = withDefaults(
@@ -71,7 +70,14 @@ watch(
               <slot name="subtitle">{{ subtitle }}</slot>
             </p>
           </div>
-          <Button variant="tertiary" size="sm" @click="emit('close')">Close</Button>
+          <button
+            type="button"
+            class="large-detail-modal__close"
+            aria-label="Close"
+            @click="emit('close')"
+          >
+            Close
+          </button>
         </header>
 
         <div v-if="$slots.tabs" class="large-detail-modal__tabs">
@@ -115,7 +121,7 @@ watch(
   max-height: 80vh;
   overflow: auto;
   border: 1px solid var(--color-outline);
-  border-radius: var(--radius-all);
+  border-radius: var(--radius-md);
   background: var(--color-surface-raised);
   box-shadow: var(--shadow-modal);
 }
@@ -168,6 +174,24 @@ watch(
   font-size: var(--text-body-md-font-size);
   font-weight: var(--text-body-md-font-weight);
   line-height: var(--text-body-md-line-height);
+}
+
+.large-detail-modal__close {
+  flex-shrink: 0;
+  min-width: 28px;
+  min-height: 28px;
+  border: 0;
+  border-radius: var(--radius-all);
+  background: transparent;
+  color: var(--color-on-surface-muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.large-detail-modal__close:hover {
+  background: var(--color-surface-muted);
+  color: var(--color-on-surface);
 }
 
 .large-detail-modal__tabs {

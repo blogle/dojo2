@@ -59,13 +59,12 @@ const emit = defineEmits<{
 }
 
 .tabs__item:hover {
-  background: var(--color-primary-container);
-  color: var(--color-on-primary-container);
+  color: var(--color-on-surface);
 }
 
 .tabs__item--active {
-  background: var(--color-primary-container);
-  color: var(--color-on-primary-container);
+  color: var(--color-on-surface);
   font-weight: 600;
+  box-shadow: inset 0 -2px 0 var(--color-primary);
 }
 </style>

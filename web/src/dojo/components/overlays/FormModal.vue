@@ -125,7 +125,7 @@ watch(
 .form-modal {
   width: min(100%, 480px);
   border: 1px solid var(--color-outline);
-  border-radius: var(--radius-all);
+  border-radius: var(--radius-md);
   background: var(--color-surface-raised);
   box-shadow: var(--shadow-modal);
 }

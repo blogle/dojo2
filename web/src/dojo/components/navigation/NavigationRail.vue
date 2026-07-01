@@ -28,6 +28,7 @@ withDefaults(
     width?: string;
     fullHeight?: boolean;
     collapsible?: boolean;
+    brand?: string;
   }>(),
   {
     expanded: false,
@@ -35,6 +36,7 @@ withDefaults(
     width: undefined,
     fullHeight: false,
     collapsible: false,
+    brand: undefined,
   },
 );
 
@@ -89,6 +91,7 @@ const onItemClick = (event: MouseEvent, item: NavigationRailItem) => {
     data-cy="navigation-rail-root"
   >
     <div class="navigation-rail__items">
+      <span v-if="brand" class="navigation-rail__brand">{{ brand }}</span>
       <a
         v-for="item in items"
         :key="item.key"
@@ -224,8 +227,24 @@ const onItemClick = (event: MouseEvent, item: NavigationRailItem) => {
 }
 
 .navigation-rail__item--current {
-  background: var(--color-primary-container);
-  color: var(--color-on-primary-container);
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+}
+
+.navigation-rail__brand {
+  display: block;
+  padding: var(--space-sm) 10px;
+  font-family: var(--text-headline-sm-font-family);
+  font-size: var(--text-headline-sm-font-size);
+  font-weight: var(--text-headline-sm-font-weight);
+  line-height: var(--text-headline-sm-line-height);
+  color: var(--color-primary);
+  letter-spacing: -0.01em;
+}
+
+.navigation-rail:not(.navigation-rail--expanded) .navigation-rail__brand {
+  text-align: center;
+  padding: var(--space-sm) 0;
 }
 
 .navigation-rail__icon {

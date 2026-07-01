@@ -28,9 +28,19 @@ export default defineFixtures<ProgressBarProps>({
       props: {
         value: 100,
         variant: "positive",
-        label: "Complete",
+        label: "Fully funded",
         showValue: true,
       },
+    },
+    {
+      name: "partial",
+      props: {
+        value: 60,
+        variant: "partial",
+        label: "Partially funded",
+        showValue: true,
+      },
+      notes: "Earth tone orange for partial funding progress.",
     },
     {
       name: "warning",

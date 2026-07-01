@@ -86,8 +86,11 @@ const formatDelta = (delta: number) => `${delta > 0 ? "+" : ""}${delta}`;
 <style scoped>
 .metric-strip {
   display: flex;
-  gap: var(--space-xl);
+  gap: 0;
   padding: var(--space-lg) 0;
+  background: var(--color-surface);
+  border: 1px solid var(--color-outline);
+  border-radius: var(--radius-md);
 }
 
 .metric-strip--scrollable {
@@ -99,6 +102,12 @@ const formatDelta = (delta: number) => `${delta > 0 ? "+" : ""}${delta}`;
   min-width: 140px;
   display: grid;
   gap: 2px;
+  padding: 0 var(--space-lg);
+  border-right: 1px solid var(--color-outline);
+}
+
+.metric-strip__item:last-child {
+  border-right: 0;
 }
 
 .metric-strip__item--clickable {

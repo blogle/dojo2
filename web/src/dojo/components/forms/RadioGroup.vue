@@ -39,6 +39,9 @@ const emit = defineEmits<{
         ]"
         @click="emit('update:modelValue', option.value)"
       >
+        <span class="radio-group__indicator" aria-hidden="true">
+          <span v-if="modelValue === option.value" class="radio-group__indicator-dot" />
+        </span>
         {{ option.label }}
       </button>
     </div>
@@ -68,6 +71,9 @@ const emit = defineEmits<{
 
 .radio-group__option {
   appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
   padding: 0 var(--space-md);
   min-height: 36px;
   border: 1px solid var(--color-outline);
@@ -97,5 +103,31 @@ const emit = defineEmits<{
 .radio-group__option:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.radio-group__indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: 1.5px solid var(--color-outline-strong);
+  border-radius: var(--radius-full);
+  flex-shrink: 0;
+}
+
+.radio-group__option--active .radio-group__indicator {
+  border-color: var(--color-primary);
+}
+
+.radio-group__indicator-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  background: var(--color-primary);
+}
+
+.radio-group__option--active .radio-group__indicator-dot {
+  background: var(--color-primary);
 }
 </style>

@@ -85,6 +85,7 @@ withDefaults(
   background: var(--color-surface-muted);
   color: var(--color-on-surface-muted);
   text-align: left;
+  white-space: nowrap;
   font-family: var(--text-label-sm-font-family);
   font-size: var(--text-label-sm-font-size);
   font-weight: var(--text-label-sm-font-weight);

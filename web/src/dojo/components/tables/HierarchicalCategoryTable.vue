@@ -217,6 +217,7 @@ const isDragging = (key: string) => dragKey.value === key;
           class="hierarchical-category-table__row"
           :class="{
             'hierarchical-category-table__row--group': row.group,
+            'hierarchical-category-table__row--group-expanded': row.group && row.expanded !== false,
             'hierarchical-category-table__row--selected': isSelected(row.key),
             'hierarchical-category-table__row--drag-target': isDragTarget(row.key),
             'hierarchical-category-table__row--dragging': isDragging(row.key),
@@ -329,6 +330,7 @@ const isDragging = (key: string) => dragKey.value === key;
   background: var(--color-surface-muted);
   color: var(--color-on-surface-muted);
   text-align: left;
+  white-space: nowrap;
   font-family: var(--text-label-sm-font-family);
   font-size: var(--text-label-sm-font-size);
   font-weight: var(--text-label-sm-font-weight);
@@ -360,6 +362,10 @@ const isDragging = (key: string) => dragKey.value === key;
 
 .hierarchical-category-table__row--group {
   font-weight: 600;
+}
+
+.hierarchical-category-table__row--group-expanded {
+  background: var(--color-surface-muted);
 }
 
 .hierarchical-category-table__row--dragging {

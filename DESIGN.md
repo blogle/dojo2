@@ -33,6 +33,8 @@ colors:
   info-container: "#DCE9E9"
   historical: "#735F44"
   historical-container: "#E9E0D2"
+  partial-funding: "#C07A3C"
+  partial-funding-container: "#F2DFC8"
   scrim: "rgba(31, 38, 33, 0.42)"
 
 typography:
@@ -424,6 +426,9 @@ components:
   state-badge-historical:
     backgroundColor: "{colors.historical-container}"
     textColor: "{colors.historical}"
+  state-badge-partial-funding:
+    backgroundColor: "{colors.partial-funding-container}"
+    textColor: "{colors.partial-funding}"
   sparkline:
     strokeWidth: "1.5"
     strokeLinecap: round
@@ -552,6 +557,8 @@ components:
     maxWidth: "480px"
   modal-confirm:
     maxWidth: "400px"
+  progress-bar-partial:
+    backgroundColor: "{colors.partial-funding}"
   wizard:
     sidebarWidth: "200px"
     sidebarBackground: "{colors.surface-muted}"
@@ -887,6 +894,8 @@ The interface feels **quiet, exact, and durable**. Financial values are the stro
 | `{colors.info-container}` | `#DCE9E9` | Info badges, info banners |
 | `{colors.historical}` | `#735F44` | Sepia-brown for global as-of mode, historical context |
 | `{colors.historical-container}` | `#E9E0D2` | Historical banners, historical context backgrounds |
+| `{colors.partial-funding}` | `#C07A3C` | Partial funding progress, partially-funded status text |
+| `{colors.partial-funding-container}` | `#F2DFC8` | Partial funding backgrounds, partially-funded badges |
 
 ### Scrim
 
