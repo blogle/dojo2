@@ -59,22 +59,33 @@ const emit = defineEmits<{
 }>();
 
 const expandedState = ref<Record<string, boolean>>({});
+const topOrder = ref<string[]>([]);
+const childOrder = ref<Record<string, string[]>>({});
 
-const initExpanded = () => {
-  const state: Record<string, boolean> = {};
+const initState = () => {
+  const exp: Record<string, boolean> = {};
+  const child: Record<string, string[]> = {};
   const walk = (rows: HierarchicalCategoryRow[]) => {
     for (const row of rows) {
-      state[row.key] = row.expanded !== false;
-      if (row.children?.length) walk(row.children);
+      exp[row.key] = row.expanded !== false;
+      if (row.children?.length) {
+        child[row.key] = row.children.map((c) => c.key);
+        walk(row.children);
+      }
     }
   };
   walk(props.rows);
-  expandedState.value = state;
+  expandedState.value = exp;
+  topOrder.value = props.rows.map((r) => r.key);
+  childOrder.value = child;
 };
 
-initExpanded();
+initState();
 
 const flattenRows = (rows: HierarchicalCategoryRow[]): HierarchicalCategoryRow[] => {
+  const order = topOrder.value.length ? topOrder.value : rows.map((r) => r.key);
+  const byKey = new Map(rows.map((r) => [r.key, r]));
+  const ordered = order.map((k) => byKey.get(k)).filter(Boolean) as HierarchicalCategoryRow[];
   const flattened: HierarchicalCategoryRow[] = [];
 
   const visit = (row: HierarchicalCategoryRow, depth: number) => {
@@ -82,11 +93,16 @@ const flattenRows = (rows: HierarchicalCategoryRow[]): HierarchicalCategoryRow[]
     flattened.push({ ...row, depth, expanded });
 
     if (row.children?.length && expanded) {
-      row.children.forEach((child) => visit(child, depth + 1));
+      const cOrder = childOrder.value[row.key];
+      const cByKey = new Map(row.children.map((c) => [c.key, c]));
+      const cOrdered = cOrder
+        ? cOrder.map((k) => cByKey.get(k)).filter(Boolean) as HierarchicalCategoryRow[]
+        : row.children;
+      cOrdered.forEach((child) => visit(child, depth + 1));
     }
   };
 
-  rows.forEach((row) => visit(row, row.depth ?? 0));
+  ordered.forEach((row) => visit(row, row.depth ?? 0));
 
   return flattened;
 };
@@ -132,7 +148,35 @@ const onDragLeave = () => {
 
 const onDrop = (key: string) => {
   if (dragKey.value && dragKey.value !== key) {
-    emit("reorder", dragKey.value, key, dropPosition.value);
+    const src = dragKey.value;
+    const tgt = key;
+    const pos = dropPosition.value;
+    const visible = visibleRows.value;
+    const srcRow = visible.find((r) => r.key === src);
+    const tgtRow = visible.find((r) => r.key === tgt);
+
+    if (srcRow?.group && tgtRow?.group) {
+      const srcIdx = topOrder.value.indexOf(src);
+      if (srcIdx !== -1) topOrder.value.splice(srcIdx, 1);
+      let tgtIdx = topOrder.value.indexOf(tgt);
+      if (pos === "after") tgtIdx++;
+      topOrder.value.splice(tgtIdx, 0, src);
+    } else if (!srcRow?.group && !tgtRow?.group) {
+      const srcParent = visible.find((r) => r.children?.some((c) => c.key === src))?.key;
+      const tgtParent = visible.find((r) => r.children?.some((c) => c.key === tgt))?.key;
+      if (srcParent && tgtParent && srcParent === tgtParent) {
+        const siblings = childOrder.value[srcParent];
+        if (siblings) {
+          const srcIdx = siblings.indexOf(src);
+          if (srcIdx !== -1) siblings.splice(srcIdx, 1);
+          let tgtIdx = siblings.indexOf(tgt);
+          if (pos === "after") tgtIdx++;
+          siblings.splice(tgtIdx, 0, src);
+        }
+      }
+    }
+
+    emit("reorder", src, tgt, pos);
   }
   dragKey.value = null;
   dropTarget.value = null;
