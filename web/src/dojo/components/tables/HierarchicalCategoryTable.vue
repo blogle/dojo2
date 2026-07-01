@@ -58,13 +58,30 @@ const emit = defineEmits<{
   reorder: [key: string, targetKey: string, position: "before" | "after"];
 }>();
 
+const expandedState = ref<Record<string, boolean>>({});
+
+const initExpanded = () => {
+  const state: Record<string, boolean> = {};
+  const walk = (rows: HierarchicalCategoryRow[]) => {
+    for (const row of rows) {
+      state[row.key] = row.expanded !== false;
+      if (row.children?.length) walk(row.children);
+    }
+  };
+  walk(props.rows);
+  expandedState.value = state;
+};
+
+initExpanded();
+
 const flattenRows = (rows: HierarchicalCategoryRow[]): HierarchicalCategoryRow[] => {
   const flattened: HierarchicalCategoryRow[] = [];
 
   const visit = (row: HierarchicalCategoryRow, depth: number) => {
-    flattened.push({ ...row, depth });
+    const expanded = expandedState.value[row.key] ?? true;
+    flattened.push({ ...row, depth, expanded });
 
-    if (row.children?.length && row.expanded !== false) {
+    if (row.children?.length && expanded) {
       row.children.forEach((child) => visit(child, depth + 1));
     }
   };
@@ -75,6 +92,11 @@ const flattenRows = (rows: HierarchicalCategoryRow[]): HierarchicalCategoryRow[]
 };
 
 const visibleRows = computed(() => flattenRows(props.rows));
+
+const handleToggle = (key: string) => {
+  expandedState.value[key] = !expandedState.value[key];
+  emit("toggle", key);
+};
 
 const isSelected = (key: string) => props.selectedKeys.includes(key);
 
@@ -173,12 +195,12 @@ const isDragging = (key: string) => dragKey.value === key;
                 v-if="expandable && row.children?.length"
                 type="button"
                 class="hierarchical-category-table__disclosure"
-                :aria-label="row.expanded === false ? 'Expand row' : 'Collapse row'"
-                @click.stop="emit('toggle', row.key)"
+                :aria-label="expandedState[row.key] === false ? 'Expand row' : 'Collapse row'"
+                @click.stop="handleToggle(row.key)"
               >
                 <svg
                   class="hierarchical-category-table__chevron"
-                  :class="{ 'hierarchical-category-table__chevron--collapsed': row.expanded === false }"
+                  :class="{ 'hierarchical-category-table__chevron--collapsed': expandedState[row.key] === false }"
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
