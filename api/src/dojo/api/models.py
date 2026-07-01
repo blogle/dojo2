@@ -90,6 +90,10 @@ class CategoryPayload(BaseModel):
     is_active: bool = True
     target_amount_minor: int | None = None
     due_date_rule: str | None = None
+    goal_type: str | None = None
+    goal_amount_minor: int | None = None
+    goal_frequency: str | None = None
+    goal_due_date: str | None = None
 
 
 class CategoryUpdatePayload(BaseModel):
@@ -100,3 +104,14 @@ class CategoryUpdatePayload(BaseModel):
     is_active: bool | None = None
     target_amount_minor: int | None = None
     due_date_rule: str | None = None
+    goal_type: str | None = None
+    goal_amount_minor: int | None = None
+    goal_frequency: str | None = None
+    goal_due_date: str | None = None
+
+
+class GoalPayload(BaseModel):
+    goal_type: str | None = None
+    goal_amount_minor: int | None = None
+    goal_frequency: str | None = None
+    goal_due_date: str | None = None

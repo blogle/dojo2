@@ -19,6 +19,7 @@ import {
   startGoogleOnboarding,
   updateAccount,
   updateCategory,
+  updateCategoryGoal,
   updateCategoryGroup,
   updateTransaction,
 } from "../api/client";
@@ -401,6 +402,21 @@ async function saveCategory(
   });
 }
 
+async function saveCategoryGoal(
+  categoryId: string,
+  payload: {
+    goal_type?: string | null;
+    goal_amount_minor?: number | null;
+    goal_frequency?: string | null;
+    goal_due_date?: string | null;
+  },
+): Promise<void> {
+  await withSaving(async () => {
+    await updateCategoryGoal(categoryId, payload);
+    await Promise.all([refreshCategories(), refreshBudget()]);
+  });
+}
+
 const ready = computed(() => Boolean(state.appStatus?.ready));
 
 export function useAppState() {
@@ -421,6 +437,7 @@ export function useAppState() {
     saveAccount,
     saveCategoryGroup,
     saveCategory,
+    saveCategoryGoal,
     loadMoreTransactions,
     loadPreviousTransactions,
     refreshBudget,

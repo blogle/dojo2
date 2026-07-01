@@ -47,10 +47,15 @@ export type Category = {
   is_active: boolean;
   target_amount_minor: number | null;
   due_date_rule: string | null;
+  goal_type: string | null;
+  goal_amount_minor: number | null;
+  goal_frequency: string | null;
+  goal_due_date: string | null;
   available_minor: number;
   month_activity_minor: number;
   month_budgeted_minor: number;
   starting_available_minor: number;
+  monthly_funding_minor: number;
   linked_account_id?: string | null;
 };
 
@@ -81,6 +86,7 @@ export type BudgetResponse = {
     spent_minor: number;
   };
   groups: CategoryGroup[];
+  unconfigured_goal_count: number;
 };
 
 export type BootstrapResponse = {

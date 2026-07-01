@@ -239,3 +239,31 @@ export async function updateCategory(
     body: JSON.stringify(payload),
   });
 }
+
+export async function fetchCategoryGoal(
+  categoryId: string,
+): Promise<{
+  category_id: string;
+  goal_type: string | null;
+  goal_amount_minor: number | null;
+  goal_frequency: string | null;
+  goal_due_date: string | null;
+  monthly_funding_minor: number;
+}> {
+  return request(`/api/categories/${categoryId}/goal`);
+}
+
+export async function updateCategoryGoal(
+  categoryId: string,
+  payload: {
+    goal_type?: string | null;
+    goal_amount_minor?: number | null;
+    goal_frequency?: string | null;
+    goal_due_date?: string | null;
+  },
+): Promise<void> {
+  await request(`/api/categories/${categoryId}/goal`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}

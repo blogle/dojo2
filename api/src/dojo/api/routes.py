@@ -14,6 +14,7 @@ from dojo.api.models import (
     CategoryGroupUpdatePayload,
     CategoryPayload,
     CategoryUpdatePayload,
+    GoalPayload,
     ImportRequest,
     TransactionPayload,
     TransferPayload,
@@ -302,6 +303,20 @@ def update_category(
     request: Request, category_id: str, payload: CategoryUpdatePayload
 ) -> dict[str, Any]:
     return get_service(request).update_category(category_id, payload.model_dump(exclude_none=True))
+
+
+@router.get("/categories/{category_id}/goal")
+def get_category_goal(request: Request, category_id: str) -> dict[str, Any]:
+    return get_service(request).get_category_goal(category_id)
+
+
+@router.put("/categories/{category_id}/goal")
+def update_category_goal(
+    request: Request, category_id: str, payload: GoalPayload
+) -> dict[str, Any]:
+    return get_service(request).update_category_goal(
+        category_id, payload.model_dump(exclude_none=True)
+    )
 
 
 @router.get("/net-worth")

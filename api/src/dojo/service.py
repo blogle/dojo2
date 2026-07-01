@@ -978,6 +978,8 @@ class DojoService:
                 - alloc_pre_from.get(bucket_id, 0)
             )
 
+            monthly_funding = self._compute_monthly_funding(category)
+
             results.append(
                 category
                 | {
@@ -987,6 +989,7 @@ class DojoService:
                     "month_activity_minor": month_activity,
                     "month_budgeted_minor": month_budgeted,
                     "starting_available_minor": starting_available,
+                    "monthly_funding_minor": monthly_funding,
                     "linked_account_id": settings.get(category["category_id"], {}).get(
                         "account_id"
                     ),
@@ -1027,6 +1030,11 @@ class DojoService:
             },
             "groups": self.list_category_groups(
                 month=month, show_hidden=show_hidden, precomputed_categories=categories
+            ),
+            "unconfigured_goal_count": sum(
+                1
+                for c in categories
+                if c["category_kind"] == CATEGORY_KIND_STANDARD and c["goal_type"] is None
             ),
         }
 
@@ -1393,6 +1401,10 @@ class DojoService:
                     "is_active": payload.get("is_active", True),
                     "target_amount_minor": payload.get("target_amount_minor"),
                     "due_date_rule": payload.get("due_date_rule"),
+                    "goal_type": payload.get("goal_type"),
+                    "goal_amount_minor": payload.get("goal_amount_minor"),
+                    "goal_frequency": payload.get("goal_frequency"),
+                    "goal_due_date": payload.get("goal_due_date"),
                     "metadata": json_dumps({}),
                     "valid_from": now,
                     "valid_to": MAX_TS,
@@ -1444,6 +1456,12 @@ class DojoService:
                         "target_amount_minor", current["target_amount_minor"]
                     ),
                     "due_date_rule": payload.get("due_date_rule", current["due_date_rule"]),
+                    "goal_type": payload.get("goal_type", current["goal_type"]),
+                    "goal_amount_minor": payload.get(
+                        "goal_amount_minor", current["goal_amount_minor"]
+                    ),
+                    "goal_frequency": payload.get("goal_frequency", current["goal_frequency"]),
+                    "goal_due_date": payload.get("goal_due_date", current["goal_due_date"]),
                     "metadata": current["metadata"],
                     "created_at": current["created_at"],
                     "created_by_user_id": current["created_by_user_id"],
@@ -1451,6 +1469,95 @@ class DojoService:
                 now=now,
             )
         return {"category_id": category_id}
+
+    def get_category_goal(self, category_id: str) -> dict[str, Any]:
+        current = self.db.fetch_one(
+            load_sql("queries/current_category_by_id"),
+            (category_id,),
+        )
+        if current is None:
+            raise ValueError("Category not found")
+        monthly_funding = self._compute_monthly_funding(current)
+        return {
+            "category_id": category_id,
+            "goal_type": current["goal_type"],
+            "goal_amount_minor": current["goal_amount_minor"],
+            "goal_frequency": current["goal_frequency"],
+            "goal_due_date": str(current["goal_due_date"]) if current["goal_due_date"] else None,
+            "monthly_funding_minor": monthly_funding,
+        }
+
+    def update_category_goal(self, category_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        current = self.db.fetch_one(
+            load_sql("queries/current_category_by_id"),
+            (category_id,),
+        )
+        if current is None:
+            raise ValueError("Category not found")
+        now = self.clock.now()
+        with self.db.transaction() as connection:
+            replace_current_version(
+                connection,
+                "categories",
+                "category_id",
+                category_id,
+                {
+                    "row_id": str(uuid4()),
+                    "category_id": category_id,
+                    "group_id": current["group_id"],
+                    "name": current["name"],
+                    "category_kind": current["category_kind"],
+                    "sort_order": current["sort_order"],
+                    "is_hidden": current["is_hidden"],
+                    "is_active": current["is_active"],
+                    "target_amount_minor": current["target_amount_minor"],
+                    "due_date_rule": current["due_date_rule"],
+                    "goal_type": payload.get("goal_type", current["goal_type"]),
+                    "goal_amount_minor": payload.get(
+                        "goal_amount_minor", current["goal_amount_minor"]
+                    ),
+                    "goal_frequency": payload.get("goal_frequency", current["goal_frequency"]),
+                    "goal_due_date": payload.get("goal_due_date", current["goal_due_date"]),
+                    "metadata": current["metadata"],
+                    "created_at": current["created_at"],
+                    "created_by_user_id": current["created_by_user_id"],
+                },
+                now=now,
+            )
+        return {"category_id": category_id}
+
+    def _compute_monthly_funding(self, category: dict[str, Any]) -> int:
+        goal_type = category.get("goal_type")
+        goal_amount = category.get("goal_amount_minor")
+        if goal_type is None or goal_amount is None:
+            return 0
+        goal_amount = int(goal_amount)
+
+        if goal_type == "ONE_TIME":
+            goal_due_date = category.get("goal_due_date")
+            if goal_due_date is None:
+                return 0
+            today = self.clock.now().date()
+            if isinstance(goal_due_date, str):
+                goal_due_date = date.fromisoformat(goal_due_date)
+            months_remaining = max(
+                1,
+                (goal_due_date.year - today.year) * 12 + (goal_due_date.month - today.month),
+            )
+            return goal_amount // months_remaining
+
+        if goal_type == "RECURRING":
+            frequency = category.get("goal_frequency", "MONTHLY")
+            if frequency == "QUARTERLY":
+                return goal_amount // 3
+            if frequency == "YEARLY":
+                return goal_amount // 12
+            return goal_amount
+
+        if goal_type == "DISCRETIONARY":
+            return goal_amount
+
+        return 0
 
     def compute_available_to_budget(self) -> int:
         transactions = self.db.fetch_all(

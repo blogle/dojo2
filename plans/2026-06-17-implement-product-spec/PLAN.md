@@ -74,13 +74,15 @@ The following areas from SPEC.md are explicitly deferred to later phases:
 
 ### Phase 4: Budget Alignment
 
+> **Detailed subplan**: [`PLAN-budget-page.md`](./PLAN-budget-page.md) — covers all 10 budget mock screens, backend goal configuration, vue-router integration, and frontend assembly. Phases 4.1–4.5 below are the high-level summary; the subplan is authoritative for implementation.
+
 | Work Item | Description | Status |
 |-----------|-------------|--------|
-| 4.1 | Budget page columns and layout alignment with SPEC.md | Planned |
-| 4.2 | Category hierarchy presentation (Credit Card Payments first, Uncategorized last) | Planned |
-| 4.3 | Reordering mode implementation | Planned |
-| 4.4 | Row state indicators (underfunded, due soon, overspent, etc.) | Planned |
-| 4.5 | Retired categories management (retire/restore terminology) | Planned |
+| 4.1 | Budget page columns and layout alignment with SPEC.md | In progress (see subplan) |
+| 4.2 | Category hierarchy presentation (Credit Card Payments first, Uncategorized last) | In progress (see subplan) |
+| 4.3 | Reordering mode implementation | In progress (see subplan) |
+| 4.4 | Row state indicators (underfunded, due soon, overspent, etc.) | In progress (see subplan) |
+| 4.5 | Retired categories management (retire/restore terminology) | In progress (see subplan) |
 
 ### Phase 5: Transactions Alignment
 
@@ -114,13 +116,15 @@ The following areas from SPEC.md are explicitly deferred to later phases:
 
 ### Phase 8: Backend-Supported Vertical Slices
 
+> **Goal types, funding shortcuts, move funds, and category detail modal are covered in [`PLAN-budget-page.md`](./PLAN-budget-page.md).** Items 8.1–8.5 are being implemented as part of the budget page subplan.
+
 | Work Item | Description | Status |
 |-----------|-------------|--------|
-| 8.1 | Goal types backend (persistence, derivation) | Planned |
-| 8.2 | Goal editor frontend | Planned |
-| 8.3 | Funding shortcuts frontend | Planned |
-| 8.4 | Move funds frontend | Planned |
-| 8.5 | Category detail modal frontend | Planned |
+| 8.1 | Goal types backend (persistence, derivation) | In progress (see subplan Phase 1) |
+| 8.2 | Goal editor frontend | In progress (see subplan Phase 3) |
+| 8.3 | Funding shortcuts frontend | In progress (see subplan Phase 5) |
+| 8.4 | Move funds frontend | In progress (see subplan Phase 6) |
+| 8.5 | Category detail modal frontend | In progress (see subplan Phase 5) |
 | 8.6 | Watchlist persistence backend | Planned |
 
 ### Phase 9: Reconciliation

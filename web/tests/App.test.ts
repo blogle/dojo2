@@ -1,13 +1,30 @@
 import { mount } from "@vue/test-utils";
 import { describe, expect, it } from "vitest";
+import { createRouter, createMemoryHistory } from "vue-router";
 
 import App from "../src/dojo/App.vue";
 
 describe("dojo app", () => {
-  it("renders the frontend reset placeholder", () => {
-    const wrapper = mount(App);
+  it("renders the app shell with router-view", async () => {
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        {
+          path: "/",
+          component: { template: "<div>budget page</div>" },
+        },
+      ],
+    });
 
-    expect(wrapper.text()).toContain("UI rebuild pending");
-    expect(wrapper.text()).toContain("SPEC.md");
+    router.push("/");
+    await router.isReady();
+
+    const wrapper = mount(App, {
+      global: {
+        plugins: [router],
+      },
+    });
+
+    expect(wrapper.text()).toContain("budget page");
   });
 });
