@@ -147,6 +147,7 @@ const showScenarioName = (
         :expanded="railIsExpanded"
         :collapsible="!isCompactRail"
         :full-height="true"
+        brand="dojo"
         aria-label="Design system sections"
         @toggle="railExpanded = !railExpanded"
       />
@@ -163,7 +164,6 @@ const showScenarioName = (
       }"
     >
       <header class="design-system-page__header">
-        <p class="design-system-page__eyebrow">dojo</p>
         <h1 class="design-system-page__title">Dojo Design System</h1>
         <p class="design-system-page__summary">
           Tokens, layout primitives, and shared component specimens.
