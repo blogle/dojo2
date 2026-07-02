@@ -2,13 +2,36 @@ from __future__ import annotations
 
 from threading import RLock
 from typing import Any, cast
-from urllib.parse import urlencode
 
 import httpx
+from authlib.integrations.httpx_client import OAuth2Client  # type: ignore[import-untyped]
+from tenacity import (
+    retry,
+    retry_if_exception,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_SHEETS_BASE_URL = "https://sheets.googleapis.com/v4/spreadsheets"
+
+MAX_RETRIES = 3
+
+
+def _is_transient_error(exc: BaseException) -> bool:
+    """Retry on connection errors and 5xx; do NOT retry 401/403."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code >= 500
+    return isinstance(exc, httpx.TransportError)
+
+
+_TRANSIENT_RETRY = retry(
+    retry=retry_if_exception(_is_transient_error),
+    stop=stop_after_attempt(MAX_RETRIES),
+    wait=wait_exponential(multiplier=0.5, max=10),
+    reraise=True,
+)
 
 
 def build_google_auth_url(
@@ -18,22 +41,25 @@ def build_google_auth_url(
     scopes: str,
     state: str,
 ) -> str:
-    query = urlencode(
-        {
-            "client_id": client_id,
-            "redirect_uri": redirect_uri,
-            "response_type": "code",
-            "scope": scopes,
-            "access_type": "offline",
-            "include_granted_scopes": "true",
-            "prompt": "consent",
-            "state": state,
-            "login_hint": "",
-        }
+    client = OAuth2Client(
+        client_id=client_id,
+        redirect_uri=redirect_uri,
+        scope=scopes,
+        token_endpoint=GOOGLE_TOKEN_URL,
     )
-    return f"{GOOGLE_AUTH_URL}?{query}"
+    url, _state = client.create_authorization_url(
+        GOOGLE_AUTH_URL,
+        state=state,
+        response_type="code",
+        access_type="offline",
+        include_granted_scopes="true",
+        prompt="consent",
+        login_hint="",
+    )
+    return str(url)
 
 
+@_TRANSIENT_RETRY
 def exchange_google_code(
     *,
     client_id: str,
@@ -41,19 +67,18 @@ def exchange_google_code(
     redirect_uri: str,
     code: str,
 ) -> dict[str, Any]:
-    response = httpx.post(
-        GOOGLE_TOKEN_URL,
-        data={
-            "code": code,
-            "client_id": client_id,
-            "client_secret": client_secret,
-            "redirect_uri": redirect_uri,
-            "grant_type": "authorization_code",
-        },
-        timeout=30.0,
+    client = OAuth2Client(
+        client_id=client_id,
+        client_secret=client_secret,
+        redirect_uri=redirect_uri,
+        token_endpoint=GOOGLE_TOKEN_URL,
     )
-    response.raise_for_status()
-    return cast(dict[str, Any], response.json())
+    authorization_response = f"{redirect_uri}?code={code}&state="
+    token = client.fetch_token(
+        GOOGLE_TOKEN_URL,
+        authorization_response=authorization_response,
+    )
+    return dict(token)
 
 
 class OAuthTokenStore:
@@ -81,6 +106,7 @@ class OAuthTokenStore:
             self._tokens_by_session_id.pop(session_id, None)
 
 
+@_TRANSIENT_RETRY
 def fetch_sheet_named_ranges(
     *, spreadsheet_id: str, access_token: str, allowed_normalized_aliases: set[str]
 ) -> tuple[str, list[str], dict[str, list[list[str]]]]:
