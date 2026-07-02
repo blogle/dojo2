@@ -94,6 +94,7 @@ class CategoryPayload(BaseModel):
     goal_amount_minor: int | None = None
     goal_frequency: str | None = None
     goal_due_date: str | None = None
+    icon: str | None = None
 
 
 class CategoryUpdatePayload(BaseModel):
@@ -108,6 +109,7 @@ class CategoryUpdatePayload(BaseModel):
     goal_amount_minor: int | None = None
     goal_frequency: str | None = None
     goal_due_date: str | None = None
+    icon: str | None = None
 
 
 class GoalPayload(BaseModel):

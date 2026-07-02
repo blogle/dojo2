@@ -841,6 +841,41 @@ class DojoService:
             "has_more": (offset + limit) < total_count,
         }
 
+    def list_allocations(self, *, show_hidden: bool) -> list[dict[str, Any]]:
+        categories = self.list_categories(month=self.default_budget_month(), show_hidden=True)
+        category_by_bucket_id = {category["bucket_id"]: category for category in categories}
+
+        def bucket_label(bucket_id: Any) -> str:
+            if str(bucket_id) == str(SYSTEM_ATB_BUCKET_ID):
+                return "Available to budget"
+            category = category_by_bucket_id.get(str(bucket_id))
+            return category["name"] if category else "Unknown bucket"
+
+        results: list[dict[str, Any]] = []
+        for row in self.db.fetch_all(load_sql("queries/current_allocations")):
+            from_category = category_by_bucket_id.get(str(row["from_bucket_id"]))
+            to_category = category_by_bucket_id.get(str(row["to_bucket_id"]))
+            if not show_hidden and (
+                (from_category is not None and from_category["is_hidden"])
+                or (to_category is not None and to_category["is_hidden"])
+            ):
+                continue
+            results.append(
+                row
+                | {
+                    "allocation_id": str(row["allocation_id"]),
+                    "from_bucket_id": str(row["from_bucket_id"]),
+                    "to_bucket_id": str(row["to_bucket_id"]),
+                    "from_bucket_name": bucket_label(row["from_bucket_id"]),
+                    "to_bucket_name": bucket_label(row["to_bucket_id"]),
+                    "from_category_id": from_category["category_id"] if from_category else None,
+                    "to_category_id": to_category["category_id"] if to_category else None,
+                    "memo": row.get("memo")
+                    or f"{bucket_label(row['from_bucket_id'])} to {bucket_label(row['to_bucket_id'])}",
+                }
+            )
+        return sorted(results, key=lambda item: item["date"], reverse=True)
+
     def list_category_groups(
         self,
         *,
@@ -950,11 +985,13 @@ class DojoService:
 
         results = []
         for category in categories:
+            category = self._decode_json_fields(category, {"metadata"})
             if category["is_hidden"] and not show_hidden:
                 continue
             cid = category["category_id"]
             bucket_id = self._bucket_id_for_category(cid)
             is_cc = category["category_kind"] == CATEGORY_KIND_CREDIT_CARD_PAYMENT
+            metadata = cast(dict[str, Any], category.get("metadata") or {})
 
             if is_cc:
                 available = (
@@ -993,6 +1030,7 @@ class DojoService:
                     "linked_account_id": settings.get(category["category_id"], {}).get(
                         "account_id"
                     ),
+                    "icon": metadata.get("icon"),
                 }
             )
         return sorted(
@@ -1405,7 +1443,9 @@ class DojoService:
                     "goal_amount_minor": payload.get("goal_amount_minor"),
                     "goal_frequency": payload.get("goal_frequency"),
                     "goal_due_date": payload.get("goal_due_date"),
-                    "metadata": json_dumps({}),
+                    "metadata": json_dumps(
+                        {"icon": payload.get("icon")} if payload.get("icon") else {}
+                    ),
                     "valid_from": now,
                     "valid_to": MAX_TS,
                     "created_at": now,
@@ -1437,6 +1477,16 @@ class DojoService:
         if current is None:
             raise ValueError("Category not found")
         now = self.clock.now()
+        current_metadata = cast(
+            dict[str, Any],
+            self._decode_json_fields(current, {"metadata"}).get("metadata") or {},
+        )
+        if "icon" in payload:
+            icon = payload.get("icon")
+            if icon:
+                current_metadata["icon"] = icon
+            else:
+                current_metadata.pop("icon", None)
         with self.db.transaction() as connection:
             replace_current_version(
                 connection,
@@ -1462,7 +1512,7 @@ class DojoService:
                     ),
                     "goal_frequency": payload.get("goal_frequency", current["goal_frequency"]),
                     "goal_due_date": payload.get("goal_due_date", current["goal_due_date"]),
-                    "metadata": current["metadata"],
+                    "metadata": json_dumps(current_metadata),
                     "created_at": current["created_at"],
                     "created_by_user_id": current["created_by_user_id"],
                 },
@@ -1548,8 +1598,18 @@ class DojoService:
 
         if goal_type == "RECURRING":
             frequency = category.get("goal_frequency", "MONTHLY")
+            if frequency == "WEEKLY":
+                return (goal_amount * 52) // 12
+            if frequency == "EVERY_2_WEEKS":
+                return (goal_amount * 26) // 12
+            if frequency == "TWICE_MONTHLY":
+                return goal_amount * 2
+            if frequency == "EVERY_2_MONTHS":
+                return goal_amount // 2
             if frequency == "QUARTERLY":
                 return goal_amount // 3
+            if frequency == "EVERY_6_MONTHS":
+                return goal_amount // 6
             if frequency == "YEARLY":
                 return goal_amount // 12
             return goal_amount

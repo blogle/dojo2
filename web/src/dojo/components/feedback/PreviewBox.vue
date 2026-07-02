@@ -18,12 +18,17 @@ withDefaults(
 
 <style scoped>
 .preview-box {
-  border: 1px solid var(--color-outline);
-  background: var(--color-surface);
-  border-radius: var(--radius-all);
-  padding: var(--space-md);
+  border: 1px solid var(--color-outline-strong, var(--color-outline));
+  background: linear-gradient(
+    180deg,
+    var(--color-surface-raised),
+    var(--color-surface)
+  );
+  border-radius: var(--radius-md);
+  padding: var(--space-lg);
   display: grid;
-  gap: var(--space-sm);
+  gap: var(--space-md);
+  box-shadow: var(--shadow-card, none);
 }
 
 .preview-box__title {

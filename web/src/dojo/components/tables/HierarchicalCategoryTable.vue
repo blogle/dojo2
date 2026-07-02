@@ -2,6 +2,7 @@
 import { computed, ref } from "vue";
 
 import StateBadge from "@/dojo/components/display/StateBadge.vue";
+import IconGlyph from "@/dojo/components/display/IconGlyph.vue";
 
 type StateBadgeVariant =
   | "positive"
@@ -302,7 +303,7 @@ const isDragging = (key: string) => dragKey.value === key;
                 class="hierarchical-category-table__row-icon"
                 aria-hidden="true"
               >
-                {{ row.icon }}
+                <IconGlyph :name="row.icon" />
               </span>
               <span class="hierarchical-category-table__label">{{
                 row.label
@@ -484,8 +485,13 @@ const isDragging = (key: string) => dragKey.value === key;
 }
 
 .hierarchical-category-table__row-icon {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   color: var(--color-on-surface-muted);
-  font-size: var(--text-body-sm-font-size);
+  font-size: 18px;
 }
 
 .hierarchical-category-table__cell--positive {

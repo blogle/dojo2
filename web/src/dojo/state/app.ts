@@ -9,6 +9,7 @@ import {
   createTransfer,
   deleteTransaction,
   fetchAccounts,
+  fetchAllocations,
   fetchBootstrap,
   fetchBudget,
   fetchCategories,
@@ -25,6 +26,7 @@ import {
 } from "../api/client";
 import type {
   Account,
+  Allocation,
   AppStatus,
   BootstrapResponse,
   BudgetResponse,
@@ -47,6 +49,7 @@ const state = reactive({
   bootstrap: null as BootstrapResponse | null,
   budget: null as BudgetResponse | null,
   transactions: [] as Transaction[],
+  allocations: [] as Allocation[],
   accounts: [] as Account[],
   categoryGroups: [] as CategoryGroup[],
   categories: [] as Category[],
@@ -69,6 +72,7 @@ function resetState(): void {
   state.bootstrap = null;
   state.budget = null;
   state.transactions = [];
+  state.allocations = [];
   state.accounts = [];
   state.categoryGroups = [];
   state.categories = [];
@@ -125,7 +129,7 @@ async function refreshBudget(): Promise<void> {
   state.categories = state.budget.groups.flatMap((group) => group.categories);
 }
 
-const PAGE_SIZE = 100;
+const PAGE_SIZE = 10_000;
 
 async function fetchTransactionPage(offset: number): Promise<void> {
   const page = await fetchTransactionsPage(state.showHidden, offset, PAGE_SIZE);
@@ -159,6 +163,10 @@ async function refreshAccounts(): Promise<void> {
   state.accounts = await fetchAccounts(state.showHidden);
 }
 
+async function refreshAllocations(): Promise<void> {
+  state.allocations = await fetchAllocations(state.showHidden);
+}
+
 async function refreshCategories(): Promise<void> {
   const response = await fetchCategories(state.month, state.showHidden);
   state.categoryGroups = response.groups;
@@ -176,6 +184,7 @@ async function initialize(): Promise<void> {
       await Promise.all([
         refreshBudget(),
         refreshTransactions(),
+        refreshAllocations(),
         refreshAccounts(),
         refreshNetWorth(),
       ]);
@@ -264,7 +273,11 @@ async function beginGoogleOnboarding(): Promise<void> {
 async function setMonth(month: string): Promise<void> {
   state.month = month;
   await withLoading(async () => {
-    await Promise.all([refreshBudget(), refreshCategories()]);
+    await Promise.all([
+      refreshBudget(),
+      refreshCategories(),
+      refreshAllocations(),
+    ]);
   });
 }
 
@@ -274,6 +287,7 @@ async function setShowHidden(value: boolean): Promise<void> {
     await Promise.all([
       refreshBudget(),
       refreshTransactions(),
+      refreshAllocations(),
       refreshAccounts(),
       refreshCategories(),
       refreshNetWorth(),
@@ -294,7 +308,11 @@ async function submitAllocation(payload: {
 }): Promise<void> {
   await withSaving(async () => {
     await createAllocation(payload, payload.path);
-    await Promise.all([refreshBudget(), refreshCategories()]);
+    await Promise.all([
+      refreshBudget(),
+      refreshCategories(),
+      refreshAllocations(),
+    ]);
   });
 }
 
@@ -308,6 +326,7 @@ async function submitTransaction(payload: TransactionPayload): Promise<void> {
     }
     await Promise.all([
       refreshTransactions(),
+      refreshAllocations(),
       refreshAccounts(),
       refreshBudget(),
       refreshNetWorth(),
@@ -320,6 +339,7 @@ async function removeTransaction(transactionId: string): Promise<void> {
     await deleteTransaction(transactionId);
     await Promise.all([
       refreshTransactions(),
+      refreshAllocations(),
       refreshAccounts(),
       refreshBudget(),
       refreshNetWorth(),
@@ -353,6 +373,7 @@ async function submitTransfer(payload: {
     await createTransfer(payload);
     await Promise.all([
       refreshTransactions(),
+      refreshAllocations(),
       refreshAccounts(),
       refreshBudget(),
       refreshNetWorth(),
@@ -442,6 +463,7 @@ export function useAppState() {
     loadPreviousTransactions,
     refreshBudget,
     refreshTransactions,
+    refreshAllocations,
     refreshAccounts,
     refreshCategories,
     refreshNetWorth,

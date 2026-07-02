@@ -29,8 +29,13 @@ const goalTypeOptions = [
 ];
 
 const frequencyOptions = [
+  { value: "WEEKLY", label: "Weekly" },
+  { value: "EVERY_2_WEEKS", label: "Every 2 weeks" },
+  { value: "TWICE_MONTHLY", label: "Twice monthly" },
   { value: "MONTHLY", label: "Monthly" },
+  { value: "EVERY_2_MONTHS", label: "Every 2 months" },
   { value: "QUARTERLY", label: "Quarterly" },
+  { value: "EVERY_6_MONTHS", label: "Every 6 months" },
   { value: "YEARLY", label: "Yearly" },
 ];
 
@@ -40,7 +45,8 @@ const goalType = computed({
 });
 
 const goalAmount = computed({
-  get: () => (props.goalAmountMinor != null ? String(props.goalAmountMinor / 100) : ""),
+  get: () =>
+    props.goalAmountMinor != null ? String(props.goalAmountMinor / 100) : "",
   set: (val: string) => {
     const num = parseFloat(val);
     emit("update:goalAmountMinor", isNaN(num) ? null : Math.round(num * 100));
@@ -67,7 +73,9 @@ const monthlyFundingDisplay = computed(() => {
   <div class="goal-editor" data-cy="goal-editor-root">
     <div class="goal-editor__section">
       <p class="goal-editor__label">Goal</p>
-      <p class="goal-editor__helper">Set a goal and schedule for this category.</p>
+      <p class="goal-editor__helper">
+        Set a goal and schedule for this category.
+      </p>
     </div>
 
     <div class="goal-editor__section">

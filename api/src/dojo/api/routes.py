@@ -203,6 +203,11 @@ def return_to_atb(request: Request, payload: AllocationRequest) -> dict[str, Any
     return fund_category(request, payload)
 
 
+@router.get("/allocations")
+def allocations(request: Request, *, show_hidden: bool = False) -> dict[str, Any]:
+    return {"items": get_service(request).list_allocations(show_hidden=show_hidden)}
+
+
 @router.get("/transactions")
 def transactions(
     request: Request,

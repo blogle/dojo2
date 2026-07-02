@@ -12,6 +12,8 @@ const router = createRouter({
   ],
 });
 
+const currentMonth = new Date().toISOString().slice(0, 7);
+
 const mockCategories = [
   {
     category_id: "c1",
@@ -19,7 +21,7 @@ const mockCategories = [
     group_id: "g1",
     group_name: "Essentials",
     name: "Groceries",
-    category_kind: "Flexible",
+    category_kind: "STANDARD",
     sort_order: 0,
     is_hidden: false,
     is_active: true,
@@ -43,7 +45,7 @@ const mockCategories = [
     group_id: "g1",
     group_name: "Essentials",
     name: "Rent",
-    category_kind: "Monthly Need",
+    category_kind: "STANDARD",
     sort_order: 1,
     is_hidden: false,
     is_active: true,
@@ -69,27 +71,66 @@ const mockGroups = [
 ];
 
 const mockBudget = {
-  month: "2026-06",
+  month: currentMonth,
   available_to_budget_minor: 50000,
   overspent_minor: 0,
   underfunded_minor: 0,
   month_activity_minor: -12000,
   month_budgeted_minor: 50000,
-  unconfigured_goal_count: 0,
+  unconfigured_goal_count: 1,
   summary: { month_activity_minor: -12000, month_budgeted_minor: 50000 },
   groups: [
     {
       ...mockGroups[0],
-      totals: { available_minor: 30000, month_activity_minor: -8000, month_budgeted_minor: 30000 },
+      totals: {
+        available_minor: 30000,
+        month_activity_minor: -8000,
+        month_budgeted_minor: 30000,
+      },
       categories: mockCategories.filter((c) => c.group_id === "g1"),
     },
     {
       ...mockGroups[1],
-      totals: { available_minor: 20000, month_activity_minor: -4000, month_budgeted_minor: 20000 },
+      totals: {
+        available_minor: 20000,
+        month_activity_minor: -4000,
+        month_budgeted_minor: 20000,
+      },
       categories: [],
     },
   ],
 };
+
+const mockAllocations = [
+  {
+    allocation_id: "a1",
+    date: "2026-06-01",
+    from_bucket_id: "atb",
+    to_bucket_id: "b1",
+    from_bucket_name: "Available to budget",
+    to_bucket_name: "Groceries",
+    from_category_id: null,
+    to_category_id: "c1",
+    amount_minor: 20000,
+    memo: "Monthly funding",
+  },
+];
+
+const mockTransactions = [
+  {
+    transaction_id: "t1",
+    date: "2026-06-03",
+    account_id: "acc1",
+    account_name: "Checking",
+    amount_minor: -5000,
+    category_id: "c1",
+    category_name: "Groceries",
+    system_category: null,
+    status: "CLEARED",
+    memo: "Market",
+    is_hidden_entity: false,
+  },
+];
 
 function stubFetch() {
   cy.stub(window, "fetch").callsFake((url: string) => {
@@ -97,15 +138,37 @@ function stubFetch() {
     let body: unknown;
 
     if (path === "/api/bootstrap") {
-      body = { ready: true, mode: "lived" };
+      body = {
+        app_status: {
+          app: "dojo",
+          ready: true,
+          mode: "lived",
+          needs_onboarding: false,
+          latest_import_batch: null,
+          latest_import_run: null,
+        },
+        import_status: null,
+        default_budget_month: currentMonth,
+      };
     } else if (path.startsWith("/api/budget")) {
       body = mockBudget;
-    } else if (path === "/api/categories" || path.startsWith("/api/categories?")) {
+    } else if (
+      path === "/api/categories" ||
+      path.startsWith("/api/categories?")
+    ) {
       body = mockCategories;
     } else if (path.startsWith("/api/category-groups")) {
       body = mockGroups;
     } else if (path.startsWith("/api/transactions")) {
-      body = { items: [], total: 0, offset: 0, limit: 20, has_more: false };
+      body = {
+        items: mockTransactions,
+        total: 1,
+        offset: 0,
+        limit: 20,
+        has_more: false,
+      };
+    } else if (path.startsWith("/api/allocations")) {
+      body = { items: mockAllocations };
     } else if (path.startsWith("/api/accounts")) {
       body = [];
     } else if (path.startsWith("/api/net-worth")) {
@@ -143,7 +206,10 @@ describe("BudgetsPage", () => {
   it("displays metric strip with budget summary", () => {
     mountPage();
     cy.get("[data-cy=metric-strip-root]").should("be.visible");
-    cy.get("[data-cy=metric-strip-root]").should("contain.text", "Available to budget");
+    cy.get("[data-cy=metric-strip-root]").should(
+      "contain.text",
+      "Available to budget",
+    );
   });
 
   it("displays the hierarchical category table", () => {
@@ -162,8 +228,14 @@ describe("BudgetsPage", () => {
   it("opens Add Group modal from dropdown", () => {
     mountPage();
     cy.get("[data-cy=dropdown-button-root] .dropdown-button__toggle").click();
-    cy.get("[role=menu]").should("be.visible").contains("Add category group").click();
-    cy.get("[data-cy=form-modal-root]").should("contain.text", "Add category group");
+    cy.get("[role=menu]")
+      .should("be.visible")
+      .contains("Add category group")
+      .click();
+    cy.get("[data-cy=form-modal-root]").should(
+      "contain.text",
+      "Add category group",
+    );
   });
 
   it("opens Add Category modal from dropdown", () => {
@@ -176,6 +248,59 @@ describe("BudgetsPage", () => {
   it("opens Retired categories modal", () => {
     mountPage();
     cy.contains("button", "Retired categories").click();
-    cy.get("[data-cy=large-detail-modal-root]").should("contain.text", "Retired");
+    cy.get("[data-cy=large-detail-modal-root]").should(
+      "contain.text",
+      "Retired",
+    );
+  });
+
+  it("opens category review from the unconfigured goals warning", () => {
+    mountPage();
+    cy.contains("button", "Review categories").click();
+    cy.get("[data-cy=full-screen-trouser-root]").should("contain.text", "Rent");
+    cy.get("[data-cy=full-screen-trouser-root]").should(
+      "contain.text",
+      "Goal progress",
+    );
+  });
+
+  it("shows filtered funding and spending history in category detail", () => {
+    mountPage();
+    cy.contains("Groceries").click();
+    cy.contains("button", "Funding history").click();
+    cy.get("[data-cy=table-shell-root]").should(
+      "contain.text",
+      "Monthly funding",
+    );
+    cy.contains("button", "Spending history").click();
+    cy.get("[data-cy=table-shell-root]").should("contain.text", "Market");
+  });
+
+  it("opens category groups in the detail trouser", () => {
+    mountPage();
+    cy.contains("Essentials").click();
+    cy.get("[data-cy=full-screen-trouser-root]").should(
+      "contain.text",
+      "Category group",
+    );
+    cy.get("[data-cy=full-screen-trouser-root]").should(
+      "contain.text",
+      "Goal progress",
+    );
+  });
+
+  it("opens edit configuration from category detail", () => {
+    mountPage();
+    cy.contains("Groceries").click();
+    cy.contains("button", "Edit configuration").click();
+    cy.get("[data-cy=form-modal-root]").should(
+      "contain.text",
+      "Edit category configuration",
+    );
+    cy.get("[data-cy=form-modal-root]").should(
+      "contain.text",
+      "Retire category",
+    );
+    cy.get("[data-cy=form-modal-root]").should("contain.text", "Icon");
   });
 });

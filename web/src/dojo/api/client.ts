@@ -1,5 +1,6 @@
 import type {
   Account,
+  Allocation,
   AppStatus,
   BootstrapResponse,
   BudgetResponse,
@@ -89,6 +90,16 @@ export async function fetchAccounts(showHidden: boolean): Promise<Account[]> {
   const params = new URLSearchParams({ show_hidden: String(showHidden) });
   const response = await request<{ items: Account[] }>(
     `/api/accounts?${params.toString()}`,
+  );
+  return response.items;
+}
+
+export async function fetchAllocations(
+  showHidden: boolean,
+): Promise<Allocation[]> {
+  const params = new URLSearchParams({ show_hidden: String(showHidden) });
+  const response = await request<{ items: Allocation[] }>(
+    `/api/allocations?${params.toString()}`,
   );
   return response.items;
 }

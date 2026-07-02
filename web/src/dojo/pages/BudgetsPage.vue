@@ -13,6 +13,7 @@ import PersistentWarningBanner from "../components/feedback/PersistentWarningBan
 import HistoricalBanner from "../components/feedback/HistoricalBanner.vue";
 import ReorderModeBanner from "../components/feedback/ReorderModeBanner.vue";
 import GoalEditor from "../components/budget/GoalEditor.vue";
+import IconPicker from "../components/forms/IconPicker.vue";
 import NavigationRail from "../components/navigation/NavigationRail.vue";
 import HierarchicalCategoryTable from "../components/tables/HierarchicalCategoryTable.vue";
 import type { HierarchicalCategoryRow } from "../components/tables/HierarchicalCategoryTable.vue";
@@ -37,7 +38,9 @@ const activeModal = ref<
   | null
   | "add-group"
   | "add-category"
+  | "edit-category"
   | "category-detail"
+  | "group-detail"
   | "fund-group"
   | "move-funds"
   | "retired"
@@ -50,6 +53,7 @@ const fundingCategory = ref<Category | null>(null);
 const groupName = ref("");
 const categoryName = ref("");
 const categoryGroupId = ref("");
+const categoryIcon = ref("");
 const goalType = ref<string | null>(null);
 const goalAmountMinor = ref<number | null>(null);
 const goalFrequency = ref<string | null>(null);
@@ -164,6 +168,7 @@ const tableRows = computed<HierarchicalCategoryRow[]>(() => {
     children: group.categories.map((cat) => ({
       key: cat.category_id,
       label: cat.name,
+      icon: cat.icon || "•",
       cells: {
         goal: cat.goal_type
           ? formatCurrency(cat.goal_amount_minor ?? 0)
@@ -234,6 +239,64 @@ const retiredCategories = computed(() =>
   state.categories.filter((c) => c.is_hidden),
 );
 
+const selectedGroupDetail = computed<Category | null>(() => {
+  if (!selectedGroup.value) return null;
+  const group = selectedGroup.value;
+  const monthlyGoal = group.categories.reduce(
+    (total, category) => total + (category.goal_amount_minor ?? 0),
+    0,
+  );
+  const monthlyFunding = group.categories.reduce(
+    (total, category) => total + category.monthly_funding_minor,
+    0,
+  );
+  return {
+    category_id: group.group_id,
+    bucket_id: group.group_id,
+    group_id: group.group_id,
+    group_name: "Category group",
+    name: group.name,
+    category_kind: "STANDARD",
+    sort_order: group.sort_order,
+    is_hidden: group.is_hidden,
+    is_active: true,
+    target_amount_minor: null,
+    due_date_rule: null,
+    goal_type: monthlyGoal > 0 ? "GROUP_AGGREGATE" : null,
+    goal_amount_minor: monthlyGoal > 0 ? monthlyGoal : null,
+    goal_frequency: null,
+    goal_due_date: null,
+    available_minor: group.totals.available_minor,
+    month_activity_minor: group.totals.month_activity_minor,
+    month_budgeted_minor: group.totals.month_budgeted_minor,
+    starting_available_minor: group.totals.starting_available_minor,
+    monthly_funding_minor: monthlyFunding,
+    icon: group.is_system ? "Ⓒ" : "⌂",
+  };
+});
+
+const selectedDetailCategory = computed(
+  () => selectedCategory.value ?? selectedGroupDetail.value,
+);
+
+const selectedDetailScopeCategoryIds = computed(() => {
+  if (selectedCategory.value) return [selectedCategory.value.category_id];
+  if (selectedGroup.value) {
+    return selectedGroup.value.categories.map(
+      (category) => category.category_id,
+    );
+  }
+  return [];
+});
+
+const firstUnconfiguredGoalCategory = computed(
+  () =>
+    state.categories.find(
+      (category) =>
+        category.category_kind === "STANDARD" && category.goal_type == null,
+    ) ?? null,
+);
+
 async function restoreCategory(categoryId: string) {
   await saveCategory({ is_hidden: false }, categoryId);
 }
@@ -264,7 +327,7 @@ function handleRowSelect(key: string) {
   for (const group of state.categoryGroups) {
     if (group.group_id === key) {
       selectedGroup.value = group;
-      activeModal.value = "fund-group";
+      activeModal.value = "group-detail";
       return;
     }
     for (const cat of group.categories) {
@@ -277,7 +340,18 @@ function handleRowSelect(key: string) {
   }
 }
 
+function handleReviewCategories() {
+  const category = firstUnconfiguredGoalCategory.value;
+  if (!category) return;
+  selectedCategory.value = category;
+  activeModal.value = "category-detail";
+}
+
 function handleFundCategory() {
+  if (selectedGroup.value) {
+    activeModal.value = "fund-group";
+    return;
+  }
   fundingCategory.value = selectedCategory.value;
   activeModal.value = "funding";
 }
@@ -287,7 +361,16 @@ function handleMoveFundsFromDetail() {
 }
 
 function handleEditConfig() {
-  // TODO: open edit configuration modal
+  if (!selectedCategory.value) return;
+  const category = selectedCategory.value;
+  categoryName.value = category.name;
+  categoryGroupId.value = category.group_id;
+  categoryIcon.value = category.icon ?? "";
+  goalType.value = category.goal_type;
+  goalAmountMinor.value = category.goal_amount_minor;
+  goalFrequency.value = category.goal_frequency;
+  goalDueDate.value = category.goal_due_date;
+  activeModal.value = "edit-category";
 }
 
 async function submitFundCategory(payload: {
@@ -321,6 +404,7 @@ function closeModal() {
   groupName.value = "";
   categoryName.value = "";
   categoryGroupId.value = "";
+  categoryIcon.value = "";
   goalType.value = null;
   goalAmountMinor.value = null;
   goalFrequency.value = null;
@@ -339,12 +423,42 @@ async function submitAddCategory() {
   await saveCategory({
     group_id: categoryGroupId.value,
     name: categoryName.value.trim(),
+    icon: categoryIcon.value.trim() || null,
     sort_order,
     goal_type: goalType.value,
     goal_amount_minor: goalAmountMinor.value,
     goal_frequency: goalFrequency.value,
     goal_due_date: goalDueDate.value,
   });
+  closeModal();
+}
+
+async function submitEditCategory() {
+  if (
+    !selectedCategory.value ||
+    !categoryName.value.trim() ||
+    !categoryGroupId.value
+  ) {
+    return;
+  }
+  await saveCategory(
+    {
+      group_id: categoryGroupId.value,
+      name: categoryName.value.trim(),
+      icon: categoryIcon.value.trim() || null,
+      goal_type: goalType.value,
+      goal_amount_minor: goalAmountMinor.value,
+      goal_frequency: goalFrequency.value,
+      goal_due_date: goalDueDate.value,
+    },
+    selectedCategory.value.category_id,
+  );
+  closeModal();
+}
+
+async function retireSelectedCategory() {
+  if (!selectedCategory.value) return;
+  await saveCategory({ is_hidden: true }, selectedCategory.value.category_id);
   closeModal();
 }
 
@@ -398,7 +512,7 @@ onMounted(() => {
         :title="`${unconfiguredGoalCount} ${unconfiguredGoalCount === 1 ? 'category needs' : 'categories need'} goal configuration`"
         description="Some categories imported from your spreadsheet don't have a goal type set. Configure goals to enable funding and progress tracking."
         primary-action="Review categories"
-        @primary="activeModal = 'retired'"
+        @primary="handleReviewCategories"
       />
 
       <PersistentWarningBanner
@@ -485,6 +599,15 @@ onMounted(() => {
       @cancel="closeModal"
       @close="closeModal"
     >
+      <TextField
+        v-model="categoryName"
+        label="Category name"
+        placeholder="e.g. Groceries"
+      />
+      <IconPicker
+        v-model="categoryIcon"
+        helper="Optional. Pick an icon to make the category easier to scan."
+      />
       <SelectField
         v-model="categoryGroupId"
         label="Parent group"
@@ -510,9 +633,59 @@ onMounted(() => {
       />
     </FormModal>
 
+    <FormModal
+      :visible="activeModal === 'edit-category'"
+      title="Edit category configuration"
+      submit-text="Save changes"
+      danger-text="Retire category"
+      @submit="submitEditCategory"
+      @danger="retireSelectedCategory"
+      @cancel="closeModal"
+      @close="closeModal"
+    >
+      <TextField
+        v-model="categoryName"
+        label="Category name"
+        placeholder="e.g. Groceries"
+      />
+      <IconPicker
+        v-model="categoryIcon"
+        helper="Optional. Pick an icon to make the category easier to scan."
+      />
+      <SelectField
+        v-model="categoryGroupId"
+        label="Parent group"
+        :options="[
+          { value: '', label: 'Choose a group...' },
+          ...state.categoryGroups.map((g) => ({
+            value: g.group_id,
+            label: g.name,
+          })),
+        ]"
+        helper="Choose where this category belongs."
+      />
+      <GoalEditor
+        :goal-type="goalType"
+        :goal-amount-minor="goalAmountMinor"
+        :goal-frequency="goalFrequency"
+        :goal-due-date="goalDueDate"
+        :monthly-funding-minor="selectedCategory?.monthly_funding_minor ?? 0"
+        @update:goal-type="goalType = $event"
+        @update:goal-amount-minor="goalAmountMinor = $event"
+        @update:goal-frequency="goalFrequency = $event"
+        @update:goal-due-date="goalDueDate = $event"
+      />
+    </FormModal>
+
     <CategoryDetailModal
-      :visible="activeModal === 'category-detail'"
-      :category="selectedCategory"
+      :visible="
+        activeModal === 'category-detail' || activeModal === 'group-detail'
+      "
+      :category="selectedDetailCategory"
+      :allocations="state.allocations"
+      :transactions="state.transactions"
+      :scope-category-ids="selectedDetailScopeCategoryIds"
+      :detail-kind="activeModal === 'group-detail' ? 'group' : 'category'"
       @close="closeModal"
       @fund="handleFundCategory"
       @move-funds="handleMoveFundsFromDetail"
@@ -537,6 +710,9 @@ onMounted(() => {
     <FundingModal
       :visible="activeModal === 'funding'"
       :category="fundingCategory"
+      :allocations="state.allocations"
+      :budget-month="selectedMonth || currentMonth"
+      :available-to-budget-minor="state.budget?.available_to_budget_minor ?? 0"
       @close="closeModal"
       @submit="submitFundCategory"
     />
@@ -600,6 +776,10 @@ onMounted(() => {
   display: grid;
   gap: var(--space-lg);
   align-content: start;
+}
+
+.budgets-page__main :deep(.metric-strip__item) {
+  flex: 1;
 }
 
 @media (max-width: 720px) {

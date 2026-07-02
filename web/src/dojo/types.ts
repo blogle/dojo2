@@ -21,6 +21,19 @@ export type Transaction = {
   is_hidden_entity: boolean;
 };
 
+export type Allocation = {
+  allocation_id: string;
+  date: string;
+  from_bucket_id: string;
+  to_bucket_id: string;
+  from_bucket_name: string;
+  to_bucket_name: string;
+  from_category_id: string | null;
+  to_category_id: string | null;
+  amount_minor: number;
+  memo: string | null;
+};
+
 export type Account = {
   account_id: string;
   name: string;
@@ -57,6 +70,7 @@ export type Category = {
   starting_available_minor: number;
   monthly_funding_minor: number;
   linked_account_id?: string | null;
+  icon?: string | null;
 };
 
 export type CategoryGroup = {

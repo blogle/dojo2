@@ -1,17 +1,22 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 
-import type { Category } from "../../types";
+import type { Allocation, Category, Transaction } from "../../types";
 import { formatCurrency, formatGoalType } from "../../utils/currency";
 
 import Button from "../actions/Button.vue";
 import KeyValueList from "../display/KeyValueList.vue";
 import Tabs from "../navigation/Tabs.vue";
 import FullScreenTrouser from "../overlays/FullScreenTrouser.vue";
+import TableShell from "../tables/TableShell.vue";
 
 const props = defineProps<{
   visible: boolean;
   category: Category | null;
+  allocations: Allocation[];
+  transactions: Transaction[];
+  scopeCategoryIds?: string[];
+  detailKind?: "category" | "group";
 }>();
 
 const emit = defineEmits<{
@@ -30,6 +35,38 @@ const tabs = computed(() => [
   { key: "funding-history", label: "Funding history" },
   { key: "spending-history", label: "Spending history" },
 ]);
+
+const fundingHistoryColumns = [
+  { key: "date", label: "Date" },
+  { key: "from", label: "From" },
+  { key: "to", label: "To" },
+  { key: "amount", label: "Amount", align: "end" as const },
+  { key: "memo", label: "Memo" },
+];
+
+const spendingHistoryColumns = [
+  { key: "date", label: "Date" },
+  { key: "account", label: "Account" },
+  { key: "amount", label: "Amount", align: "end" as const },
+  { key: "status", label: "Status" },
+  { key: "memo", label: "Memo" },
+];
+
+function formatDate(value: string): string {
+  const d = new Date(`${value}T00:00:00`);
+  return d.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+const scopedCategoryIds = computed(() => {
+  if (props.scopeCategoryIds && props.scopeCategoryIds.length > 0) {
+    return props.scopeCategoryIds;
+  }
+  return props.category ? [props.category.category_id] : [];
+});
 
 const summaryMetrics = computed(() => {
   if (!props.category) return [];
@@ -54,6 +91,22 @@ const summaryMetrics = computed(() => {
 const goalConfigItems = computed(() => {
   if (!props.category) return [];
   const c = props.category;
+  if (props.detailKind === "group") {
+    return [
+      { label: "Goal type", value: "Group aggregate" },
+      {
+        label: "Monthly goal",
+        value: c.goal_amount_minor
+          ? formatCurrency(c.goal_amount_minor)
+          : "\u2014",
+      },
+      { label: "Start month", value: "\u2014" },
+      { label: "Target amount", value: "\u2014" },
+      { label: "Target date", value: "\u2014" },
+      { label: "Rollover", value: "\u2014" },
+      { label: "Incremental", value: "\u2014" },
+    ];
+  }
   return [
     {
       label: "Goal type",
@@ -75,11 +128,19 @@ const goalProgress = computed(() => {
   if (!props.category) return null;
   const c = props.category;
   const monthlyGoal = c.goal_amount_minor ?? 0;
-  if (monthlyGoal <= 0) return null;
+  if (monthlyGoal <= 0) {
+    return {
+      pct: 0,
+      available: Math.max(0, c.available_minor),
+      remaining: 0,
+      monthlyGoal,
+      hasGoal: false,
+    };
+  }
   const available = Math.max(0, c.available_minor);
   const pct = Math.min(100, Math.round((available / monthlyGoal) * 100));
   const remaining = Math.max(0, monthlyGoal - available);
-  return { pct, available, remaining, monthlyGoal };
+  return { pct, available, remaining, monthlyGoal, hasGoal: true };
 });
 
 const fundingToDate = computed(() => {
@@ -117,6 +178,52 @@ const fundingToDateItems = computed(() => {
     },
   ];
 });
+
+const fundingHistoryRows = computed(() => {
+  if (!props.category) return [];
+  return props.allocations
+    .filter(
+      (allocation) =>
+        (allocation.from_category_id != null &&
+          scopedCategoryIds.value.includes(allocation.from_category_id)) ||
+        (allocation.to_category_id != null &&
+          scopedCategoryIds.value.includes(allocation.to_category_id)),
+    )
+    .map((allocation) => {
+      const isOutflow =
+        allocation.from_category_id != null &&
+        scopedCategoryIds.value.includes(allocation.from_category_id);
+      const signedAmount = isOutflow
+        ? -allocation.amount_minor
+        : allocation.amount_minor;
+      return {
+        key: allocation.allocation_id,
+        date: formatDate(allocation.date),
+        from: allocation.from_bucket_name,
+        to: allocation.to_bucket_name,
+        amount: formatCurrency(signedAmount),
+        memo: allocation.memo || "\u2014",
+      };
+    });
+});
+
+const spendingHistoryRows = computed(() => {
+  if (!props.category) return [];
+  return props.transactions
+    .filter(
+      (transaction) =>
+        transaction.category_id != null &&
+        scopedCategoryIds.value.includes(transaction.category_id),
+    )
+    .map((transaction) => ({
+      key: transaction.transaction_id,
+      date: formatDate(transaction.date),
+      account: transaction.account_name,
+      amount: formatCurrency(transaction.amount_minor),
+      status: transaction.status,
+      memo: transaction.memo || "\u2014",
+    }));
+});
 </script>
 
 <template>
@@ -131,7 +238,11 @@ const fundingToDateItems = computed(() => {
       <Button variant="secondary" @click="emit('move-funds')">
         Move funds
       </Button>
-      <Button variant="secondary" @click="emit('edit-config')">
+      <Button
+        v-if="detailKind !== 'group'"
+        variant="secondary"
+        @click="emit('edit-config')"
+      >
         Edit configuration
       </Button>
     </template>
@@ -195,7 +306,9 @@ const fundingToDateItems = computed(() => {
               <div>
                 <span class="category-detail__progress-label">Remaining</span>
                 <span class="category-detail__progress-value">{{
-                  formatCurrency(goalProgress.remaining)
+                  goalProgress.hasGoal
+                    ? formatCurrency(goalProgress.remaining)
+                    : "Set a monthly goal"
                 }}</span>
               </div>
               <div>
@@ -203,7 +316,9 @@ const fundingToDateItems = computed(() => {
                   >Monthly goal</span
                 >
                 <span class="category-detail__progress-value">{{
-                  formatCurrency(goalProgress.monthlyGoal)
+                  goalProgress.hasGoal
+                    ? formatCurrency(goalProgress.monthlyGoal)
+                    : "\u2014"
                 }}</span>
               </div>
             </div>
@@ -219,16 +334,26 @@ const fundingToDateItems = computed(() => {
 
     <div
       v-if="activeTab === 'funding-history'"
-      class="category-detail__placeholder"
+      class="category-detail__history"
     >
-      <p>Funding history will show a filtered view of category allocations.</p>
+      <TableShell
+        :columns="fundingHistoryColumns"
+        :rows="fundingHistoryRows"
+        empty-text="No allocation records for this category."
+        sticky-header
+      />
     </div>
 
     <div
       v-if="activeTab === 'spending-history'"
-      class="category-detail__placeholder"
+      class="category-detail__history"
     >
-      <p>Spending history will show a filtered view of transactions.</p>
+      <TableShell
+        :columns="spendingHistoryColumns"
+        :rows="spendingHistoryRows"
+        empty-text="No transactions for this category."
+        sticky-header
+      />
     </div>
 
     <template #footer>
@@ -364,15 +489,8 @@ const fundingToDateItems = computed(() => {
   color: var(--color-positive);
 }
 
-.category-detail__placeholder {
-  color: var(--color-on-surface-muted);
-  font-family: var(--text-body-md-font-family);
-  font-size: var(--text-body-md-font-size);
-  padding: var(--space-xl) 0;
-}
-
-.category-detail__placeholder p {
-  margin: 0;
+.category-detail__history {
+  min-width: 0;
 }
 
 @media (max-width: 720px) {

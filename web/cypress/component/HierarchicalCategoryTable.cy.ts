@@ -171,9 +171,7 @@ describe("HierarchicalCategoryTable", () => {
       props: {
         reorderable: true,
         columns: [{ key: "name", label: "Category" }],
-        rows: [
-          { key: "a", label: "Housing", cells: {} },
-        ],
+        rows: [{ key: "a", label: "Housing", cells: {} }],
       },
     });
     cy.get("[data-cy=hierarchical-category-table-root]")
@@ -202,9 +200,7 @@ describe("HierarchicalCategoryTable", () => {
       props: {
         reorderable: false,
         columns: [{ key: "name", label: "Category" }],
-        rows: [
-          { key: "a", label: "Housing", cells: {} },
-        ],
+        rows: [{ key: "a", label: "Housing", cells: {} }],
       },
     });
     cy.get("[data-cy=hierarchical-category-table-root]")
@@ -287,15 +283,12 @@ describe("HierarchicalCategoryTable", () => {
     mount(HierarchicalCategoryTable, {
       props: {
         columns: [{ key: "name", label: "Category" }],
-        rows: [
-          { key: "a", label: "Housing", icon: "🏠", cells: {} },
-        ],
+        rows: [{ key: "a", label: "Housing", icon: "home", cells: {} }],
       },
     });
-    cy.get("[data-cy=hierarchical-category-table-root]").should(
-      "contain.text",
-      "🏠",
-    );
+    cy.get("[data-cy=hierarchical-category-table-root]")
+      .find("[data-cy=icon-glyph-root]")
+      .should("exist");
   });
 
   it("applies cell variant colors", () => {
