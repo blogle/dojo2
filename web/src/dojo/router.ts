@@ -19,6 +19,10 @@ const router = createRouter({
       path: "/budgets",
       component: () => import("./pages/BudgetsPage.vue"),
     },
+    {
+      path: "/transactions",
+      component: () => import("./pages/TransactionsPage.vue"),
+    },
   ],
 });
 
