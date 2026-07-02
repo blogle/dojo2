@@ -33,10 +33,7 @@ describe("MetricStrip", () => {
         items: [{ key: "a", label: "Revenue", value: "$10,000" }],
       },
     });
-    cy.get("[data-cy=metric-strip-root]").should(
-      "contain.text",
-      "$10,000",
-    );
+    cy.get("[data-cy=metric-strip-root]").should("contain.text", "$10,000");
   });
 
   it("renders delta with positive class", () => {
@@ -70,10 +67,7 @@ describe("MetricStrip", () => {
         ],
       },
     });
-    cy.get("[data-cy=metric-strip-root]").should(
-      "contain.text",
-      "On track",
-    );
+    cy.get("[data-cy=metric-strip-root]").should("contain.text", "On track");
   });
 
   it("shows skeleton when loading", () => {
@@ -82,14 +76,18 @@ describe("MetricStrip", () => {
         items: [{ key: "a", label: "Revenue", loading: true }],
       },
     });
-    cy.get("[data-cy=metric-strip-root]").find(".metric-strip__skeleton").should("exist");
+    cy.get("[data-cy=metric-strip-root]")
+      .find(".metric-strip__skeleton")
+      .should("exist");
   });
 
   it("emits select when a clickable item is activated", () => {
     const onSelect = cy.spy().as("onSelect");
     mount(MetricStrip, {
       props: {
-        items: [{ key: "revenue", label: "Revenue", value: "$100", clickable: true }],
+        items: [
+          { key: "revenue", label: "Revenue", value: "$100", clickable: true },
+        ],
         onSelect,
       },
     });

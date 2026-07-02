@@ -19,13 +19,19 @@ describe("PreviewBox", () => {
       props: { title: "Balance change" },
       slots: { default: "Content" },
     });
-    cy.get("[data-cy=preview-box-root]").should("contain.text", "Balance change");
+    cy.get("[data-cy=preview-box-root]").should(
+      "contain.text",
+      "Balance change",
+    );
   });
 
   it("renders slot content", () => {
     mount(PreviewBox, {
       slots: { default: "Preview content" },
     });
-    cy.get("[data-cy=preview-box-root]").should("contain.text", "Preview content");
+    cy.get("[data-cy=preview-box-root]").should(
+      "contain.text",
+      "Preview content",
+    );
   });
 });

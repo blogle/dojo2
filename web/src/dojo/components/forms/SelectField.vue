@@ -39,7 +39,9 @@ const emit = defineEmits<{
         :value="modelValue"
         :disabled="disabled"
         :name="name"
-        @change="emit('update:modelValue', ($event.target as HTMLSelectElement).value)"
+        @change="
+          emit('update:modelValue', ($event.target as HTMLSelectElement).value)
+        "
       >
         <option
           v-for="option in options"
@@ -52,8 +54,16 @@ const emit = defineEmits<{
       </select>
       <span class="select-field__chevron" aria-hidden="true">▾</span>
     </span>
-    <span v-if="error" class="select-field__message select-field__message--error">{{ error }}</span>
-    <span v-else-if="helper" class="select-field__message select-field__message--helper">{{ helper }}</span>
+    <span
+      v-if="error"
+      class="select-field__message select-field__message--error"
+      >{{ error }}</span
+    >
+    <span
+      v-else-if="helper"
+      class="select-field__message select-field__message--helper"
+      >{{ helper }}</span
+    >
   </label>
 </template>
 

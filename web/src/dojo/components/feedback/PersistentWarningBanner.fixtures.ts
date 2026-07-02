@@ -9,7 +9,8 @@ type PersistentWarningBannerProps = InstanceType<
 export default defineFixtures<PersistentWarningBannerProps>({
   component: PersistentWarningBanner,
   title: "Persistent Warning Banner",
-  description: "Content-area banner with severity variant, optional actions, and dismiss.",
+  description:
+    "Content-area banner with severity variant, optional actions, and dismiss.",
   scenarios: [
     {
       name: "warning with actions",

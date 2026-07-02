@@ -30,7 +30,8 @@ export default defineFixtures<PreviewBoxProps>({
         title: "Budget reallocation",
       },
       slots: {
-        default: '<div>Groceries: $500 → $350</div><div>Dining: $200 → $350</div>',
+        default:
+          "<div>Groceries: $500 → $350</div><div>Dining: $200 → $350</div>",
       },
     },
   ],

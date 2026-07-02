@@ -20,8 +20,14 @@ export default defineFixtures<ColorSwatchGridProps>({
               { label: "Primary Hover", token: "--color-primary-hover" },
               { label: "Primary Active", token: "--color-primary-active" },
               { label: "On Primary", token: "--color-on-primary" },
-              { label: "Primary Container", token: "--color-primary-container" },
-              { label: "On Primary Container", token: "--color-on-primary-container" },
+              {
+                label: "Primary Container",
+                token: "--color-primary-container",
+              },
+              {
+                label: "On Primary Container",
+                token: "--color-on-primary-container",
+              },
             ],
           },
           {
@@ -56,24 +62,34 @@ export default defineFixtures<ColorSwatchGridProps>({
             name: "Semantic",
             swatches: [
               { label: "Positive", token: "--color-positive" },
-              { label: "Positive Container", token: "--color-positive-container" },
+              {
+                label: "Positive Container",
+                token: "--color-positive-container",
+              },
               { label: "Warning", token: "--color-warning" },
-              { label: "Warning Container", token: "--color-warning-container" },
+              {
+                label: "Warning Container",
+                token: "--color-warning-container",
+              },
               { label: "Error", token: "--color-error" },
               { label: "Error Container", token: "--color-error-container" },
               { label: "Info", token: "--color-info" },
               { label: "Info Container", token: "--color-info-container" },
               { label: "Historical", token: "--color-historical" },
-              { label: "Historical Container", token: "--color-historical-container" },
+              {
+                label: "Historical Container",
+                token: "--color-historical-container",
+              },
               { label: "Partial Funding", token: "--color-partial-funding" },
-              { label: "Partial Funding Container", token: "--color-partial-funding-container" },
+              {
+                label: "Partial Funding Container",
+                token: "--color-partial-funding-container",
+              },
             ],
           },
           {
             name: "Overlay",
-            swatches: [
-              { label: "Scrim", token: "--color-scrim" },
-            ],
+            swatches: [{ label: "Scrim", token: "--color-scrim" }],
           },
         ],
       },

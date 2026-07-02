@@ -40,7 +40,12 @@ const emit = defineEmits<{
         :max="max"
         :step="step"
         :disabled="disabled"
-        @input="emit('update:modelValue', Number(($event.target as HTMLInputElement).value))"
+        @input="
+          emit(
+            'update:modelValue',
+            Number(($event.target as HTMLInputElement).value),
+          )
+        "
       />
     </div>
 

@@ -21,7 +21,10 @@ describe("TextField", () => {
 
   it("displays helper text", () => {
     mount(TextField, { props: { helper: "Required field" } });
-    cy.get("[data-cy=text-field-root]").should("contain.text", "Required field");
+    cy.get("[data-cy=text-field-root]").should(
+      "contain.text",
+      "Required field",
+    );
   });
 
   it("displays error text", () => {
@@ -57,10 +60,7 @@ describe("TextField", () => {
     mount(TextField, {
       props: { error: "Error shown", helper: "Helper hidden" },
     });
-    cy.get("[data-cy=text-field-root]").should(
-      "contain.text",
-      "Error shown",
-    );
+    cy.get("[data-cy=text-field-root]").should("contain.text", "Error shown");
     cy.get("[data-cy=text-field-root]").should(
       "not.contain.text",
       "Helper hidden",

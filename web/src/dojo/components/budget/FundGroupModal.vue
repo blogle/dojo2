@@ -68,14 +68,17 @@ function handleSubmit() {
     @cancel="emit('close')"
     @close="emit('close')"
   >
-    <div v-if="groupCategories.length === 0" style="color: var(--color-on-surface-muted);">
+    <div
+      v-if="groupCategories.length === 0"
+      style="color: var(--color-on-surface-muted)"
+    >
       No categories in this group.
     </div>
-    <div v-else style="display: grid; gap: var(--space-md);">
+    <div v-else style="display: grid; gap: var(--space-md)">
       <div
         v-for="cat in groupCategories"
         :key="cat.category_id"
-        style="display: grid; gap: var(--space-xs);"
+        style="display: grid; gap: var(--space-xs)"
       >
         <CurrencyField
           :model-value="fundingAmounts[cat.category_id] ?? ''"
@@ -85,7 +88,13 @@ function handleSubmit() {
           @update:model-value="fundingAmounts[cat.category_id] = $event"
         />
       </div>
-      <div style="padding: var(--space-sm); background: var(--color-surface-muted); text-align: right;">
+      <div
+        style="
+          padding: var(--space-sm);
+          background: var(--color-surface-muted);
+          text-align: right;
+        "
+      >
         Total: {{ formatCurrency(totalFunding) }}
       </div>
     </div>

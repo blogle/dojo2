@@ -23,11 +23,7 @@ const variantColorMap: Record<string, string> = {
 
 <template>
   <div class="progress-ring" data-cy="progress-ring-root">
-    <svg
-      :width="size"
-      :height="size"
-      :viewBox="`0 0 ${size} ${size}`"
-    >
+    <svg :width="size" :height="size" :viewBox="`0 0 ${size} ${size}`">
       <circle
         class="progress-ring__track"
         :cx="size / 2"
@@ -44,7 +40,10 @@ const variantColorMap: Record<string, string> = {
         :stroke="variantColorMap[variant]"
         :stroke-dasharray="2 * Math.PI * ((size - strokeWidth) / 2)"
         :stroke-dashoffset="
-          2 * Math.PI * ((size - strokeWidth) / 2) * (1 - Math.min(100, Math.max(0, value)) / 100)
+          2 *
+          Math.PI *
+          ((size - strokeWidth) / 2) *
+          (1 - Math.min(100, Math.max(0, value)) / 100)
         "
         transform-origin="center"
         transform="rotate(-90)"
@@ -66,6 +65,7 @@ const variantColorMap: Record<string, string> = {
 .progress-ring__fill {
   fill: none;
   stroke-linecap: round;
-  transition: stroke-dashoffset var(--transition-normal) var(--transition-ease-out);
+  transition: stroke-dashoffset var(--transition-normal)
+    var(--transition-ease-out);
 }
 </style>

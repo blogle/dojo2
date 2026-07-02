@@ -13,7 +13,8 @@ const plusIcon = `
 export default defineFixtures<ButtonProps>({
   component: Button,
   title: "Button",
-  description: "Primary, secondary, and tertiary button grammar for page and modal actions.",
+  description:
+    "Primary, secondary, and tertiary button grammar for page and modal actions.",
   presentation: {
     container: "none",
   },
@@ -37,7 +38,8 @@ export default defineFixtures<ButtonProps>({
         icon: plusIcon,
         default: "Add",
       },
-      notes: "The visual primary should be reserved for the single advancing action in a local context.",
+      notes:
+        "The visual primary should be reserved for the single advancing action in a local context.",
     },
     {
       name: "tertiary",

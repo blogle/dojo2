@@ -28,7 +28,13 @@ const detailsFor = (row: TypographyRow) =>
   row.specs ??
   `${tokenValue(row.token, "font-size")} / ${tokenValue(row.token, "font-weight")} / ${tokenValue(row.token, "line-height")}`;
 
-const mutedTokens = new Set(["body-lg", "body-md", "body-sm", "caption", "numeric"]);
+const mutedTokens = new Set([
+  "body-lg",
+  "body-md",
+  "body-sm",
+  "caption",
+  "numeric",
+]);
 
 const sampleClassFor = (token: string) =>
   mutedTokens.has(token)
@@ -44,7 +50,9 @@ const sampleClassFor = (token: string) =>
         <p class="type-row__details">{{ detailsFor(row) }}</p>
       </div>
       <div class="type-row__sample-wrap">
-        <p v-if="row.token === 'display-lg'" class="type-row__eyebrow">Typography</p>
+        <p v-if="row.token === 'display-lg'" class="type-row__eyebrow">
+          Typography
+        </p>
         <p :class="sampleClassFor(row.token)" :style="styleFor(row.token)">
           {{ row.sample }}
         </p>

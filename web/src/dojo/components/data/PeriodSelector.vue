@@ -51,7 +51,9 @@ const emit = defineEmits<{
       <input
         type="checkbox"
         :checked="comparison"
-        @change="emit('update:comparison', ($event.target as HTMLInputElement).checked)"
+        @change="
+          emit('update:comparison', ($event.target as HTMLInputElement).checked)
+        "
       />
       <span>Compare</span>
     </label>

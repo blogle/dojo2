@@ -22,7 +22,11 @@ const style = computed(() =>
 </script>
 
 <template>
-  <hr :class="['divider', `divider--${orientation}`]" :style="style" data-cy="divider-root" />
+  <hr
+    :class="['divider', `divider--${orientation}`]"
+    :style="style"
+    data-cy="divider-root"
+  />
 </template>
 
 <style scoped>

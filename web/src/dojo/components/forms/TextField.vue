@@ -57,12 +57,19 @@ const emit = defineEmits<{
         :type="type"
         :name="name"
         :inputmode="inputmode"
-        @input="emit('update:modelValue', ($event.target as HTMLInputElement).value)"
+        @input="
+          emit('update:modelValue', ($event.target as HTMLInputElement).value)
+        "
       />
     </span>
 
-    <span v-if="error" class="field__message field__message--error">{{ error }}</span>
-    <span v-else-if="helper || $slots.helper" class="field__message field__message--helper">
+    <span v-if="error" class="field__message field__message--error">{{
+      error
+    }}</span>
+    <span
+      v-else-if="helper || $slots.helper"
+      class="field__message field__message--helper"
+    >
       <slot name="helper">{{ helper }}</slot>
     </span>
   </label>

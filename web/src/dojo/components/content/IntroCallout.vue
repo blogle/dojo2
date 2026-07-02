@@ -17,7 +17,11 @@ defineProps<{
 <style scoped>
 .intro-callout {
   border: 1px solid var(--color-outline);
-  background: color-mix(in srgb, var(--color-surface) 78%, var(--color-surface-muted));
+  background: color-mix(
+    in srgb,
+    var(--color-surface) 78%,
+    var(--color-surface-muted)
+  );
   padding: var(--layout-intro-padding);
 }
 

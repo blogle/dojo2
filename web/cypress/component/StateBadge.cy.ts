@@ -15,12 +15,18 @@ describe("StateBadge", () => {
   });
 
   it("renders slot content", () => {
-    mount(StateBadge, { props: { variant: "positive" }, slots: { default: "Active" } });
+    mount(StateBadge, {
+      props: { variant: "positive" },
+      slots: { default: "Active" },
+    });
     cy.get("[data-cy=state-badge-root]").should("contain.text", "Active");
   });
 
   it("applies the correct variant class", () => {
-    mount(StateBadge, { props: { variant: "error" }, slots: { default: "Error" } });
+    mount(StateBadge, {
+      props: { variant: "error" },
+      slots: { default: "Error" },
+    });
     cy.get("[data-cy=state-badge-root]").should(
       "have.class",
       "state-badge--error",

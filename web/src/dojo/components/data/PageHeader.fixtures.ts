@@ -7,7 +7,8 @@ type PageHeaderProps = InstanceType<typeof PageHeader>["$props"];
 export default defineFixtures<PageHeaderProps>({
   component: PageHeader,
   title: "Page Header",
-  description: "Page framing with title, subtitle, metadata, actions, and optional tabs.",
+  description:
+    "Page framing with title, subtitle, metadata, actions, and optional tabs.",
   scenarios: [
     {
       name: "default",
@@ -25,7 +26,8 @@ export default defineFixtures<PageHeaderProps>({
           </div>
         `,
       },
-      notes: "Actions share the row with the title at medium widths and stack beneath it on small screens.",
+      notes:
+        "Actions share the row with the title at medium widths and stack beneath it on small screens.",
     },
     {
       name: "with tabs",

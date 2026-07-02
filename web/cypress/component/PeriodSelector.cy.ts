@@ -50,10 +50,7 @@ describe("PeriodSelector", () => {
     mount(PeriodSelector, {
       props: { comparison: true },
     });
-    cy.get("[data-cy=period-selector-root]").should(
-      "contain.text",
-      "Compare",
-    );
+    cy.get("[data-cy=period-selector-root]").should("contain.text", "Compare");
   });
 
   it("emits update:comparison when checkbox is toggled", () => {

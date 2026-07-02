@@ -7,7 +7,8 @@ type MetricStripProps = InstanceType<typeof MetricStrip>["$props"];
 export default defineFixtures<MetricStripProps>({
   component: MetricStrip,
   title: "Metric Strip",
-  description: "Horizontal metric row with values, deltas, status badges, and loading state.",
+  description:
+    "Horizontal metric row with values, deltas, status badges, and loading state.",
   scenarios: [
     {
       name: "default",

@@ -23,8 +23,15 @@ const tokenValue = (token: string) => rootStyles.getPropertyValue(token).trim();
     <section v-for="group in groups" :key="group.name" class="swatch-group">
       <h3 class="swatch-group__title">{{ group.name }}</h3>
       <div class="swatch-grid">
-        <article v-for="swatch in group.swatches" :key="swatch.token" class="swatch-card">
-          <div class="swatch-card__chip" :style="{ backgroundColor: `var(${swatch.token})` }" />
+        <article
+          v-for="swatch in group.swatches"
+          :key="swatch.token"
+          class="swatch-card"
+        >
+          <div
+            class="swatch-card__chip"
+            :style="{ backgroundColor: `var(${swatch.token})` }"
+          />
           <div class="swatch-card__meta">
             <p class="swatch-card__label">{{ swatch.label }}</p>
             <p class="swatch-card__value">{{ tokenValue(swatch.token) }}</p>

@@ -12,7 +12,8 @@ export default defineFixtures<HistoricalBannerProps>({
     {
       name: "read only mode",
       props: {
-        description: "Showing the budget as of June 15, 2026. Editing and funding actions are disabled in this mode.",
+        description:
+          "Showing the budget as of June 15, 2026. Editing and funding actions are disabled in this mode.",
       },
     },
   ],

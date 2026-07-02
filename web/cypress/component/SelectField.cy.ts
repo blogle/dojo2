@@ -31,10 +31,7 @@ describe("SelectField", () => {
         options: [{ value: "a", label: "Option A" }],
       },
     });
-    cy.get("[data-cy=select-field-root]").should(
-      "contain.text",
-      "Choose one",
-    );
+    cy.get("[data-cy=select-field-root]").should("contain.text", "Choose one");
   });
 
   it("displays error text", () => {

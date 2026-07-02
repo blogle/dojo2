@@ -22,7 +22,9 @@ const clampedValue = computed(() => Math.min(100, Math.max(0, props.value)));
   <div class="progress-bar" data-cy="progress-bar-root">
     <div v-if="label || showValue" class="progress-bar__header">
       <span v-if="label" class="progress-bar__label">{{ label }}</span>
-      <span v-if="showValue" class="progress-bar__value">{{ clampedValue }}%</span>
+      <span v-if="showValue" class="progress-bar__value"
+        >{{ clampedValue }}%</span
+      >
     </div>
     <div class="progress-bar__track">
       <div

@@ -33,12 +33,53 @@ withDefaults(
       fill="none"
       aria-hidden="true"
     >
-      <circle v-if="icon === 'check'" cx="8" cy="8" r="6" fill="currentColor" opacity="0.15" />
-      <path v-if="icon === 'check'" d="M5.5 8l2 2 3.5-3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
-      <circle v-if="icon === 'clock'" cx="8" cy="8" r="6" fill="currentColor" opacity="0.15" />
-      <path v-if="icon === 'clock'" d="M8 5v3l2 1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
-      <circle v-if="icon === 'alert'" cx="8" cy="8" r="6" fill="currentColor" opacity="0.15" />
-      <path v-if="icon === 'alert'" d="M8 5v3M8 10.5v.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+      <circle
+        v-if="icon === 'check'"
+        cx="8"
+        cy="8"
+        r="6"
+        fill="currentColor"
+        opacity="0.15"
+      />
+      <path
+        v-if="icon === 'check'"
+        d="M5.5 8l2 2 3.5-3.5"
+        stroke="currentColor"
+        stroke-width="1.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+      <circle
+        v-if="icon === 'clock'"
+        cx="8"
+        cy="8"
+        r="6"
+        fill="currentColor"
+        opacity="0.15"
+      />
+      <path
+        v-if="icon === 'clock'"
+        d="M8 5v3l2 1.5"
+        stroke="currentColor"
+        stroke-width="1.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+      <circle
+        v-if="icon === 'alert'"
+        cx="8"
+        cy="8"
+        r="6"
+        fill="currentColor"
+        opacity="0.15"
+      />
+      <path
+        v-if="icon === 'alert'"
+        d="M8 5v3M8 10.5v.5"
+        stroke="currentColor"
+        stroke-width="1.5"
+        stroke-linecap="round"
+      />
     </svg>
     <slot />
   </span>

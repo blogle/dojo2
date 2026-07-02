@@ -27,16 +27,18 @@ describe("ReorderModeBanner", () => {
   it("emits cancel when cancel button is clicked", () => {
     const onCancel = cy.spy().as("onCancel");
     mount(ReorderModeBanner, {
-      props: { "onCancel": onCancel },
+      props: { onCancel: onCancel },
     });
-    cy.get("[data-cy=reorder-mode-banner-root] .reorder-banner__cancel").click();
+    cy.get(
+      "[data-cy=reorder-mode-banner-root] .reorder-banner__cancel",
+    ).click();
     cy.get("@onCancel").should("have.been.calledOnce");
   });
 
   it("emits save when save button is clicked", () => {
     const onSave = cy.spy().as("onSave");
     mount(ReorderModeBanner, {
-      props: { "onSave": onSave },
+      props: { onSave: onSave },
     });
     cy.get("[data-cy=reorder-mode-banner-root] .reorder-banner__save").click();
     cy.get("@onSave").should("have.been.calledOnce");

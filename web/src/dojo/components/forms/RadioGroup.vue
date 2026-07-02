@@ -40,7 +40,10 @@ const emit = defineEmits<{
         @click="emit('update:modelValue', option.value)"
       >
         <span class="radio-group__indicator" aria-hidden="true">
-          <span v-if="modelValue === option.value" class="radio-group__indicator-dot" />
+          <span
+            v-if="modelValue === option.value"
+            class="radio-group__indicator-dot"
+          />
         </span>
         {{ option.label }}
       </button>

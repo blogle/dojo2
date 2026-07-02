@@ -24,14 +24,8 @@ describe("TableShell", () => {
         rows: [],
       },
     });
-    cy.get("[data-cy=table-shell-root] thead").should(
-      "contain.text",
-      "Name",
-    );
-    cy.get("[data-cy=table-shell-root] thead").should(
-      "contain.text",
-      "Amount",
-    );
+    cy.get("[data-cy=table-shell-root] thead").should("contain.text", "Name");
+    cy.get("[data-cy=table-shell-root] thead").should("contain.text", "Amount");
   });
 
   it("renders rows from rows prop", () => {

@@ -23,9 +23,13 @@ const emit = defineEmits<{
   <div class="historical-banner" data-cy="historical-banner-root">
     <div class="historical-banner__copy">
       <p class="historical-banner__label">{{ label }}</p>
-      <p v-if="description" class="historical-banner__description">{{ description }}</p>
+      <p v-if="description" class="historical-banner__description">
+        {{ description }}
+      </p>
     </div>
-    <Button variant="primary" size="sm" @click="emit('exit')">{{ exitLabel }}</Button>
+    <Button variant="primary" size="sm" @click="emit('exit')">{{
+      exitLabel
+    }}</Button>
   </div>
 </template>
 

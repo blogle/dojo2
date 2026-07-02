@@ -45,7 +45,9 @@ describe("HistoricalBanner", () => {
   it("emits exit when the exit button is clicked", () => {
     const onExit = cy.spy().as("onExit");
     mount(HistoricalBanner, { props: { onExit } });
-    cy.get("[data-cy=historical-banner-root]").contains("Return to current").click();
+    cy.get("[data-cy=historical-banner-root]")
+      .contains("Return to current")
+      .click();
     cy.get("@onExit").should("have.been.called");
   });
 });

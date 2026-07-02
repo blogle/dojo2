@@ -17,7 +17,10 @@ const tokenValue = (token: string) => rootStyles.getPropertyValue(token).trim();
     <article v-for="entry in tokens" :key="entry.token" class="spacing-row">
       <p class="spacing-row__label">{{ entry.label }}</p>
       <div class="spacing-row__bar-wrap">
-        <div class="spacing-row__bar" :style="{ width: `var(${entry.token})` }" />
+        <div
+          class="spacing-row__bar"
+          :style="{ width: `var(${entry.token})` }"
+        />
       </div>
       <p class="spacing-row__value">{{ tokenValue(entry.token) }}</p>
     </article>

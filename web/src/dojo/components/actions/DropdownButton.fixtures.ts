@@ -7,7 +7,8 @@ type DropdownButtonProps = InstanceType<typeof DropdownButton>["$props"];
 export default defineFixtures<DropdownButtonProps>({
   component: DropdownButton,
   title: "Dropdown Button",
-  description: "Compact action button with a menu of related secondary actions.",
+  description:
+    "Compact action button with a menu of related secondary actions.",
   presentation: {
     container: "none",
   },
@@ -17,8 +18,16 @@ export default defineFixtures<DropdownButtonProps>({
       props: {
         label: "Add",
         items: [
-          { key: "category", label: "Category", description: "Add a category inside an existing group." },
-          { key: "group", label: "Category group", description: "Create an empty group and order it later." },
+          {
+            key: "category",
+            label: "Category",
+            description: "Add a category inside an existing group.",
+          },
+          {
+            key: "group",
+            label: "Category group",
+            description: "Create an empty group and order it later.",
+          },
         ],
       },
     },
@@ -29,7 +38,12 @@ export default defineFixtures<DropdownButtonProps>({
         variant: "secondary",
         items: [
           { key: "retired", label: "Retired categories" },
-          { key: "restore", label: "Restore latest", disabled: true, description: "No recently retired categories." },
+          {
+            key: "restore",
+            label: "Restore latest",
+            disabled: true,
+            description: "No recently retired categories.",
+          },
         ],
       },
     },

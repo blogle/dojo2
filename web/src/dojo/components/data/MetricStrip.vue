@@ -66,8 +66,13 @@ const formatDelta = (delta: number) => `${delta > 0 ? "+" : ""}${delta}`;
         <div v-if="item.loading" class="metric-strip__skeleton" />
         <p v-else class="metric-strip__value">{{ item.value }}</p>
         <div class="metric-strip__aux-row">
-          <span v-if="item.auxValue" class="metric-strip__aux-value">{{ item.auxValue }}</span>
-          <span v-if="item.delta !== undefined" :class="['metric-strip__delta', deltaClass(item.delta)]">
+          <span v-if="item.auxValue" class="metric-strip__aux-value">{{
+            item.auxValue
+          }}</span>
+          <span
+            v-if="item.delta !== undefined"
+            :class="['metric-strip__delta', deltaClass(item.delta)]"
+          >
             {{ formatDelta(item.delta) }}
           </span>
           <StateBadge

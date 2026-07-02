@@ -7,7 +7,8 @@ type ReorderModeBannerProps = InstanceType<typeof ReorderModeBanner>["$props"];
 export default defineFixtures<ReorderModeBannerProps>({
   component: ReorderModeBanner,
   title: "Reorder Mode Banner",
-  description: "Inline banner that appears during reorder mode with status and actions.",
+  description:
+    "Inline banner that appears during reorder mode with status and actions.",
   scenarios: [
     {
       name: "no changes",

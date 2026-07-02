@@ -7,7 +7,8 @@ type SelectFieldProps = InstanceType<typeof SelectField>["$props"];
 export default defineFixtures<SelectFieldProps>({
   component: SelectField,
   title: "Select Field",
-  description: "Form select for parent-group, goal frequency, and funding source choices.",
+  description:
+    "Form select for parent-group, goal frequency, and funding source choices.",
   scenarios: [
     {
       name: "default",
@@ -26,7 +27,8 @@ export default defineFixtures<SelectFieldProps>({
       props: {
         label: "Goal frequency",
         modelValue: "monthly",
-        helper: "Recurring goals fund before discretionary goals when due dates tie.",
+        helper:
+          "Recurring goals fund before discretionary goals when due dates tie.",
         options: [
           { value: "monthly", label: "Monthly" },
           { value: "quarterly", label: "Quarterly" },

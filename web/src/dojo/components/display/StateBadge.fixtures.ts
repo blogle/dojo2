@@ -7,7 +7,8 @@ type StateBadgeProps = InstanceType<typeof StateBadge>["$props"];
 export default defineFixtures<StateBadgeProps>({
   component: StateBadge,
   title: "State Badge",
-  description: "Semantic status badges with optional icon indicators for table rows, metrics, and banners.",
+  description:
+    "Semantic status badges with optional icon indicators for table rows, metrics, and banners.",
   presentation: {
     container: "none",
   },
@@ -38,7 +39,8 @@ export default defineFixtures<StateBadgeProps>({
       slots: {
         default: "Overspent",
       },
-      notes: "Use the paired container and text token for every semantic state.",
+      notes:
+        "Use the paired container and text token for every semantic state.",
     },
     {
       name: "partial-funding",

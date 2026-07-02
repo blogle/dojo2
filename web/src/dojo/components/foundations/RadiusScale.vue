@@ -15,7 +15,10 @@ const tokenValue = (token: string) => rootStyles.getPropertyValue(token).trim();
 <template>
   <div class="radius-scale" data-cy="radius-scale-root">
     <article v-for="entry in tokens" :key="entry.token" class="radius-card">
-      <div class="radius-card__shape" :style="{ borderRadius: `var(${entry.token})` }" />
+      <div
+        class="radius-card__shape"
+        :style="{ borderRadius: `var(${entry.token})` }"
+      />
       <p class="radius-card__label">{{ entry.label }}</p>
       <p class="radius-card__value">{{ tokenValue(entry.token) }}</p>
     </article>
@@ -40,7 +43,11 @@ const tokenValue = (token: string) => rootStyles.getPropertyValue(token).trim();
   width: 42px;
   height: 42px;
   border: 1px solid var(--color-outline);
-  background: color-mix(in srgb, var(--color-surface) 72%, var(--color-primary-container));
+  background: color-mix(
+    in srgb,
+    var(--color-surface) 72%,
+    var(--color-primary-container)
+  );
 }
 
 .radius-card__label,

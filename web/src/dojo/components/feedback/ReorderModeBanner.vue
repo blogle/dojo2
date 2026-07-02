@@ -27,7 +27,11 @@ const emit = defineEmits<{
       </span>
     </div>
     <div class="reorder-banner__actions">
-      <button type="button" class="reorder-banner__cancel" @click="emit('cancel')">
+      <button
+        type="button"
+        class="reorder-banner__cancel"
+        @click="emit('cancel')"
+      >
         {{ cancelText }}
       </button>
       <button type="button" class="reorder-banner__save" @click="emit('save')">
@@ -84,7 +88,11 @@ const emit = defineEmits<{
 }
 
 .reorder-banner__cancel:hover {
-  background: color-mix(in srgb, var(--color-on-primary-container) 8%, transparent);
+  background: color-mix(
+    in srgb,
+    var(--color-on-primary-container) 8%,
+    transparent
+  );
 }
 
 .reorder-banner__save {

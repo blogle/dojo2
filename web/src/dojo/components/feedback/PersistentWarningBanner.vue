@@ -44,12 +44,19 @@ const severityIcon = (severity: "info" | "warning" | "error") => {
     :class="`persistent-warning-banner--${severity}`"
     data-cy="persistent-warning-banner-root"
   >
-    <span class="persistent-warning-banner__icon" aria-hidden="true">{{ severityIcon(props.severity) }}</span>
+    <span class="persistent-warning-banner__icon" aria-hidden="true">{{
+      severityIcon(props.severity)
+    }}</span>
     <div class="persistent-warning-banner__copy">
       <p class="persistent-warning-banner__title">{{ title }}</p>
-      <p v-if="description" class="persistent-warning-banner__description">{{ description }}</p>
+      <p v-if="description" class="persistent-warning-banner__description">
+        {{ description }}
+      </p>
     </div>
-    <div v-if="primaryAction || secondaryAction || dismissible" class="persistent-warning-banner__actions">
+    <div
+      v-if="primaryAction || secondaryAction || dismissible"
+      class="persistent-warning-banner__actions"
+    >
       <Button
         v-if="secondaryAction"
         variant="tertiary"

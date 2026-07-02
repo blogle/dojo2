@@ -55,11 +55,7 @@ useDismissableLayer(open, root, closeMenu);
     :class="`dropdown-button--${variant}`"
     data-cy="dropdown-button-root"
   >
-    <button
-      type="button"
-      class="dropdown-button__primary"
-      :disabled="disabled"
-    >
+    <button type="button" class="dropdown-button__primary" :disabled="disabled">
       {{ label }}
     </button>
 
@@ -71,7 +67,15 @@ useDismissableLayer(open, root, closeMenu);
       :disabled="disabled"
       @click="open = !open"
     >
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.8"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
         <path d="M7 10l5 5 5-5" />
       </svg>
     </button>
@@ -87,7 +91,11 @@ useDismissableLayer(open, root, closeMenu);
         @click="onSelect(item)"
       >
         <span class="dropdown-button__item-label">{{ item.label }}</span>
-        <span v-if="item.description" class="dropdown-button__item-description">{{ item.description }}</span>
+        <span
+          v-if="item.description"
+          class="dropdown-button__item-description"
+          >{{ item.description }}</span
+        >
       </button>
     </div>
   </div>

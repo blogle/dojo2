@@ -12,7 +12,11 @@ defineProps<{
 
 <template>
   <dl class="key-value-list" data-cy="key-value-list-root">
-    <div v-for="(item, index) in items" :key="index" class="key-value-list__row">
+    <div
+      v-for="(item, index) in items"
+      :key="index"
+      class="key-value-list__row"
+    >
       <dt class="key-value-list__label">{{ item.label }}</dt>
       <dd
         :class="[
