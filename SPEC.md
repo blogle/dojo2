@@ -499,47 +499,51 @@ A row may simultaneously be:
 
 Each state has an independent semantic representation.
 
-### Category and Group Detail Modal
+### Category and Group Detail
 
-Selecting a category or group opens a large modal.
+Selecting a category or group opens a full-screen trouser (right-side overlay panel). The trouser covers the full viewport height and most of the width, leaving the navigation rail visible.
 
-The modal includes:
+The trouser includes:
 
-* name
-* current available amount
-* goal configuration
-* historical activity
-* historical funding
-* goal progress
-* expected funding to date
-* actual funding to date
-* deviation from the planned funding path
-* additional monthly funding needed to recover
-* spending reduction needed to recover
-* funding actions
-* move funds
-* edit configuration
-* advanced allocation records
+* name and group name
+* action buttons at the top (Fund, Move funds, Edit configuration) — plain buttons without surface containers
+* tabs: Overview, Funding history, Spending history
+
+#### Overview Tab
+
+The overview tab displays:
+
+* summary metrics: current available, monthly goal, budgeted this month, activity this month
+* goal configuration (goal type, monthly goal, start month, target amount, target date, rollover, incremental)
+* goal progress with visual indicator
+* funding to date: expected funding, actual funding, deviation from plan, additional monthly funding needed, spending reduction needed
+
+#### Funding History Tab
+
+Funding history shows a filtered view of the category allocations table, scoped to the selected category.
+
+#### Spending History Tab
+
+Spending history shows a filtered view of the transactions table, scoped to the selected category.
 
 Group values are aggregates of their active child categories.
 
 ### Funding Shortcuts
 
-Funding shortcuts may be presented in a dropdown button.
+Funding a category is initiated by selecting the Fund button in the category detail trouser. This opens a dedicated funding modal.
 
-Every option displays the exact amount that will be funded.
+The funding modal presents:
 
-Before Save, the modal previews:
+* funding options: Fund up to next month, Fund to monthly goal, Custom amount
+* every option displays the exact amount that will be funded
+* a preview section showing: amount being funded, resulting category balance, resulting Available to budget
+* a warning when Available to budget will become negative after the action
 
-* amount being funded
-* resulting category balance
-* resulting Available to budget
-
-Funding a category succeeds even when Available to budget becomes negative. The application then displays a persistent warning until the deficit is corrected.
+Before Save, the modal previews the action results. Funding a category succeeds even when Available to budget becomes negative. The application then displays a persistent warning until the deficit is corrected.
 
 ### Move Funds
 
-1. Open a category detail modal
+1. Open a category detail trouser
 2. Select Move funds
 3. Choose a source or destination category
 4. Enter an amount
@@ -573,7 +577,7 @@ This flow never makes Available to budget negative.
 
 ### Allocation Records
 
-Allocation records are available from an Advanced section or tab in the category or group detail modal.
+Allocation records are available from an Advanced section in the category or group detail trouser. The Funding history tab provides a filtered view of allocations scoped to the selected category.
 
 ### Retired Categories
 

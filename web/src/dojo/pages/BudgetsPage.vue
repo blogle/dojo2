@@ -23,6 +23,7 @@ import SelectField from "../components/forms/SelectField.vue";
 import CategoryDetailModal from "../components/budget/CategoryDetailModal.vue";
 import MoveFundsModal from "../components/budget/MoveFundsModal.vue";
 import FundGroupModal from "../components/budget/FundGroupModal.vue";
+import FundingModal from "../components/budget/FundingModal.vue";
 
 const { state, initialize, setMonth, saveCategory, saveCategoryGroup } =
   useAppState();
@@ -40,9 +41,11 @@ const activeModal = ref<
   | "fund-group"
   | "move-funds"
   | "retired"
+  | "funding"
 >(null);
 const selectedCategory = ref<Category | null>(null);
 const selectedGroup = ref<CategoryGroup | null>(null);
+const fundingCategory = ref<Category | null>(null);
 
 const groupName = ref("");
 const categoryName = ref("");
@@ -274,6 +277,32 @@ function handleRowSelect(key: string) {
   }
 }
 
+function handleFundCategory() {
+  fundingCategory.value = selectedCategory.value;
+  activeModal.value = "funding";
+}
+
+function handleMoveFundsFromDetail() {
+  activeModal.value = "move-funds";
+}
+
+function handleEditConfig() {
+  // TODO: open edit configuration modal
+}
+
+async function submitFundCategory(payload: {
+  categoryId: string;
+  amountMinor: number;
+}) {
+  const cat = state.categories.find(
+    (c) => c.category_id === payload.categoryId,
+  );
+  if (!cat) return;
+  const newAvailable = cat.available_minor + payload.amountMinor;
+  await saveCategory({ available_minor: newAvailable }, payload.categoryId);
+  closeModal();
+}
+
 function handleMonthSelect() {
   if (selectedMonth.value) {
     setMonth(selectedMonth.value);
@@ -485,6 +514,9 @@ onMounted(() => {
       :visible="activeModal === 'category-detail'"
       :category="selectedCategory"
       @close="closeModal"
+      @fund="handleFundCategory"
+      @move-funds="handleMoveFundsFromDetail"
+      @edit-config="handleEditConfig"
     />
 
     <FundGroupModal
@@ -500,6 +532,13 @@ onMounted(() => {
       :categories="state.categories"
       @close="closeModal"
       @submit="submitMoveFunds"
+    />
+
+    <FundingModal
+      :visible="activeModal === 'funding'"
+      :category="fundingCategory"
+      @close="closeModal"
+      @submit="submitFundCategory"
     />
 
     <LargeDetailModal

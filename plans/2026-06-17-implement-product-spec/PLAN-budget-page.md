@@ -292,11 +292,13 @@ Inside BudgetsPage.vue. Triggered by DropdownButton `select("add-category")`.
 
 ---
 
-## Phase 5: Frontend — Category Detail Modal (Screen 06)
+## Phase 5: Frontend — Category Detail Trouser (Screen 06)
 
-### 5.1 CategoryDetailModal component
+> **Design update (2026-07-01)**: The category detail view now uses a full-screen trouser (right-side overlay panel) instead of a centered modal. The Fund action is a plain button that opens a dedicated FundingModal (no dropdown). Move funds and Edit configuration are plain buttons at the top without surface containers. Tabs are Overview, Funding history, Spending history (Advanced allocation tab removed). See `docs/plans/budget-category-detail-trouser.md` for the full plan.
 
-**File**: `web/src/dojo/components/budget/CategoryDetailModal.vue` (new)
+### 5.1 CategoryDetailModal component (refactored to use FullScreenTrouser)
+
+**File**: `web/src/dojo/components/budget/CategoryDetailModal.vue` (modify existing)
 
 Props:
 ```typescript
@@ -306,28 +308,42 @@ Props:
 }
 ```
 
-Layout (matching mock 06):
-- Header: category icon + name + close button
-- Summary metrics: Current available, Monthly goal, Budgeted this month, Activity this month
-- Tabs (Overview, Funding history, Spending history, Advanced allocation)
-- Overview tab: Goal config panel (KeyValueList), Goal progress (ProgressRing), Funding to date
-- Funding actions: Fund dropdown + Move funds button + Edit config button
+Layout (matching mock 06, updated):
+- Uses FullScreenTrouser instead of LargeDetailModal
+- Header: category icon + name + group name subtitle
+- Header actions: Fund button (primary) + Move funds button (secondary) + Edit configuration button (secondary) — plain buttons, no surface containers
+- Tabs (Overview, Funding history, Spending history)
+- Overview tab: Summary metrics + Goal config panel (KeyValueList) + Goal progress (ProgressRing) + Funding to date
+- Funding history tab: filtered view of category allocations (placeholder initially)
+- Spending history tab: filtered view of transactions (placeholder initially)
 - Footer: Close button
 
-### 5.2 FundingOptionSelector component
+Events emitted: `fund`, `move-funds`, `edit-config`, `close`
 
-**File**: `web/src/dojo/components/budget/FundingOptionSelector.vue` (new)
+### 5.2 FundingModal component (new)
 
-Custom dropdown with funding shortcuts:
-- "Fund up to next month — $X.XX"
-- "Fund to monthly goal — $X.XX"
-- "Custom amount..." with inline CurrencyField
+**File**: `web/src/dojo/components/budget/FundingModal.vue` (new)
 
-Emits: `fund(amount_minor)`
+A dedicated modal for funding a single category, replacing the dropdown pattern.
 
-### 5.3 Preview section
+Props:
+```typescript
+{
+  visible: boolean,
+  category: Category | null,
+}
+```
 
-PreviewBox showing: amount being funded, category balance before→after, ATB before→after, negative ATB warning if applicable.
+Layout (matching mock 07, without tabs):
+- Header: Category name + monthly goal subtitle
+- Funding option selector (radio-like or dropdown):
+  - "Fund up to next month — $X.XX"
+  - "Fund to monthly goal — $X.XX"
+  - "Custom amount..." with inline CurrencyField
+- Preview section: amount being funded, category balance before→after, ATB before→after, negative ATB warning
+- Footer: Cancel + Save
+
+Emits: `fund(categoryId, amountMinor)`, `close`
 
 ---
 
@@ -447,9 +463,10 @@ Phase-specific:
 - `web/src/dojo/utils/currency.ts`
 - `web/src/dojo/components/budget/GoalEditor.vue`
 - `web/src/dojo/components/budget/CategoryDetailModal.vue`
-- `web/src/dojo/components/budget/FundingOptionSelector.vue`
+- `web/src/dojo/components/budget/FundingModal.vue` (replaces FundingOptionSelector.vue)
 - `web/src/dojo/components/budget/MoveFundsEditor.vue`
 - `web/src/dojo/components/budget/GroupFundingModal.vue`
+- `web/src/dojo/components/overlays/FullScreenTrouser.vue`
 - `web/cypress/component/BudgetsPage.cy.ts`
 - `web/cypress/component/GoalEditor.cy.ts`
 
