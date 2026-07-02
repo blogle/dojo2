@@ -175,7 +175,9 @@ def bootstrap(request: Request) -> dict[str, Any]:
 
 
 @router.get("/budget")
-def budget(request: Request, month: str | None = None, show_hidden: bool = False) -> dict[str, Any]:
+def budget(
+    request: Request, *, month: str | None = None, show_hidden: bool = False
+) -> dict[str, Any]:
     service = get_service(request)
     return service.get_budget(month or service.default_budget_month(), show_hidden=show_hidden)
 
@@ -204,6 +206,7 @@ def return_to_atb(request: Request, payload: AllocationRequest) -> dict[str, Any
 @router.get("/transactions")
 def transactions(
     request: Request,
+    *,
     limit: int = Query(default=500, ge=1, le=10_000),
     offset: int = Query(default=0, ge=0),
     show_hidden: bool = False,
@@ -246,7 +249,7 @@ def create_transfer(request: Request, payload: TransferPayload) -> dict[str, Any
 
 
 @router.get("/accounts")
-def accounts(request: Request, show_hidden: bool = False) -> dict[str, Any]:
+def accounts(request: Request, *, show_hidden: bool = False) -> dict[str, Any]:
     return {"items": get_service(request).list_accounts(show_hidden=show_hidden)}
 
 
@@ -264,7 +267,7 @@ def update_account(
 
 @router.get("/categories")
 def categories(
-    request: Request, month: str | None = None, show_hidden: bool = False
+    request: Request, *, month: str | None = None, show_hidden: bool = False
 ) -> dict[str, Any]:
     service = get_service(request)
     active_month = month or service.default_budget_month()
