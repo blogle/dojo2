@@ -1,0 +1,38 @@
+{
+  "skill_name": "code-hygiene",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Review the comment changes in evals/files/comment-noise.py. Which comments should stay, change, or be removed?",
+      "expected_output": "Rejects comments that restate code, recommends semantic comments only where they explain non-obvious why, and treats uncommented complex code as a smell rather than a quota.",
+      "files": ["evals/files/comment-noise.py"],
+      "expectations": [
+        "Rejects comments that restate nearby code",
+        "Recommends comments that explain external constraints, invariants, tradeoffs, or what would break",
+        "Does not introduce a comment quota for visual spacing"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Review the proposed extraction in evals/files/vue-coincidental-duplication.md. Should these two Vue components be deduplicated?",
+      "expected_output": "Avoids premature deduplication of coincidental markup and only extracts duplicated decisions or reusable domain transformations.",
+      "files": ["evals/files/vue-coincidental-duplication.md"],
+      "expectations": [
+        "Distinguishes coincidental markup similarity from duplicated decisions",
+        "Avoids creating a premature shared component or config abstraction",
+        "Only extracts reusable domain transformations if a real shared rule exists"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Fix the Ruff FBT issue in evals/files/positional-boolean-report.py and state the verification command you would run.",
+      "expected_output": "Uses deterministic Ruff FBT guidance, makes the boolean keyword-only or replaces it with an explicit mode, and verifies with the relevant just lint recipe.",
+      "files": ["evals/files/positional-boolean-report.py"],
+      "expectations": [
+        "Uses Ruff FBT as the deterministic signal",
+        "Replaces the positional boolean with a keyword-only boolean or explicit mode",
+        "Verifies with the relevant lint command instead of relying only on review"
+      ]
+    }
+  ]
+}

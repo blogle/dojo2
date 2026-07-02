@@ -1,0 +1,38 @@
+{
+  "skill_name": "architecture-principles",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Review the proposed patch in evals/files/status-string-service.py. Explain what should change before it lands and why.",
+      "expected_output": "Recommends parsing the raw string at the boundary into a typed domain representation, avoiding string-programming in core service logic, and using deterministic checks where applicable.",
+      "files": ["evals/files/status-string-service.py"],
+      "expectations": [
+        "Calls out string-programming in core service logic",
+        "Recommends parsing raw route input into a typed domain representation at the boundary",
+        "Does not suggest repeated validation of the raw string inside inner logic"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Refactor the sketch in evals/files/budget-computation-mixed-concerns.py. Preserve behavior while applying dojo architecture preferences.",
+      "expected_output": "Separates imperative shell concerns from pure budget computation, keeps responsibility boundaries clear, and avoids speculative abstractions.",
+      "files": ["evals/files/budget-computation-mixed-concerns.py"],
+      "expectations": [
+        "Separates database access from pure budget computation",
+        "Separates response formatting from domain calculation",
+        "Avoids introducing a generic framework or registry for one workflow"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Add a test plan for the parser sketch in evals/files/import-row-parser.py. Focus on what behavior should be tested, not exact test framework boilerplate.",
+      "expected_output": "Focuses tests on parse boundary behavior, accepted domain invariants, and recoverable failures without testing incidental helper structure.",
+      "files": ["evals/files/import-row-parser.py"],
+      "expectations": [
+        "Tests parsed domain values and explicit parse failures",
+        "Avoids tests that only assert private helper calls or incidental decomposition",
+        "Treats parser tests as boundary/invariant tests"
+      ]
+    }
+  ]
+}
