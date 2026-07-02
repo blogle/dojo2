@@ -6,7 +6,7 @@ export interface TableColumn {
   width?: string;
 }
 
-withDefaults(
+const props = withDefaults(
   defineProps<{
     columns: TableColumn[];
     rows: object[];
@@ -20,6 +20,10 @@ withDefaults(
     emptyText: "No rows to display.",
   },
 );
+
+function cellValue(row: object, columnKey: string): unknown {
+  return (row as Record<string, unknown>)[columnKey];
+}
 </script>
 
 <template>
@@ -53,14 +57,14 @@ withDefaults(
           class="table-shell__row"
         >
           <slot name="row" :row="row" :columns="columns">
-            <td
-              v-for="column in columns"
-              :key="column.key"
-              class="table-shell__cell"
-              :class="{ 'table-shell__cell--end': column.align === 'end' }"
-            >
-              {{ (row as Record<string, unknown>)[column.key] }}
-            </td>
+            <template v-for="column in columns" :key="column.key">
+              <td
+                class="table-shell__cell"
+                :class="{ 'table-shell__cell--end': column.align === 'end' }"
+              >
+                {{ cellValue(row, column.key) }}
+              </td>
+            </template>
           </slot>
         </tr>
       </tbody>
