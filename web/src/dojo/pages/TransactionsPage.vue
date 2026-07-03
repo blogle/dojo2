@@ -1,9 +1,17 @@
 <script setup lang="ts">
 import { computed, ref, onMounted } from "vue";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/vue-query";
 
 import type { Transaction } from "../types";
-import { useAppState } from "../state/app";
 import { formatCurrency, formatMonth } from "../utils/currency";
+import {
+  fetchTransactionsPage,
+  fetchAccounts,
+  fetchCategories,
+  createTransaction,
+  updateTransaction,
+  deleteTransaction,
+} from "../api/client";
 
 import NavigationRail from "../components/navigation/NavigationRail.vue";
 import PageHeader from "../components/data/PageHeader.vue";
@@ -14,28 +22,76 @@ import TransactionEntryForm from "../components/transactions/TransactionEntryFor
 import TransactionFilterBar from "../components/transactions/TransactionFilterBar.vue";
 import TransactionLedger from "../components/transactions/TransactionLedger.vue";
 
-const {
-  state,
-  initialize,
-  submitTransaction,
-  removeTransaction,
-  toggleTransactionStatus,
-} = useAppState();
+const queryClient = useQueryClient();
+
+const PAGE_SIZE = 10_000;
+const QUERY_KEYS = {
+  transactions: ["transactions", PAGE_SIZE] as const,
+  accounts: ["accounts"] as const,
+  categories: ["categories"] as const,
+  budget: ["budget"] as const,
+  allocations: ["allocations"] as const,
+  netWorth: ["net-worth"] as const,
+} as const;
 
 const selectedMonth = ref("");
 const editingTransaction = ref<Transaction | null>(null);
 const removingTransaction = ref<Transaction | null>(null);
 const showUndoToast = ref(false);
-const lastRemovedId = ref<string | null>(null);
+const lastRemovedSnapshot = ref<Transaction | null>(null);
 
 const currentMonth = computed(() => {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 });
 
+const { data: txPage } = useQuery({
+  queryKey: QUERY_KEYS.transactions,
+  queryFn: () => fetchTransactionsPage(false, 0, PAGE_SIZE),
+});
+
+const transactions = computed(() => txPage.value?.items ?? []);
+
+const { data: accounts } = useQuery({
+  queryKey: QUERY_KEYS.accounts,
+  queryFn: () => fetchAccounts(false),
+});
+
+const { data: categoriesResponse } = useQuery({
+  queryKey: QUERY_KEYS.categories,
+  queryFn: () => fetchCategories(currentMonth.value, false),
+});
+
+const categories = computed(() => categoriesResponse.value?.items ?? []);
+
+function invalidateRelatedQueries() {
+  queryClient.invalidateQueries({ queryKey: QUERY_KEYS.transactions });
+  queryClient.invalidateQueries({ queryKey: QUERY_KEYS.accounts });
+  queryClient.invalidateQueries({ queryKey: QUERY_KEYS.budget });
+  queryClient.invalidateQueries({ queryKey: QUERY_KEYS.allocations });
+  queryClient.invalidateQueries({ queryKey: QUERY_KEYS.netWorth });
+  queryClient.invalidateQueries({ queryKey: QUERY_KEYS.categories });
+}
+
+const createMutation = useMutation({
+  mutationFn: createTransaction,
+  onSuccess: () => invalidateRelatedQueries(),
+});
+
+const updateMutation = useMutation({
+  mutationFn: ({ id, payload }: { id: string; payload: Parameters<typeof updateTransaction>[1] }) =>
+    updateTransaction(id, payload),
+  onSuccess: () => invalidateRelatedQueries(),
+});
+
+const deleteMutation = useMutation({
+  mutationFn: deleteTransaction,
+  onSuccess: () => invalidateRelatedQueries(),
+});
+
 const monthTransactions = computed(() => {
   if (!selectedMonth.value) return [];
-  return state.transactions.filter((t) => {
+  return transactions.value.filter((t) => {
     const txMonth = t.date.slice(0, 7);
     return txMonth === selectedMonth.value;
   });
@@ -127,7 +183,7 @@ function handleCancelEdit() {
   editingTransaction.value = null;
 }
 
-async function handleSaveEdit(payload: {
+function handleSaveEdit(payload: {
   date: string;
   account_id: string;
   amount_minor: number;
@@ -137,19 +193,33 @@ async function handleSaveEdit(payload: {
   memo: string;
 }) {
   if (!editingTransaction.value) return;
-  await submitTransaction(payload);
+  updateMutation.mutate({
+    id: editingTransaction.value.transaction_id,
+    payload,
+  });
   editingTransaction.value = null;
+}
+
+function handleSubmit(payload: {
+  date: string;
+  account_id: string;
+  amount_minor: number;
+  category_id: string | null;
+  system_category: string | null;
+  status: "PENDING" | "CLEARED";
+  memo: string;
+}) {
+  createMutation.mutate(payload);
 }
 
 function handleRemoveRequest(tx: Transaction) {
   removingTransaction.value = tx;
 }
 
-async function confirmRemove() {
+function confirmRemove() {
   if (!removingTransaction.value) return;
-  const id = removingTransaction.value.transaction_id;
-  lastRemovedId.value = id;
-  await removeTransaction(id);
+  lastRemovedSnapshot.value = { ...removingTransaction.value };
+  deleteMutation.mutate(removingTransaction.value.transaction_id);
   removingTransaction.value = null;
   showUndoToast.value = true;
   setTimeout(() => {
@@ -161,31 +231,24 @@ function cancelRemove() {
   removingTransaction.value = null;
 }
 
-async function handleUndoRemove() {
-  if (!lastRemovedId.value) return;
-  // Re-enable the removed transaction by updating it
-  const tx = state.transactions.find(
-    (t) => t.transaction_id === lastRemovedId.value,
-  );
-  if (tx) {
-    await submitTransaction({
-      date: tx.date,
-      account_id: tx.account_id,
-      amount_minor: tx.amount_minor,
-      category_id: tx.category_id,
-      system_category: tx.system_category,
-      status: tx.status,
-      memo: tx.memo,
-    });
-  }
+function handleUndoRemove() {
+  if (!lastRemovedSnapshot.value) return;
+  const tx = lastRemovedSnapshot.value;
+  createMutation.mutate({
+    date: tx.date,
+    account_id: tx.account_id,
+    amount_minor: tx.amount_minor,
+    category_id: tx.category_id,
+    system_category: tx.system_category,
+    status: tx.status,
+    memo: tx.memo,
+  });
   showUndoToast.value = false;
-  lastRemovedId.value = null;
+  lastRemovedSnapshot.value = null;
 }
 
 onMounted(() => {
-  initialize().then(() => {
-    selectedMonth.value = state.month || currentMonth.value;
-  });
+  selectedMonth.value = currentMonth.value;
 });
 </script>
 
@@ -216,27 +279,27 @@ onMounted(() => {
       <MetricStrip :items="metrics" />
 
       <TransactionEntryForm
-        :accounts="state.accounts"
-        :categories="state.categories"
+        :accounts="accounts ?? []"
+        :categories="categories"
         :editing-transaction="editingTransaction"
-        @submit="submitTransaction"
+        @submit="handleSubmit"
         @cancel-edit="handleCancelEdit"
         @save-edit="handleSaveEdit"
       />
 
       <TransactionFilterBar
-        :accounts="state.accounts"
-        :categories="state.categories"
+        :accounts="accounts ?? []"
+        :categories="categories"
       />
 
       <TransactionLedger
         :transactions="monthTransactions"
-        :accounts="state.accounts"
-        :categories="state.categories"
+        :accounts="accounts ?? []"
+        :categories="categories"
         :editing-transaction-id="editingTransaction?.transaction_id ?? null"
         @edit="handleEditTransaction"
         @remove="handleRemoveRequest"
-        @toggle-status="toggleTransactionStatus"
+        @toggle-status="(tx) => handleEditTransaction(tx)"
       />
 
       <div v-if="removingTransaction" class="transactions-page__modal-scrim">
