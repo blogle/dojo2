@@ -7,6 +7,7 @@ import type {
   Transaction,
   TransactionPayload,
 } from "../../types";
+import { parseMoneyInput } from "../../utils/currency";
 import Button from "../actions/Button.vue";
 import DatePicker from "../forms/DatePicker.vue";
 import SelectField from "../forms/SelectField.vue";
@@ -70,8 +71,8 @@ watch(
 function handleSubmit() {
   if (!date.value || !accountId.value || !amount.value) return;
 
-  const amountMinor = Math.round(parseFloat(amount.value) * 100);
-  if (isNaN(amountMinor) || amountMinor === 0) return;
+  const amountMinor = parseMoneyInput(amount.value);
+  if (amountMinor === null || amountMinor === 0) return;
 
   const finalAmount =
     direction.value === "outflow" ? -amountMinor : amountMinor;

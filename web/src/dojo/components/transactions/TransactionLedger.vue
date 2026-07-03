@@ -7,7 +7,7 @@ import type {
   Transaction,
   TransactionPayload,
 } from "../../types";
-import { formatCurrency } from "../../utils/currency";
+import { formatCurrency, parseMoneyInput } from "../../utils/currency";
 import Button from "../actions/Button.vue";
 import SelectField from "../forms/SelectField.vue";
 import CurrencyField from "../forms/CurrencyField.vue";
@@ -48,8 +48,8 @@ function startEdit(tx: Transaction) {
 
 function saveEdit() {
   if (!props.editingTransactionId) return;
-  const amountMinor = Math.round(parseFloat(editAmount.value) * 100);
-  if (isNaN(amountMinor)) return;
+  const amountMinor = parseMoneyInput(editAmount.value);
+  if (amountMinor === null) return;
   const finalAmount =
     editDirection.value === "outflow" ? -amountMinor : amountMinor;
 

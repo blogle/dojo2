@@ -25,3 +25,16 @@ export function formatGoalType(type: string): string {
   };
   return labels[type] ?? type;
 }
+
+export function parseMoneyInput(raw: string): number | null {
+  const value = raw.trim();
+  if (!value) {
+    return null;
+  }
+  const normalized = value.replace(/[$,]/g, "");
+  const amount = Number(normalized);
+  if (Number.isNaN(amount)) {
+    return null;
+  }
+  return Math.round(amount * 100);
+}

@@ -2,7 +2,7 @@
 import { computed, ref } from "vue";
 
 import type { Category } from "../../types";
-import { formatCurrency } from "../../utils/currency";
+import { formatCurrency, parseMoneyInput } from "../../utils/currency";
 
 import SelectField from "../forms/SelectField.vue";
 import CurrencyField from "../forms/CurrencyField.vue";
@@ -32,9 +32,7 @@ const categoryOptions = computed(() =>
     })),
 );
 
-const amountMinor = computed(() =>
-  Math.round(parseFloat(amountString.value || "0") * 100),
-);
+const amountMinor = computed(() => parseMoneyInput(amountString.value) ?? 0);
 
 const fromCategory = computed(() =>
   props.categories.find(

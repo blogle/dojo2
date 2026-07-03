@@ -2,7 +2,7 @@
 import { computed, ref } from "vue";
 
 import type { Allocation, Category } from "../../types";
-import { formatCurrency } from "../../utils/currency";
+import { formatCurrency, parseMoneyInput } from "../../utils/currency";
 
 import CurrencyField from "../forms/CurrencyField.vue";
 import SelectField from "../forms/SelectField.vue";
@@ -119,7 +119,7 @@ const selectedAmount = computed(() => {
   if (selectedOption.value === "average") return fundAverage.value;
   if (selectedOption.value === "next-month") return fundUpToNextMonth.value;
   if (selectedOption.value === "monthly-goal") return fundToMonthlyGoal.value;
-  return Math.round(parseFloat(customAmount.value || "0") * 100);
+  return parseMoneyInput(customAmount.value) ?? 0;
 });
 
 const currentAvailable = computed(() => props.category?.available_minor ?? 0);
@@ -161,7 +161,7 @@ const optionItems = computed(() => [
     key: "custom" as const,
     label: "Custom amount",
     description: "Enter a specific amount for this funding action.",
-    amount: Math.round(parseFloat(customAmount.value || "0") * 100),
+    amount: parseMoneyInput(customAmount.value) ?? 0,
   },
 ]);
 

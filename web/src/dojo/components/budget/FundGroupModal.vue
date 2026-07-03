@@ -2,7 +2,7 @@
 import { computed, ref, watch } from "vue";
 
 import type { Category, CategoryGroup } from "../../types";
-import { formatCurrency } from "../../utils/currency";
+import { formatCurrency, parseMoneyInput } from "../../utils/currency";
 
 import CurrencyField from "../forms/CurrencyField.vue";
 import FormModal from "../overlays/FormModal.vue";
@@ -41,7 +41,7 @@ const groupCategories = computed(() => {
 
 const totalFunding = computed(() => {
   return Object.values(fundingAmounts.value).reduce(
-    (sum, v) => sum + Math.round(parseFloat(v || "0") * 100),
+    (sum, v) => sum + (parseMoneyInput(v) ?? 0),
     0,
   );
 });
@@ -50,7 +50,7 @@ function handleSubmit() {
   const entries = Object.entries(fundingAmounts.value)
     .map(([categoryId, v]) => ({
       categoryId,
-      monthlyGoalMinor: Math.round(parseFloat(v || "0") * 100),
+      monthlyGoalMinor: parseMoneyInput(v) ?? 0,
     }))
     .filter((e) => e.monthlyGoalMinor > 0);
   if (entries.length === 0) return;

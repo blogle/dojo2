@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed } from "vue";
 
+import { formatCurrency, parseMoneyInput } from "../../utils/currency";
+
 import CurrencyField from "../forms/CurrencyField.vue";
 import DatePicker from "../forms/DatePicker.vue";
 import RadioGroup from "../forms/RadioGroup.vue";
@@ -48,8 +50,7 @@ const goalAmount = computed({
   get: () =>
     props.goalAmountMinor != null ? String(props.goalAmountMinor / 100) : "",
   set: (val: string) => {
-    const num = parseFloat(val);
-    emit("update:goalAmountMinor", isNaN(num) ? null : Math.round(num * 100));
+    emit("update:goalAmountMinor", parseMoneyInput(val));
   },
 });
 
@@ -64,8 +65,7 @@ const goalDueDate = computed({
 });
 
 const monthlyFundingDisplay = computed(() => {
-  const amount = props.monthlyFundingMinor / 100;
-  return `$ ${amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return formatCurrency(props.monthlyFundingMinor);
 });
 </script>
 
