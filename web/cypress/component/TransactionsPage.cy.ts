@@ -73,7 +73,7 @@ const mockTransactions = [
 ];
 
 function stubFetch() {
-  cy.stub(window, "fetch").callsFake((url: string, init?: RequestInit) => {
+  cy.stub(window, "fetch").callsFake((url: string) => {
     const path = new URL(url, "http://localhost").pathname;
 
     if (path === "/api/bootstrap") {

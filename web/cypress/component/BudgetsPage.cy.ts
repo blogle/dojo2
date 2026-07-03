@@ -1,7 +1,9 @@
 import { mount } from "cypress/vue";
 import { createRouter, createMemoryHistory } from "vue-router";
+import { VueQueryPlugin } from "@tanstack/vue-query";
 
 import BudgetsPage from "../../src/dojo/pages/BudgetsPage.vue";
+import { createDojoQueryClient } from "../../src/dojo/queryClient";
 
 const router = createRouter({
   history: createMemoryHistory(),
@@ -190,8 +192,14 @@ function stubFetch() {
 
 function mountPage() {
   stubFetch();
+  const queryClient = createDojoQueryClient();
   return mount(BudgetsPage, {
-    global: { plugins: [router] },
+    global: {
+      plugins: [
+        router,
+        [VueQueryPlugin, { queryClient }],
+      ],
+    },
   });
 }
 
@@ -256,7 +264,11 @@ describe("BudgetsPage", () => {
 
   it("opens category review from the unconfigured goals warning", () => {
     mountPage();
-    cy.contains("button", "Review categories").click();
+    cy.get("[data-cy=hierarchical-category-table-root]").should("be.visible");
+    cy.contains("td", "Rent").should("be.visible");
+    cy.contains("button", "Review categories")
+      .should("be.visible")
+      .click();
     cy.get("[data-cy=full-screen-trouser-root]").should("contain.text", "Rent");
     cy.get("[data-cy=full-screen-trouser-root]").should(
       "contain.text",

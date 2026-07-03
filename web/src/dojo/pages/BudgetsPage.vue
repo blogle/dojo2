@@ -1,9 +1,18 @@
 <script setup lang="ts">
-import { computed, ref, onMounted } from "vue";
+import { computed, ref } from "vue";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/vue-query";
 
 import type { Category, CategoryGroup } from "../types";
-import { useAppState } from "../state/app";
 import { formatCurrency, formatMonth } from "../utils/currency";
+import {
+  fetchBudget,
+  fetchAllocations,
+  fetchTransactionsPage,
+  createCategory,
+  updateCategory,
+  createCategoryGroup,
+  updateCategoryGroup,
+} from "../api/client";
 
 import Button from "../components/actions/Button.vue";
 import DropdownButton from "../components/actions/DropdownButton.vue";
@@ -26,10 +35,21 @@ import MoveFundsModal from "../components/budget/MoveFundsModal.vue";
 import FundGroupModal from "../components/budget/FundGroupModal.vue";
 import FundingModal from "../components/budget/FundingModal.vue";
 
-const { state, initialize, setMonth, saveCategory, saveCategoryGroup } =
-  useAppState();
+const queryClient = useQueryClient();
 
-const selectedMonth = ref("");
+const QUERY_KEYS = {
+  budget: ["budget"] as const,
+  allocations: ["allocations"] as const,
+  transactions: ["transactions"] as const,
+} as const;
+
+const currentMonth = computed(() => {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+});
+
+const selectedMonth = ref(currentMonth.value);
+
 const isReordering = ref(false);
 const reorderChanges = ref<
   Array<{ key: string; targetKey: string; position: "before" | "after" }>
@@ -58,11 +78,6 @@ const goalType = ref<string | null>(null);
 const goalAmountMinor = ref<number | null>(null);
 const goalFrequency = ref<string | null>(null);
 const goalDueDate = ref<string | null>(null);
-
-const currentMonth = computed(() => {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-});
 
 const isHistorical = computed(
   () =>
@@ -151,9 +166,70 @@ function computeStates(cat: Category): Array<{
   return states;
 }
 
+// --- Queries ---
+
+const { data: budgetResponse } = useQuery({
+  queryKey: QUERY_KEYS.budget,
+  queryFn: () => fetchBudget(selectedMonth.value, false),
+});
+
+const { data: allocations } = useQuery({
+  queryKey: QUERY_KEYS.allocations,
+  queryFn: () => fetchAllocations(false),
+});
+
+const { data: txPage } = useQuery({
+  queryKey: QUERY_KEYS.transactions,
+  queryFn: () => fetchTransactionsPage(false, 0, 10_000),
+});
+
+const budget = computed(() => budgetResponse.value ?? null);
+const categoryGroups = computed(() => budget.value?.groups ?? []);
+const categories = computed(() =>
+  budget.value?.groups.flatMap((g) => g.categories) ?? [],
+);
+const transactions = computed(() => txPage.value?.items ?? []);
+
+// --- Mutations ---
+
+function invalidateBudgetQueries() {
+  queryClient.invalidateQueries({ queryKey: QUERY_KEYS.budget });
+  queryClient.invalidateQueries({ queryKey: QUERY_KEYS.allocations });
+}
+
+const categoryMutation = useMutation({
+  mutationFn: ({
+    payload,
+    categoryId,
+  }: {
+    payload: Record<string, unknown>;
+    categoryId?: string;
+  }) =>
+    categoryId
+      ? updateCategory(categoryId, payload)
+      : createCategory(payload),
+  onSuccess: () => invalidateBudgetQueries(),
+});
+
+const categoryGroupMutation = useMutation({
+  mutationFn: ({
+    payload,
+    groupId,
+  }: {
+    payload: Record<string, unknown>;
+    groupId?: string;
+  }) =>
+    groupId
+      ? updateCategoryGroup(groupId, payload)
+      : createCategoryGroup(payload),
+  onSuccess: () => invalidateBudgetQueries(),
+});
+
+// --- Derived data ---
+
 const tableRows = computed<HierarchicalCategoryRow[]>(() => {
-  if (!state.budget) return [];
-  return state.budget.groups.map((group) => ({
+  if (!budget.value) return [];
+  return budget.value.groups.map((group) => ({
     key: group.group_id,
     label: group.name,
     icon: groupIcon(group),
@@ -168,7 +244,7 @@ const tableRows = computed<HierarchicalCategoryRow[]>(() => {
     children: group.categories.map((cat) => ({
       key: cat.category_id,
       label: cat.name,
-      icon: cat.icon || "•",
+      icon: cat.icon || "\u2022",
       cells: {
         goal: cat.goal_type
           ? formatCurrency(cat.goal_amount_minor ?? 0)
@@ -185,7 +261,7 @@ const tableRows = computed<HierarchicalCategoryRow[]>(() => {
 });
 
 const metrics = computed(() => {
-  if (!state.budget) {
+  if (!budget.value) {
     return [
       { key: "month", label: "Month", value: "\u2014" },
       { key: "atb", label: "Available to budget", value: "\u2014" },
@@ -193,7 +269,7 @@ const metrics = computed(() => {
       { key: "budgeted", label: "Budgeted", value: "\u2014" },
     ];
   }
-  const b = state.budget;
+  const b = budget.value;
   return [
     {
       key: "month",
@@ -228,15 +304,15 @@ const addItems = [
 ];
 
 const unconfiguredGoalCount = computed(
-  () => state.budget?.unconfigured_goal_count ?? 0,
+  () => budget.value?.unconfigured_goal_count ?? 0,
 );
 
 const negativeAtb = computed(
-  () => state.budget != null && state.budget.available_to_budget_minor < 0,
+  () => budget.value != null && budget.value.available_to_budget_minor < 0,
 );
 
 const retiredCategories = computed(() =>
-  state.categories.filter((c) => c.is_hidden),
+  categories.value.filter((c) => c.is_hidden),
 );
 
 const selectedGroupDetail = computed<Category | null>(() => {
@@ -271,7 +347,7 @@ const selectedGroupDetail = computed<Category | null>(() => {
     month_budgeted_minor: group.totals.month_budgeted_minor,
     starting_available_minor: group.totals.starting_available_minor,
     monthly_funding_minor: monthlyFunding,
-    icon: group.is_system ? "Ⓒ" : "⌂",
+    icon: group.is_system ? "\u24B8" : "\u2302",
   };
 });
 
@@ -291,14 +367,16 @@ const selectedDetailScopeCategoryIds = computed(() => {
 
 const firstUnconfiguredGoalCategory = computed(
   () =>
-    state.categories.find(
+    categories.value.find(
       (category) =>
         category.category_kind === "STANDARD" && category.goal_type == null,
     ) ?? null,
 );
 
-async function restoreCategory(categoryId: string) {
-  await saveCategory({ is_hidden: false }, categoryId);
+// --- Actions ---
+
+function restoreCategory(categoryId: string) {
+  categoryMutation.mutate({ payload: { is_hidden: false }, categoryId });
 }
 
 function handleAdd(key: string) {
@@ -324,7 +402,7 @@ function handleReorder(
 
 function handleRowSelect(key: string) {
   if (isReordering.value) return;
-  for (const group of state.categoryGroups) {
+  for (const group of categoryGroups.value) {
     if (group.group_id === key) {
       selectedGroup.value = group;
       activeModal.value = "group-detail";
@@ -373,28 +451,31 @@ function handleEditConfig() {
   activeModal.value = "edit-category";
 }
 
-async function submitFundCategory(payload: {
+function submitFundCategory(payload: {
   categoryId: string;
   amountMinor: number;
 }) {
-  const cat = state.categories.find(
+  const cat = categories.value.find(
     (c) => c.category_id === payload.categoryId,
   );
   if (!cat) return;
   const newAvailable = cat.available_minor + payload.amountMinor;
-  await saveCategory({ available_minor: newAvailable }, payload.categoryId);
+  categoryMutation.mutate({
+    payload: { available_minor: newAvailable },
+    categoryId: payload.categoryId,
+  });
   closeModal();
 }
 
 function handleMonthSelect() {
   if (selectedMonth.value) {
-    setMonth(selectedMonth.value);
+    queryClient.invalidateQueries({ queryKey: QUERY_KEYS.budget });
+    queryClient.invalidateQueries({ queryKey: QUERY_KEYS.allocations });
   }
 }
 
 function returnToCurrent() {
   selectedMonth.value = currentMonth.value;
-  setMonth(currentMonth.value);
 }
 
 function closeModal() {
@@ -411,29 +492,33 @@ function closeModal() {
   goalDueDate.value = null;
 }
 
-async function submitAddGroup() {
+function submitAddGroup() {
   if (!groupName.value.trim()) return;
-  await saveCategoryGroup({ name: groupName.value.trim() });
-  closeModal();
-}
-
-async function submitAddCategory() {
-  if (!categoryName.value.trim() || !categoryGroupId.value) return;
-  const sort_order = Date.now();
-  await saveCategory({
-    group_id: categoryGroupId.value,
-    name: categoryName.value.trim(),
-    icon: categoryIcon.value.trim() || null,
-    sort_order,
-    goal_type: goalType.value,
-    goal_amount_minor: goalAmountMinor.value,
-    goal_frequency: goalFrequency.value,
-    goal_due_date: goalDueDate.value,
+  categoryGroupMutation.mutate({
+    payload: { name: groupName.value.trim() },
   });
   closeModal();
 }
 
-async function submitEditCategory() {
+function submitAddCategory() {
+  if (!categoryName.value.trim() || !categoryGroupId.value) return;
+  const sort_order = Date.now();
+  categoryMutation.mutate({
+    payload: {
+      group_id: categoryGroupId.value,
+      name: categoryName.value.trim(),
+      icon: categoryIcon.value.trim() || null,
+      sort_order,
+      goal_type: goalType.value,
+      goal_amount_minor: goalAmountMinor.value,
+      goal_frequency: goalFrequency.value,
+      goal_due_date: goalDueDate.value,
+    },
+  });
+  closeModal();
+}
+
+function submitEditCategory() {
   if (
     !selectedCategory.value ||
     !categoryName.value.trim() ||
@@ -441,8 +526,8 @@ async function submitEditCategory() {
   ) {
     return;
   }
-  await saveCategory(
-    {
+  categoryMutation.mutate({
+    payload: {
       group_id: categoryGroupId.value,
       name: categoryName.value.trim(),
       icon: categoryIcon.value.trim() || null,
@@ -451,50 +536,55 @@ async function submitEditCategory() {
       goal_frequency: goalFrequency.value,
       goal_due_date: goalDueDate.value,
     },
-    selectedCategory.value.category_id,
-  );
+    categoryId: selectedCategory.value.category_id,
+  });
   closeModal();
 }
 
-async function retireSelectedCategory() {
+function retireSelectedCategory() {
   if (!selectedCategory.value) return;
-  await saveCategory({ is_hidden: true }, selectedCategory.value.category_id);
+  categoryMutation.mutate({
+    payload: { is_hidden: true },
+    categoryId: selectedCategory.value.category_id,
+  });
   closeModal();
 }
 
-async function submitMoveFunds(payload: {
+function submitMoveFunds(payload: {
   from: string;
   to: string;
   amountMinor: number;
 }) {
-  const fromCat = state.categories.find((c) => c.category_id === payload.from);
-  const toCat = state.categories.find((c) => c.category_id === payload.to);
+  const fromCat = categories.value.find(
+    (c) => c.category_id === payload.from,
+  );
+  const toCat = categories.value.find((c) => c.category_id === payload.to);
   if (!fromCat || !toCat) return;
   const available = fromCat.available_minor;
   const newAvailable = available - payload.amountMinor;
-  await saveCategory({ available_minor: newAvailable }, payload.from);
+  categoryMutation.mutate({
+    payload: { available_minor: newAvailable },
+    categoryId: payload.from,
+  });
   const toAvailable = toCat.available_minor + payload.amountMinor;
-  await saveCategory({ available_minor: toAvailable }, payload.to);
+  categoryMutation.mutate({
+    payload: { available_minor: toAvailable },
+    categoryId: payload.to,
+  });
   closeModal();
 }
 
-async function submitFundGroup(
+function submitFundGroup(
   items: Array<{ categoryId: string; monthlyGoalMinor: number }>,
 ) {
   for (const item of items) {
-    await saveCategory(
-      { monthly_funding_minor: item.monthlyGoalMinor },
-      item.categoryId,
-    );
+    categoryMutation.mutate({
+      payload: { monthly_funding_minor: item.monthlyGoalMinor },
+      categoryId: item.categoryId,
+    });
   }
   closeModal();
 }
-
-onMounted(() => {
-  initialize().then(() => {
-    selectedMonth.value = state.month || currentMonth.value;
-  });
-});
 </script>
 
 <template>
@@ -613,7 +703,7 @@ onMounted(() => {
         label="Parent group"
         :options="[
           { value: '', label: 'Choose a group...' },
-          ...state.categoryGroups.map((g) => ({
+          ...categoryGroups.map((g) => ({
             value: g.group_id,
             label: g.name,
           })),
@@ -657,7 +747,7 @@ onMounted(() => {
         label="Parent group"
         :options="[
           { value: '', label: 'Choose a group...' },
-          ...state.categoryGroups.map((g) => ({
+          ...categoryGroups.map((g) => ({
             value: g.group_id,
             label: g.name,
           })),
@@ -682,8 +772,8 @@ onMounted(() => {
         activeModal === 'category-detail' || activeModal === 'group-detail'
       "
       :category="selectedDetailCategory"
-      :allocations="state.allocations"
-      :transactions="state.transactions"
+      :allocations="allocations ?? []"
+      :transactions="transactions"
       :scope-category-ids="selectedDetailScopeCategoryIds"
       :detail-kind="activeModal === 'group-detail' ? 'group' : 'category'"
       @close="closeModal"
@@ -695,14 +785,14 @@ onMounted(() => {
     <FundGroupModal
       :visible="activeModal === 'fund-group'"
       :group="selectedGroup"
-      :categories="state.categories"
+      :categories="categories"
       @close="closeModal"
       @submit="submitFundGroup"
     />
 
     <MoveFundsModal
       :visible="activeModal === 'move-funds'"
-      :categories="state.categories"
+      :categories="categories"
       @close="closeModal"
       @submit="submitMoveFunds"
     />
@@ -710,9 +800,9 @@ onMounted(() => {
     <FundingModal
       :visible="activeModal === 'funding'"
       :category="fundingCategory"
-      :allocations="state.allocations"
+      :allocations="allocations ?? []"
       :budget-month="selectedMonth || currentMonth"
-      :available-to-budget-minor="state.budget?.available_to_budget_minor ?? 0"
+      :available-to-budget-minor="budget?.available_to_budget_minor ?? 0"
       @close="closeModal"
       @submit="submitFundCategory"
     />
