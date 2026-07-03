@@ -88,7 +88,7 @@ describe("DropdownButton", () => {
       .click();
     cy.get("[data-cy=dropdown-button-root]")
       .find('[role="menuitem"]')
-      .should("be.disabled");
+      .should("have.attr", "data-disabled");
   });
 
   it("disables both buttons when disabled prop is true", () => {

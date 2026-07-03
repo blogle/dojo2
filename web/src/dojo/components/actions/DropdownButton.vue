@@ -1,7 +1,11 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
-
-import { useDismissableLayer } from "@/dojo/composables/useDismissableLayer";
+import {
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuRoot,
+  DropdownMenuTrigger,
+} from "reka-ui";
+import { computed } from "vue";
 
 export interface DropdownButtonItem {
   key: string;
@@ -28,13 +32,7 @@ const emit = defineEmits<{
   select: [key: string];
 }>();
 
-const root = ref<HTMLElement | null>(null);
-const open = ref(false);
 const toggleLabel = computed(() => `${props.label} options`);
-
-const closeMenu = () => {
-  open.value = false;
-};
 
 const onSelect = (item: DropdownButtonItem) => {
   if (item.disabled) {
@@ -42,15 +40,11 @@ const onSelect = (item: DropdownButtonItem) => {
   }
 
   emit("select", item.key);
-  closeMenu();
 };
-
-useDismissableLayer(open, root, closeMenu);
 </script>
 
 <template>
   <div
-    ref="root"
     class="dropdown-button"
     :class="`dropdown-button--${variant}`"
     data-cy="dropdown-button-root"
@@ -59,45 +53,48 @@ useDismissableLayer(open, root, closeMenu);
       {{ label }}
     </button>
 
-    <button
-      type="button"
-      class="dropdown-button__toggle"
-      :aria-label="toggleLabel"
-      :aria-expanded="open ? 'true' : 'false'"
-      :disabled="disabled"
-      @click="open = !open"
-    >
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="1.8"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-        aria-hidden="true"
-      >
-        <path d="M7 10l5 5 5-5" />
-      </svg>
-    </button>
-
-    <div v-if="open" class="dropdown-button__menu" role="menu">
-      <button
-        v-for="item in items"
-        :key="item.key"
+    <DropdownMenuRoot :modal="false">
+      <DropdownMenuTrigger
         type="button"
-        class="dropdown-button__item"
-        :disabled="item.disabled"
-        role="menuitem"
-        @click="onSelect(item)"
+        class="dropdown-button__toggle"
+        :aria-label="toggleLabel"
+        :disabled="disabled"
       >
-        <span class="dropdown-button__item-label">{{ item.label }}</span>
-        <span
-          v-if="item.description"
-          class="dropdown-button__item-description"
-          >{{ item.description }}</span
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.8"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
         >
-      </button>
-    </div>
+          <path d="M7 10l5 5 5-5" />
+        </svg>
+      </DropdownMenuTrigger>
+
+      <DropdownMenuContent
+        class="dropdown-button__menu"
+        :side-offset="4"
+        align="end"
+      >
+        <DropdownMenuItem
+          v-for="item in items"
+          :key="item.key"
+          as="button"
+          class="dropdown-button__item"
+          :disabled="item.disabled"
+          @select="onSelect(item)"
+        >
+          <span class="dropdown-button__item-label">{{ item.label }}</span>
+          <span
+            v-if="item.description"
+            class="dropdown-button__item-description"
+            >{{ item.description }}</span
+          >
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenuRoot>
   </div>
 </template>
 

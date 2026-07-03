@@ -1,4 +1,11 @@
 <script setup lang="ts">
+import {
+  TooltipContent,
+  TooltipProvider,
+  TooltipRoot,
+  TooltipTrigger,
+} from "reka-ui";
+
 withDefaults(
   defineProps<{
     text: string;
@@ -11,22 +18,33 @@ withDefaults(
 </script>
 
 <template>
-  <span class="tooltip" data-cy="tooltip-root">
-    <slot />
-    <span class="tooltip__content" :class="`tooltip__content--${position}`">
-      {{ text }}
-    </span>
-  </span>
+  <TooltipProvider :delay-duration="0">
+    <TooltipRoot>
+      <TooltipTrigger class="tooltip" data-cy="tooltip-root">
+        <slot />
+      </TooltipTrigger>
+      <TooltipContent
+        class="tooltip__content"
+        :class="`tooltip__content--${position}`"
+        :side="position"
+        :side-offset="8"
+      >
+        {{ text }}
+      </TooltipContent>
+    </TooltipRoot>
+  </TooltipProvider>
 </template>
 
 <style scoped>
 .tooltip {
   position: relative;
   display: inline-flex;
+  border: 0;
+  padding: 0;
+  background: transparent;
 }
 
 .tooltip__content {
-  position: absolute;
   padding: var(--space-xs) var(--space-sm);
   background: var(--color-on-surface);
   color: var(--color-surface);
@@ -38,36 +56,6 @@ withDefaults(
   box-shadow: var(--shadow-popover);
   white-space: nowrap;
   pointer-events: none;
-  opacity: 0;
-  transition: opacity var(--transition-fast) var(--transition-ease-out);
   z-index: 10;
-}
-
-.tooltip:hover .tooltip__content {
-  opacity: 1;
-}
-
-.tooltip__content--top {
-  bottom: calc(100% + var(--space-xs));
-  left: 50%;
-  transform: translateX(-50%);
-}
-
-.tooltip__content--bottom {
-  top: calc(100% + var(--space-xs));
-  left: 50%;
-  transform: translateX(-50%);
-}
-
-.tooltip__content--left {
-  right: calc(100% + var(--space-xs));
-  top: 50%;
-  transform: translateY(-50%);
-}
-
-.tooltip__content--right {
-  left: calc(100% + var(--space-xs));
-  top: 50%;
-  transform: translateY(-50%);
 }
 </style>

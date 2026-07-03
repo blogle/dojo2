@@ -1,10 +1,15 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import {
+  DialogClose,
+  DialogContent,
+  DialogPortal,
+  DialogRoot,
+  DialogTitle,
+} from "reka-ui";
 
 import Button from "@/dojo/components/actions/Button.vue";
-import { useDismissableLayer } from "@/dojo/composables/useDismissableLayer";
 
-const props = withDefaults(
+withDefaults(
   defineProps<{
     visible: boolean;
     title?: string;
@@ -33,73 +38,67 @@ const emit = defineEmits<{
   danger: [];
 }>();
 
-const panel = ref<HTMLElement | null>(null);
-const active = computed(() => props.visible);
-
-useDismissableLayer(active, panel, () => emit("close"));
-
-watch(
-  () => props.visible,
-  (visible) => {
-    if (!visible) {
-      return;
-    }
-
-    requestAnimationFrame(() => panel.value?.focus());
-  },
-);
+const onOpenChange = (value: boolean) => {
+  if (!value) {
+    emit("close");
+  }
+};
 </script>
 
 <template>
-  <Teleport to="body" :disabled="contained">
-    <div
-      v-if="visible"
-      class="modal-scrim"
-      :class="{ 'modal-scrim--contained': contained }"
-      data-cy="form-modal-root"
-    >
-      <section
-        ref="panel"
-        class="form-modal"
-        tabindex="-1"
-        role="dialog"
-        aria-modal="true"
+  <DialogRoot :open="visible" :modal="!contained" @update:open="onOpenChange">
+    <DialogPortal :disabled="contained">
+      <div
+        v-if="visible"
+        class="modal-scrim"
+        :class="{ 'modal-scrim--contained': contained }"
       >
-        <header class="form-modal__header">
-          <h2 v-if="title" class="form-modal__title">{{ title }}</h2>
-          <slot name="header" />
-          <button
-            type="button"
-            class="form-modal__close"
-            aria-label="Close"
-            @click="emit('close')"
-          >
-            ×
-          </button>
-        </header>
+        <DialogContent
+          class="form-modal"
+          data-cy="form-modal-root"
+          @escape-key-down="emit('close')"
+        >
+          <header class="form-modal__header">
+            <DialogTitle v-if="title" class="form-modal__title">{{
+              title
+            }}</DialogTitle>
+            <slot name="header" />
+            <DialogClose
+              type="button"
+              class="form-modal__close"
+              aria-label="Close"
+            >
+              Close
+            </DialogClose>
+          </header>
 
-        <div class="form-modal__body">
-          <slot />
-        </div>
+          <div class="form-modal__body">
+            <slot />
+          </div>
 
-        <footer class="form-modal__footer">
-          <Button v-if="dangerText" variant="tertiary" @click="emit('danger')">
-            {{ dangerText }}
-          </Button>
-          <Button variant="secondary" @click="emit('cancel')">{{
-            cancelText
-          }}</Button>
-          <Button
-            :disabled="submitDisabled"
-            :loading="loading"
-            @click="emit('submit')"
-          >
-            {{ submitText }}
-          </Button>
-        </footer>
-      </section>
-    </div>
-  </Teleport>
+          <footer class="form-modal__footer">
+            <Button
+              v-if="dangerText"
+              variant="tertiary"
+              @click="emit('danger')"
+            >
+              {{ dangerText }}
+            </Button>
+            <Button variant="secondary" @click="emit('cancel')">{{
+              cancelText
+            }}</Button>
+            <Button
+              :disabled="submitDisabled"
+              :loading="loading"
+              @click="emit('submit')"
+            >
+              {{ submitText }}
+            </Button>
+          </footer>
+        </DialogContent>
+      </div>
+    </DialogPortal>
+  </DialogRoot>
 </template>
 
 <style scoped>

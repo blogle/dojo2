@@ -19,10 +19,8 @@ describe("Tooltip", () => {
       props: { text: "Helpful tip", position: "top" },
       slots: { default: '<button type="button">Trigger</button>' },
     });
-    cy.get("[data-cy=tooltip-root] .tooltip__content").should(
-      "contain.text",
-      "Helpful tip",
-    );
+    cy.get("[data-cy=tooltip-root]").focus();
+    cy.get(".tooltip__content").should("contain.text", "Helpful tip");
   });
 
   it("applies the correct position class", () => {
@@ -30,7 +28,8 @@ describe("Tooltip", () => {
       props: { text: "Helpful tip", position: "bottom" },
       slots: { default: '<button type="button">Trigger</button>' },
     });
-    cy.get("[data-cy=tooltip-root] .tooltip__content").should(
+    cy.get("[data-cy=tooltip-root]").focus();
+    cy.get(".tooltip__content").should(
       "have.class",
       "tooltip__content--bottom",
     );
