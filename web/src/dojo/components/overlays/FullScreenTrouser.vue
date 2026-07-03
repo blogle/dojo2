@@ -1,9 +1,14 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import {
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogPortal,
+  DialogRoot,
+  DialogTitle,
+} from "reka-ui";
 
-import { useDismissableLayer } from "@/dojo/composables/useDismissableLayer";
-
-const props = withDefaults(
+withDefaults(
   defineProps<{
     visible: boolean;
     title?: string;
@@ -18,74 +23,61 @@ const props = withDefaults(
 const emit = defineEmits<{
   close: [];
 }>();
-
-const panel = ref<HTMLElement | null>(null);
-const active = computed(() => props.visible);
-
-useDismissableLayer(active, panel, () => emit("close"));
-
-watch(
-  () => props.visible,
-  (visible) => {
-    if (!visible) {
-      return;
-    }
-
-    requestAnimationFrame(() => panel.value?.focus());
-  },
-);
 </script>
 
 <template>
-  <Teleport to="body">
-    <div
-      v-if="visible"
-      class="trouser-scrim"
-      data-cy="full-screen-trouser-root"
-    >
-      <section
-        ref="panel"
-        class="trouser"
-        tabindex="-1"
-        role="dialog"
-        aria-modal="true"
-      >
-        <header class="trouser__header">
-          <div class="trouser__header-copy">
-            <h2 v-if="title || $slots.title" class="trouser__title">
-              <slot name="title">{{ title }}</slot>
-            </h2>
-            <p v-if="subtitle || $slots.subtitle" class="trouser__subtitle">
-              <slot name="subtitle">{{ subtitle }}</slot>
-            </p>
+  <DialogRoot :open="visible" @update:open="(open) => !open && emit('close')">
+    <DialogPortal>
+      <div v-if="visible" class="trouser-scrim">
+        <DialogContent
+          class="trouser"
+          data-cy="full-screen-trouser-root"
+          @escape-key-down="emit('close')"
+          @open-auto-focus.prevent
+        >
+          <header class="trouser__header">
+            <div class="trouser__header-copy">
+              <DialogTitle
+                v-if="title || $slots.title"
+                class="trouser__title"
+                as="h2"
+              >
+                <slot name="title">{{ title }}</slot>
+              </DialogTitle>
+              <DialogDescription
+                v-if="subtitle || $slots.subtitle"
+                class="trouser__subtitle"
+              >
+                <slot name="subtitle">{{ subtitle }}</slot>
+              </DialogDescription>
+            </div>
+            <div class="trouser__header-actions">
+              <slot name="header-actions" />
+            </div>
+            <DialogClose
+              type="button"
+              class="trouser__close"
+              aria-label="Close"
+            >
+              ×
+            </DialogClose>
+          </header>
+
+          <div v-if="$slots.tabs" class="trouser__tabs">
+            <slot name="tabs" />
           </div>
-          <div class="trouser__header-actions">
-            <slot name="header-actions" />
+
+          <div class="trouser__body">
+            <slot />
           </div>
-          <button
-            type="button"
-            class="trouser__close"
-            aria-label="Close"
-            @click="emit('close')"
-          >
-            ×
-          </button>
-        </header>
 
-        <div v-if="$slots.tabs" class="trouser__tabs">
-          <slot name="tabs" />
-        </div>
-
-        <div class="trouser__body">
-          <slot />
-        </div>
-
-        <footer v-if="$slots.footer" class="trouser__footer">
-          <slot name="footer" />
-        </footer>
-      </section>
-    </div>
-  </Teleport>
+          <footer v-if="$slots.footer" class="trouser__footer">
+            <slot name="footer" />
+          </footer>
+        </DialogContent>
+      </div>
+    </DialogPortal>
+  </DialogRoot>
 </template>
 
 <style scoped>

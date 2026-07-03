@@ -1,9 +1,14 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import {
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogPortal,
+  DialogRoot,
+  DialogTitle,
+} from "reka-ui";
 
-import { useDismissableLayer } from "@/dojo/composables/useDismissableLayer";
-
-const props = withDefaults(
+withDefaults(
   defineProps<{
     visible: boolean;
     title?: string;
@@ -22,83 +27,74 @@ const props = withDefaults(
 const emit = defineEmits<{
   close: [];
 }>();
-
-const panel = ref<HTMLElement | null>(null);
-const active = computed(() => props.visible);
-
-useDismissableLayer(active, panel, () => emit("close"));
-
-watch(
-  () => props.visible,
-  (visible) => {
-    if (!visible) {
-      return;
-    }
-
-    requestAnimationFrame(() => panel.value?.focus());
-  },
-);
 </script>
 
 <template>
-  <Teleport to="body" :disabled="contained">
-    <div
-      v-if="visible"
-      class="modal-scrim"
-      :class="{ 'modal-scrim--contained': contained }"
-      data-cy="large-detail-modal-root"
-    >
-      <section
-        ref="panel"
-        class="large-detail-modal"
-        tabindex="-1"
-        role="dialog"
-        aria-modal="true"
+  <DialogRoot
+    :open="visible"
+    :modal="!contained"
+    @update:open="(open) => !open && emit('close')"
+  >
+    <DialogPortal :disabled="contained">
+      <div
+        v-if="visible"
+        class="modal-scrim"
+        :class="{ 'modal-scrim--contained': contained }"
       >
-        <header
-          class="large-detail-modal__header"
-          :class="{ 'large-detail-modal__header--sticky': sticky }"
+        <DialogContent
+          class="large-detail-modal"
+          data-cy="large-detail-modal-root"
+          @escape-key-down="emit('close')"
+          @open-auto-focus.prevent
         >
-          <div class="large-detail-modal__header-copy">
-            <h2 v-if="title || $slots.title" class="large-detail-modal__title">
-              <slot name="title">{{ title }}</slot>
-            </h2>
-            <p
-              v-if="subtitle || $slots.subtitle"
-              class="large-detail-modal__subtitle"
-            >
-              <slot name="subtitle">{{ subtitle }}</slot>
-            </p>
-          </div>
-          <button
-            type="button"
-            class="large-detail-modal__close"
-            aria-label="Close"
-            @click="emit('close')"
+          <header
+            class="large-detail-modal__header"
+            :class="{ 'large-detail-modal__header--sticky': sticky }"
           >
-            Close
-          </button>
-        </header>
+            <div class="large-detail-modal__header-copy">
+              <DialogTitle
+                v-if="title || $slots.title"
+                class="large-detail-modal__title"
+                as="h2"
+              >
+                <slot name="title">{{ title }}</slot>
+              </DialogTitle>
+              <DialogDescription
+                v-if="subtitle || $slots.subtitle"
+                class="large-detail-modal__subtitle"
+              >
+                <slot name="subtitle">{{ subtitle }}</slot>
+              </DialogDescription>
+            </div>
+            <DialogClose
+              type="button"
+              class="large-detail-modal__close"
+              aria-label="Close"
+            >
+              Close
+            </DialogClose>
+          </header>
 
-        <div v-if="$slots.tabs" class="large-detail-modal__tabs">
-          <slot name="tabs" />
-        </div>
+          <div v-if="$slots.tabs" class="large-detail-modal__tabs">
+            <slot name="tabs" />
+          </div>
 
-        <div class="large-detail-modal__body">
-          <slot />
-        </div>
+          <div class="large-detail-modal__body">
+            <slot />
+          </div>
 
-        <footer
-          v-if="$slots.footer || $slots.actions"
-          class="large-detail-modal__footer"
-        >
-          <slot name="footer">
-            <slot name="actions" />
-          </slot>
-        </footer>
-      </section>
-    </div>
-  </Teleport>
+          <footer
+            v-if="$slots.footer || $slots.actions"
+            class="large-detail-modal__footer"
+          >
+            <slot name="footer">
+              <slot name="actions" />
+            </slot>
+          </footer>
+        </DialogContent>
+      </div>
+    </DialogPortal>
+  </DialogRoot>
 </template>
 
 <style scoped>
