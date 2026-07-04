@@ -130,9 +130,7 @@ function stubFetch() {
     }
 
     if (path.startsWith("/api/transactions/")) {
-      return Promise.resolve(
-        new Response(null, { status: 204, headers: {} }),
-      );
+      return Promise.resolve(new Response(null, { status: 204, headers: {} }));
     }
 
     return Promise.resolve(
@@ -149,10 +147,7 @@ function mountPage() {
   const queryClient = createDojoQueryClient();
   return mount(TransactionsPage, {
     global: {
-      plugins: [
-        router,
-        [VueQueryPlugin, { queryClient }],
-      ],
+      plugins: [router, [VueQueryPlugin, { queryClient }]],
     },
   });
 }
@@ -162,10 +157,7 @@ describe("TransactionsPage", () => {
     mountPage();
     cy.get("[data-cy=transactions-page-root]").should("be.visible");
     cy.get("[data-cy=navigation-rail-root]").should("be.visible");
-    cy.get("[data-cy=page-header-root]").should(
-      "contain.text",
-      "Transactions",
-    );
+    cy.get("[data-cy=page-header-root]").should("contain.text", "Transactions");
   });
 
   it("displays metric strip with inflow, outflow, and net", () => {

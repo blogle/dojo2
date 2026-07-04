@@ -185,8 +185,8 @@ const { data: txPage } = useQuery({
 
 const budget = computed(() => budgetResponse.value ?? null);
 const categoryGroups = computed(() => budget.value?.groups ?? []);
-const categories = computed(() =>
-  budget.value?.groups.flatMap((g) => g.categories) ?? [],
+const categories = computed(
+  () => budget.value?.groups.flatMap((g) => g.categories) ?? [],
 );
 const transactions = computed(() => txPage.value?.items ?? []);
 
@@ -205,9 +205,7 @@ const categoryMutation = useMutation({
     payload: Record<string, unknown>;
     categoryId?: string;
   }) =>
-    categoryId
-      ? updateCategory(categoryId, payload)
-      : createCategory(payload),
+    categoryId ? updateCategory(categoryId, payload) : createCategory(payload),
   onSuccess: () => invalidateBudgetQueries(),
 });
 
@@ -555,9 +553,7 @@ function submitMoveFunds(payload: {
   to: string;
   amountMinor: number;
 }) {
-  const fromCat = categories.value.find(
-    (c) => c.category_id === payload.from,
-  );
+  const fromCat = categories.value.find((c) => c.category_id === payload.from);
   const toCat = categories.value.find((c) => c.category_id === payload.to);
   if (!fromCat || !toCat) return;
   const available = fromCat.available_minor;

@@ -1,8 +1,13 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { ref, watch } from "vue";
+import { useDraggable } from "vue-draggable-plus";
 
 import StateBadge from "@/dojo/components/display/StateBadge.vue";
 import IconGlyph from "@/dojo/components/display/IconGlyph.vue";
+import {
+  resolveGroupMove,
+  type DragRow,
+} from "./HierarchicalCategoryTable.reorder";
 
 type StateBadgeVariant =
   | "positive"
@@ -81,8 +86,6 @@ const initState = () => {
   childOrder.value = child;
 };
 
-initState();
-
 const flattenRows = (
   rows: HierarchicalCategoryRow[],
 ): HierarchicalCategoryRow[] => {
@@ -114,92 +117,128 @@ const flattenRows = (
   return flattened;
 };
 
-const visibleRows = computed(() => flattenRows(props.rows));
+const buildChildParent = (rows: HierarchicalCategoryRow[]) => {
+  const childParent: Record<string, string> = {};
+  for (const row of rows) {
+    for (const child of row.children ?? []) {
+      childParent[child.key] = row.key;
+    }
+  }
+  return childParent;
+};
+
+const rowsFromDom = (container: HTMLElement): DragRow[] => {
+  return Array.from(container.children).flatMap((child): DragRow[] => {
+    if (!(child instanceof HTMLElement)) return [];
+    const groupKey = child.dataset.dragGroup;
+    if (groupKey) return [{ kind: "group", key: groupKey }];
+    const childKey = child.dataset.dragChild;
+    if (childKey) return [{ kind: "child", key: childKey }];
+    return [];
+  });
+};
+
+const flatRows = ref<HierarchicalCategoryRow[]>([]);
+const isDragging = ref(false);
+const tbodyRef = ref<HTMLTableSectionElement | null>(null);
+const preDragExpansion = ref<Record<string, boolean>>({});
+
+const rebuildFlatRows = () => {
+  flatRows.value = flattenRows(props.rows);
+};
+
+initState();
+rebuildFlatRows();
+
+watch(
+  () => props.rows,
+  () => {
+    initState();
+    rebuildFlatRows();
+  },
+);
 
 const handleToggle = (key: string) => {
+  if (isDragging.value) return;
   expandedState.value[key] = !expandedState.value[key];
   emit("toggle", key);
 };
 
 const isSelected = (key: string) => props.selectedKeys.includes(key);
 
-const dragKey = ref<string | null>(null);
-const dropTarget = ref<string | null>(null);
-const dropPosition = ref<"before" | "after">("after");
+useDraggable(tbodyRef, {
+  animation: 150,
+  draggable: "tr",
+  handle: ".hierarchical-category-table__drag-handle",
+  onStart(event) {
+    isDragging.value = true;
+    const movedEl = event.item;
+    const isGroup = movedEl.hasAttribute("data-drag-group");
+    if (isGroup) {
+      const groupKey = movedEl.dataset.dragGroup!;
+      preDragExpansion.value = { ...expandedState.value };
+      if (expandedState.value[groupKey] !== false) {
+        expandedState.value[groupKey] = false;
+        rebuildFlatRows();
+      }
+    }
+  },
+  onEnd() {
+    isDragging.value = false;
+    if (Object.keys(preDragExpansion.value).length > 0) {
+      expandedState.value = { ...preDragExpansion.value };
+      preDragExpansion.value = {};
+      rebuildFlatRows();
+    }
+  },
+  onUpdate(event) {
+    const movedEl = event.item;
+    const isGroup = movedEl.hasAttribute("data-drag-group");
+    const src = isGroup
+      ? movedEl.dataset.dragGroup!
+      : movedEl.dataset.dragChild!;
+    const newIndex = event.newIndex!;
+    const oldIndex = event.oldIndex!;
+    const pos = newIndex > oldIndex ? "after" : "before";
 
-const onDragStart = (key: string, event: DragEvent) => {
-  dragKey.value = key;
-  event.dataTransfer!.effectAllowed = "move";
-};
-
-const onDragOver = (key: string, event: DragEvent) => {
-  event.preventDefault();
-  event.dataTransfer!.dropEffect = "move";
-
-  const target = event.currentTarget as HTMLElement;
-  const rect = target.getBoundingClientRect();
-  const midY = rect.top + rect.height / 2;
-
-  dropPosition.value = event.clientY < midY ? "before" : "after";
-  dropTarget.value = key;
-};
-
-const onDragEnter = (key: string, event: DragEvent) => {
-  event.preventDefault();
-  dropTarget.value = key;
-};
-
-const onDragLeave = () => {
-  dropTarget.value = null;
-};
-
-const onDrop = (key: string) => {
-  if (dragKey.value && dragKey.value !== key) {
-    const src = dragKey.value;
-    const tgt = key;
-    const pos = dropPosition.value;
-    const visible = visibleRows.value;
-    const srcRow = visible.find((r) => r.key === src);
-    const tgtRow = visible.find((r) => r.key === tgt);
-
-    if (srcRow?.group && tgtRow?.group) {
-      const srcIdx = topOrder.value.indexOf(src);
-      if (srcIdx !== -1) topOrder.value.splice(srcIdx, 1);
-      let tgtIdx = topOrder.value.indexOf(tgt);
-      if (pos === "after") tgtIdx++;
-      topOrder.value.splice(tgtIdx, 0, src);
-    } else if (!srcRow?.group && !tgtRow?.group) {
-      const srcParent = visible.find((r) =>
-        r.children?.some((c) => c.key === src),
-      )?.key;
-      const tgtParent = visible.find((r) =>
-        r.children?.some((c) => c.key === tgt),
-      )?.key;
-      if (srcParent && tgtParent && srcParent === tgtParent) {
-        const siblings = childOrder.value[srcParent];
-        if (siblings) {
-          const srcIdx = siblings.indexOf(src);
-          if (srcIdx !== -1) siblings.splice(srcIdx, 1);
-          let tgtIdx = siblings.indexOf(tgt);
-          if (pos === "after") tgtIdx++;
-          siblings.splice(tgtIdx, 0, src);
+    if (isGroup) {
+      const container = movedEl.parentElement;
+      if (container) {
+        const move = resolveGroupMove(
+          rowsFromDom(container),
+          buildChildParent(props.rows),
+          topOrder.value,
+          src,
+        );
+        if (move) {
+          topOrder.value = move.order;
+          emit("reorder", src, move.targetKey, move.position);
         }
+      }
+    } else {
+      let srcParent: string | undefined;
+      for (const [parentKey, children] of Object.entries(childOrder.value)) {
+        if (children.includes(src)) {
+          srcParent = parentKey;
+          break;
+        }
+      }
+      if (srcParent) {
+        const siblings = childOrder.value[srcParent];
+        const srcIdx = siblings.indexOf(src);
+        if (srcIdx !== -1) siblings.splice(srcIdx, 1);
+        const insertIdx = newIndex > srcIdx ? newIndex - 1 : newIndex;
+        siblings.splice(insertIdx, 0, src);
+        const tgt = siblings[newIndex];
+        emit("reorder", src, tgt, pos);
       }
     }
 
-    emit("reorder", src, tgt, pos);
-  }
-  dragKey.value = null;
-  dropTarget.value = null;
-};
+    rebuildFlatRows();
+  },
+});
 
-const onDragEnd = () => {
-  dragKey.value = null;
-  dropTarget.value = null;
-};
-
-const isDragTarget = (key: string) => dropTarget.value === key;
-const isDragging = (key: string) => dragKey.value === key;
+defineExpose({ isDragging });
 </script>
 
 <template>
@@ -224,9 +263,9 @@ const isDragging = (key: string) => dragKey.value === key;
           </th>
         </tr>
       </thead>
-      <tbody>
+      <tbody ref="tbodyRef">
         <tr
-          v-for="row in visibleRows"
+          v-for="row in flatRows"
           :key="row.key"
           class="hierarchical-category-table__row"
           :class="{
@@ -234,19 +273,10 @@ const isDragging = (key: string) => dragKey.value === key;
             'hierarchical-category-table__row--group-expanded':
               row.group && row.expanded !== false,
             'hierarchical-category-table__row--selected': isSelected(row.key),
-            'hierarchical-category-table__row--drag-target': isDragTarget(
-              row.key,
-            ),
-            'hierarchical-category-table__row--dragging': isDragging(row.key),
           }"
-          :draggable="reorderable"
+          :data-drag-group="reorderable && !row.depth ? row.key : undefined"
+          :data-drag-child="reorderable && row.depth ? row.key : undefined"
           @click="emit('select', row.key)"
-          @dragstart="onDragStart(row.key, $event)"
-          @dragover="onDragOver(row.key, $event)"
-          @dragenter="onDragEnter(row.key, $event)"
-          @dragleave="onDragLeave()"
-          @drop="onDrop(row.key)"
-          @dragend="onDragEnd()"
         >
           <td class="hierarchical-category-table__cell">
             <div
@@ -400,12 +430,8 @@ const isDragging = (key: string) => dragKey.value === key;
   background: var(--color-surface-muted);
 }
 
-.hierarchical-category-table__row--dragging {
+.hierarchical-category-table__row.sortable-chosen {
   opacity: 0.4;
-}
-
-.hierarchical-category-table__row--drag-target {
-  box-shadow: inset 0 -2px 0 var(--color-positive);
 }
 
 .hierarchical-category-table__cell {

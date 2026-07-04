@@ -195,10 +195,7 @@ function mountPage() {
   const queryClient = createDojoQueryClient();
   return mount(BudgetsPage, {
     global: {
-      plugins: [
-        router,
-        [VueQueryPlugin, { queryClient }],
-      ],
+      plugins: [router, [VueQueryPlugin, { queryClient }]],
     },
   });
 }
@@ -266,9 +263,7 @@ describe("BudgetsPage", () => {
     mountPage();
     cy.get("[data-cy=hierarchical-category-table-root]").should("be.visible");
     cy.contains("td", "Rent").should("be.visible");
-    cy.contains("button", "Review categories")
-      .should("be.visible")
-      .click();
+    cy.contains("button", "Review categories").should("be.visible").click();
     cy.get("[data-cy=full-screen-trouser-root]").should("contain.text", "Rent");
     cy.get("[data-cy=full-screen-trouser-root]").should(
       "contain.text",

@@ -79,8 +79,13 @@ const createMutation = useMutation({
 });
 
 const updateMutation = useMutation({
-  mutationFn: ({ id, payload }: { id: string; payload: Parameters<typeof updateTransaction>[1] }) =>
-    updateTransaction(id, payload),
+  mutationFn: ({
+    id,
+    payload,
+  }: {
+    id: string;
+    payload: Parameters<typeof updateTransaction>[1];
+  }) => updateTransaction(id, payload),
   onSuccess: () => invalidateRelatedQueries(),
 });
 
@@ -271,9 +276,7 @@ onMounted(() => {
         <Button variant="tertiary" size="sm" @click="previousMonth">
           &lt;
         </Button>
-        <Button variant="tertiary" size="sm" @click="nextMonth">
-          &gt;
-        </Button>
+        <Button variant="tertiary" size="sm" @click="nextMonth"> &gt; </Button>
       </div>
 
       <MetricStrip :items="metrics" />

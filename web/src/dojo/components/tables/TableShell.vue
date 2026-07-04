@@ -6,7 +6,7 @@ export interface TableColumn {
   width?: string;
 }
 
-const props = withDefaults(
+withDefaults(
   defineProps<{
     columns: TableColumn[];
     rows: object[];

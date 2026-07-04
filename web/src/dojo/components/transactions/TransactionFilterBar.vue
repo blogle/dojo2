@@ -137,9 +137,15 @@ function toggleReconciliation() {
         @update:model-value="updateStatusFilter"
       />
       <div class="filter-bar__toggle">
-        <span class="filter-bar__toggle-label">Changes since last reconciliation</span>
+        <span class="filter-bar__toggle-label"
+          >Changes since last reconciliation</span
+        >
         <label class="filter-bar__switch">
-          <input type="checkbox" :checked="reconciliationFilter" @change="toggleReconciliation" />
+          <input
+            type="checkbox"
+            :checked="reconciliationFilter"
+            @change="toggleReconciliation"
+          />
           <span class="filter-bar__switch-slider" />
         </label>
       </div>
