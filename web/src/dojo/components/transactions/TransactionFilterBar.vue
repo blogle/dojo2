@@ -15,8 +15,6 @@ const emit = defineEmits<{
   "update:categoryFilter": [value: string];
   "update:amountFilter": [value: string];
   "update:statusFilter": [value: string];
-  "update:displayOrder": [value: string];
-  "update:reconciliationFilter": [value: boolean];
 }>();
 
 const accountFilter = ref("all");
@@ -24,8 +22,6 @@ const dateFilter = ref("all");
 const categoryFilter = ref("all");
 const amountFilter = ref("all");
 const statusFilter = ref("all");
-const displayOrder = ref("newest");
-const reconciliationFilter = ref(false);
 
 const accountOptions = computed(() => [
   { value: "all", label: "All accounts" },
@@ -62,11 +58,6 @@ const statusOptions = [
   { value: "pending", label: "Pending" },
 ];
 
-const displayOptions = [
-  { value: "newest", label: "Newest first" },
-  { value: "oldest", label: "Oldest first" },
-];
-
 function updateAccountFilter(value: string) {
   accountFilter.value = value;
   emit("update:accountFilter", value);
@@ -90,16 +81,6 @@ function updateAmountFilter(value: string) {
 function updateStatusFilter(value: string) {
   statusFilter.value = value;
   emit("update:statusFilter", value);
-}
-
-function updateDisplayOrder(value: string) {
-  displayOrder.value = value;
-  emit("update:displayOrder", value);
-}
-
-function toggleReconciliation() {
-  reconciliationFilter.value = !reconciliationFilter.value;
-  emit("update:reconciliationFilter", reconciliationFilter.value);
 }
 </script>
 
@@ -136,25 +117,6 @@ function toggleReconciliation() {
         :options="statusOptions"
         @update:model-value="updateStatusFilter"
       />
-      <div class="filter-bar__toggle">
-        <span class="filter-bar__toggle-label"
-          >Changes since last reconciliation</span
-        >
-        <label class="filter-bar__switch">
-          <input
-            type="checkbox"
-            :checked="reconciliationFilter"
-            @change="toggleReconciliation"
-          />
-          <span class="filter-bar__switch-slider" />
-        </label>
-      </div>
-      <SelectField
-        :model-value="displayOrder"
-        label="Display"
-        :options="displayOptions"
-        @update:model-value="updateDisplayOrder"
-      />
     </div>
   </div>
 </template>
@@ -169,67 +131,9 @@ function toggleReconciliation() {
 
 .filter-bar__row {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr 1fr 1fr auto 1fr;
+  grid-template-columns: repeat(5, 1fr);
   gap: var(--space-md);
   align-items: end;
-}
-
-.filter-bar__toggle {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-xs);
-}
-
-.filter-bar__toggle-label {
-  font-family: var(--text-label-sm-font-family);
-  font-size: var(--text-label-sm-font-size);
-  font-weight: var(--text-label-sm-font-weight);
-  line-height: var(--text-label-sm-line-height);
-  letter-spacing: var(--text-label-sm-letter-spacing, 0.01em);
-  text-transform: uppercase;
-  color: var(--color-on-surface-muted);
-}
-
-.filter-bar__switch {
-  position: relative;
-  display: inline-block;
-  width: 36px;
-  height: 20px;
-}
-
-.filter-bar__switch input {
-  opacity: 0;
-  width: 0;
-  height: 0;
-}
-
-.filter-bar__switch-slider {
-  position: absolute;
-  cursor: pointer;
-  inset: 0;
-  background: var(--color-outline);
-  border-radius: 10px;
-  transition: background var(--transition-fast) var(--transition-ease-out);
-}
-
-.filter-bar__switch-slider::before {
-  content: "";
-  position: absolute;
-  height: 16px;
-  width: 16px;
-  left: 2px;
-  bottom: 2px;
-  background: var(--color-surface);
-  border-radius: 50%;
-  transition: transform var(--transition-fast) var(--transition-ease-out);
-}
-
-.filter-bar__switch input:checked + .filter-bar__switch-slider {
-  background: var(--color-primary);
-}
-
-.filter-bar__switch input:checked + .filter-bar__switch-slider::before {
-  transform: translateX(16px);
 }
 
 @media (max-width: 1200px) {

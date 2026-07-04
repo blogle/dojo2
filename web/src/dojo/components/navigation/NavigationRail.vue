@@ -27,6 +27,7 @@ withDefaults(
     ariaLabel?: string;
     width?: string;
     fullHeight?: boolean;
+    fixed?: boolean;
     collapsible?: boolean;
     brand?: string;
   }>(),
@@ -35,6 +36,7 @@ withDefaults(
     ariaLabel: "Navigation rail",
     width: undefined,
     fullHeight: false,
+    fixed: true,
     collapsible: false,
     brand: undefined,
   },
@@ -85,6 +87,7 @@ const onItemClick = (event: MouseEvent, item: NavigationRailItem) => {
     :class="{
       'navigation-rail--expanded': expanded,
       'navigation-rail--full-height': fullHeight,
+      'navigation-rail--fixed': fixed,
     }"
     :style="width && !expanded ? { width } : undefined"
     :aria-label="ariaLabel"
@@ -172,6 +175,12 @@ const onItemClick = (event: MouseEvent, item: NavigationRailItem) => {
   border: 1px solid var(--color-outline);
   background: var(--color-surface);
   overflow: hidden;
+}
+
+.navigation-rail--fixed:not(.navigation-rail--full-height) {
+  position: fixed;
+  inset: 0 auto 0 0;
+  z-index: 10;
 }
 
 .navigation-rail--expanded {
@@ -279,5 +288,11 @@ const onItemClick = (event: MouseEvent, item: NavigationRailItem) => {
   font-weight: 600;
   line-height: 1.2;
   text-align: center;
+}
+
+@media (max-width: 720px) {
+  .navigation-rail--fixed:not(.navigation-rail--full-height) {
+    position: static;
+  }
 }
 </style>

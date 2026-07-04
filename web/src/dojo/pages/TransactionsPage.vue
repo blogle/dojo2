@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, onMounted } from "vue";
+import { computed, ref } from "vue";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/vue-query";
 
 import type { Transaction } from "../types";
@@ -34,7 +34,6 @@ const QUERY_KEYS = {
   netWorth: ["net-worth"] as const,
 } as const;
 
-const selectedMonth = ref("");
 const editingTransaction = ref<Transaction | null>(null);
 const removingTransaction = ref<Transaction | null>(null);
 const showUndoToast = ref(false);
@@ -94,22 +93,14 @@ const deleteMutation = useMutation({
   onSuccess: () => invalidateRelatedQueries(),
 });
 
-const monthTransactions = computed(() => {
-  if (!selectedMonth.value) return [];
-  return transactions.value.filter((t) => {
-    const txMonth = t.date.slice(0, 7);
-    return txMonth === selectedMonth.value;
-  });
-});
-
 const inflow = computed(() =>
-  monthTransactions.value
+  transactions.value
     .filter((t) => t.amount_minor > 0)
     .reduce((sum, t) => sum + t.amount_minor, 0),
 );
 
 const outflow = computed(() =>
-  monthTransactions.value
+  transactions.value
     .filter((t) => t.amount_minor < 0)
     .reduce((sum, t) => sum + Math.abs(t.amount_minor), 0),
 );
@@ -165,20 +156,6 @@ const metrics = computed<MetricStripItem[]>(() => [
     value: formatCurrency(net.value),
   },
 ]);
-
-function previousMonth() {
-  const [year, month] = selectedMonth.value.split("-").map(Number);
-  const prev = month === 1 ? 12 : month - 1;
-  const yr = month === 1 ? year - 1 : year;
-  selectedMonth.value = `${yr}-${String(prev).padStart(2, "0")}`;
-}
-
-function nextMonth() {
-  const [year, month] = selectedMonth.value.split("-").map(Number);
-  const nxt = month === 12 ? 1 : month + 1;
-  const yr = month === 12 ? year + 1 : year;
-  selectedMonth.value = `${yr}-${String(nxt).padStart(2, "0")}`;
-}
 
 function handleEditTransaction(tx: Transaction) {
   editingTransaction.value = tx;
@@ -251,10 +228,6 @@ function handleUndoRemove() {
   showUndoToast.value = false;
   lastRemovedSnapshot.value = null;
 }
-
-onMounted(() => {
-  selectedMonth.value = currentMonth.value;
-});
 </script>
 
 <template>
@@ -271,12 +244,8 @@ onMounted(() => {
       <div class="transactions-page__month-nav">
         <span class="transactions-page__month-icon">📅</span>
         <span class="transactions-page__month-label">
-          {{ formatMonth(selectedMonth || currentMonth) }}
+          {{ formatMonth(currentMonth) }}
         </span>
-        <Button variant="tertiary" size="sm" @click="previousMonth">
-          &lt;
-        </Button>
-        <Button variant="tertiary" size="sm" @click="nextMonth"> &gt; </Button>
       </div>
 
       <MetricStrip :items="metrics" />
@@ -296,7 +265,7 @@ onMounted(() => {
       />
 
       <TransactionLedger
-        :transactions="monthTransactions"
+        :transactions="transactions"
         :accounts="accounts ?? []"
         :categories="categories"
         :editing-transaction-id="editingTransaction?.transaction_id ?? null"
@@ -354,6 +323,10 @@ onMounted(() => {
   gap: var(--space-lg);
   align-content: start;
   position: relative;
+}
+
+.transactions-page__main :deep(.metric-strip__item) {
+  flex: 1;
 }
 
 .transactions-page__month-nav {

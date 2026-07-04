@@ -251,7 +251,7 @@ const directionOptions = [
 
     <div class="ledger__footer">
       <span v-if="transactions.length === 0" class="ledger__empty">
-        No transactions found for this month.
+        No transactions found.
       </span>
       <span v-else class="ledger__count">
         Loaded {{ transactions.length }} transactions

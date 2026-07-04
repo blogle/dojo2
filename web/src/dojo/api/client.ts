@@ -80,7 +80,7 @@ export async function fetchTransactionsPage(
     show_hidden: String(showHidden),
     offset: String(offset),
     limit: String(limit),
-    sort_by: "date",
+    sort_by: "created_at",
     sort_dir: "desc",
   });
   return request<TransactionPage>(`/api/transactions?${params.toString()}`);
