@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, ref, onMounted, onUnmounted } from "vue";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/vue-query";
 
-import type { Transaction } from "../types";
+import type { Transaction, TransactionPayload } from "../types";
 import { formatCurrency, formatMonth } from "../utils/currency";
 import {
   fetchTransactionsPage,
@@ -11,6 +11,7 @@ import {
   createTransaction,
   updateTransaction,
   deleteTransaction,
+  restoreTransaction,
 } from "../api/client";
 
 import NavigationRail from "../components/navigation/NavigationRail.vue";
@@ -34,8 +35,11 @@ const QUERY_KEYS = {
   netWorth: ["net-worth"] as const,
 } as const;
 
-const editingTransaction = ref<Transaction | null>(null);
-const removingTransaction = ref<Transaction | null>(null);
+type UndoEntry =
+  | { kind: "edit"; id: string; previous: TransactionPayload }
+  | { kind: "remove"; snapshot: Transaction };
+
+const undoStack = ref<UndoEntry[]>([]);
 const showUndoToast = ref(false);
 const lastRemovedSnapshot = ref<Transaction | null>(null);
 
@@ -90,6 +94,11 @@ const updateMutation = useMutation({
 
 const deleteMutation = useMutation({
   mutationFn: deleteTransaction,
+  onSuccess: () => invalidateRelatedQueries(),
+});
+
+const restoreMutation = useMutation({
+  mutationFn: restoreTransaction,
   onSuccess: () => invalidateRelatedQueries(),
 });
 
@@ -157,29 +166,27 @@ const metrics = computed<MetricStripItem[]>(() => [
   },
 ]);
 
-function handleEditTransaction(tx: Transaction) {
-  editingTransaction.value = tx;
-}
-
-function handleCancelEdit() {
-  editingTransaction.value = null;
-}
-
-function handleSaveEdit(payload: {
-  date: string;
-  account_id: string;
-  amount_minor: number;
-  category_id: string | null;
-  system_category: string | null;
-  status: "PENDING" | "CLEARED";
-  memo: string;
-}) {
-  if (!editingTransaction.value) return;
-  updateMutation.mutate({
-    id: editingTransaction.value.transaction_id,
-    payload,
-  });
-  editingTransaction.value = null;
+function handleCommitEdit(
+  id: string,
+  payload: Parameters<typeof updateTransaction>[1],
+) {
+  const tx = transactions.value.find((t) => t.transaction_id === id);
+  if (tx) {
+    undoStack.value.push({
+      kind: "edit",
+      id,
+      previous: {
+        date: tx.date,
+        account_id: tx.account_id,
+        amount_minor: tx.amount_minor,
+        category_id: tx.category_id,
+        system_category: tx.system_category,
+        status: tx.status,
+        memo: tx.memo,
+      },
+    });
+  }
+  updateMutation.mutate({ id, payload });
 }
 
 function handleSubmit(payload: {
@@ -194,40 +201,52 @@ function handleSubmit(payload: {
   createMutation.mutate(payload);
 }
 
-function handleRemoveRequest(tx: Transaction) {
-  removingTransaction.value = tx;
-}
-
-function confirmRemove() {
-  if (!removingTransaction.value) return;
-  lastRemovedSnapshot.value = { ...removingTransaction.value };
-  deleteMutation.mutate(removingTransaction.value.transaction_id);
-  removingTransaction.value = null;
+function handleRemove(tx: Transaction) {
+  undoStack.value.push({ kind: "remove", snapshot: { ...tx } });
+  lastRemovedSnapshot.value = { ...tx };
+  deleteMutation.mutate(tx.transaction_id);
   showUndoToast.value = true;
   setTimeout(() => {
     showUndoToast.value = false;
   }, 8000);
 }
 
-function cancelRemove() {
-  removingTransaction.value = null;
-}
-
 function handleUndoRemove() {
   if (!lastRemovedSnapshot.value) return;
   const tx = lastRemovedSnapshot.value;
-  createMutation.mutate({
-    date: tx.date,
-    account_id: tx.account_id,
-    amount_minor: tx.amount_minor,
-    category_id: tx.category_id,
-    system_category: tx.system_category,
-    status: tx.status,
-    memo: tx.memo,
-  });
+  restoreMutation.mutate(tx.transaction_id);
   showUndoToast.value = false;
   lastRemovedSnapshot.value = null;
 }
+
+function handleUndo() {
+  const entry = undoStack.value.pop();
+  if (!entry) return;
+  if (entry.kind === "edit") {
+    updateMutation.mutate({ id: entry.id, payload: entry.previous });
+  } else if (entry.kind === "remove") {
+    const tx = entry.snapshot;
+    restoreMutation.mutate(tx.transaction_id);
+  }
+  showUndoToast.value = false;
+  lastRemovedSnapshot.value = null;
+}
+
+function handleGlobalKeydown(event: KeyboardEvent) {
+  const isMod = event.metaKey || event.ctrlKey;
+  if (isMod && event.key === "z" && !event.shiftKey) {
+    event.preventDefault();
+    handleUndo();
+  }
+}
+
+onMounted(() => {
+  document.addEventListener("keydown", handleGlobalKeydown);
+});
+
+onUnmounted(() => {
+  document.removeEventListener("keydown", handleGlobalKeydown);
+});
 </script>
 
 <template>
@@ -253,10 +272,7 @@ function handleUndoRemove() {
       <TransactionEntryForm
         :accounts="accounts ?? []"
         :categories="categories"
-        :editing-transaction="editingTransaction"
         @submit="handleSubmit"
-        @cancel-edit="handleCancelEdit"
-        @save-edit="handleSaveEdit"
       />
 
       <TransactionFilterBar
@@ -268,30 +284,9 @@ function handleUndoRemove() {
         :transactions="transactions"
         :accounts="accounts ?? []"
         :categories="categories"
-        :editing-transaction-id="editingTransaction?.transaction_id ?? null"
-        @edit="handleEditTransaction"
-        @remove="handleRemoveRequest"
-        @toggle-status="(tx) => handleEditTransaction(tx)"
+        @commit="handleCommitEdit"
+        @remove="handleRemove"
       />
-
-      <div v-if="removingTransaction" class="transactions-page__modal-scrim">
-        <div
-          class="transactions-page__confirm-modal"
-          role="dialog"
-          aria-modal="true"
-        >
-          <div class="transactions-page__confirm-icon">⚠</div>
-          <h2 class="transactions-page__confirm-title">Remove transaction?</h2>
-          <p class="transactions-page__confirm-text">
-            This transaction will be removed and marked as inactive. It will no
-            longer be included in your totals or reports.
-          </p>
-          <div class="transactions-page__confirm-actions">
-            <Button variant="secondary" @click="cancelRemove">Cancel</Button>
-            <Button variant="primary" @click="confirmRemove">Remove</Button>
-          </div>
-        </div>
-      </div>
 
       <Transition name="toast">
         <div v-if="showUndoToast" class="transactions-page__toast">
@@ -349,54 +344,6 @@ function handleUndoRemove() {
   font-size: var(--text-body-md-font-size);
   font-weight: var(--text-body-md-font-weight);
   color: var(--color-on-surface);
-}
-
-.transactions-page__modal-scrim {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.4);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-}
-
-.transactions-page__confirm-modal {
-  background: var(--color-surface);
-  border-radius: var(--radius-md);
-  padding: var(--space-xl);
-  max-width: 420px;
-  width: 90%;
-  text-align: center;
-  box-shadow: var(--shadow-modal);
-}
-
-.transactions-page__confirm-icon {
-  font-size: 32px;
-  margin-bottom: var(--space-md);
-  color: var(--color-warning);
-}
-
-.transactions-page__confirm-title {
-  margin: 0 0 var(--space-sm);
-  font-family: var(--text-heading-md-font-family);
-  font-size: var(--text-heading-md-font-size);
-  font-weight: var(--text-heading-md-font-weight);
-  color: var(--color-on-surface);
-}
-
-.transactions-page__confirm-text {
-  margin: 0 0 var(--space-lg);
-  font-family: var(--text-body-md-font-family);
-  font-size: var(--text-body-md-font-size);
-  color: var(--color-on-surface-muted);
-  line-height: var(--text-body-md-line-height);
-}
-
-.transactions-page__confirm-actions {
-  display: flex;
-  gap: var(--space-sm);
-  justify-content: center;
 }
 
 .transactions-page__toast {

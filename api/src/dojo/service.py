@@ -1254,6 +1254,53 @@ class DojoService:
                 now=now,
             )
 
+    def restore_transaction(self, transaction_id: str) -> dict[str, Any]:
+        now = self.clock.now()
+        with self.db.transaction() as connection:
+            # Check if already has current version
+            current = self.db.fetch_one(
+                load_sql("queries/current_transaction_by_id"),
+                (transaction_id,),
+            )
+            if current is not None:
+                raise ValueError("Transaction already active")
+
+            # Find latest closed version
+            rows = self.db.fetch_all(
+                render_sql(
+                    "templates/select_columns_where_ordered",
+                    columns="*",
+                    table="transactions",
+                    predicate="transaction_id = ? AND valid_to != ?",
+                    order_by="valid_to DESC",
+                ),
+                (transaction_id, MAX_TS),
+            )
+            if not rows:
+                raise ValueError("Transaction not found or not deleted")
+
+            latest_closed = rows[0]
+            # Insert new current version with same payload
+            insert_version(
+                connection,
+                "transactions",
+                {
+                    "transaction_id": transaction_id,
+                    "date": latest_closed["date"],
+                    "account_id": latest_closed["account_id"],
+                    "amount_minor": latest_closed["amount_minor"],
+                    "category_id": latest_closed["category_id"],
+                    "system_category": latest_closed["system_category"],
+                    "status": latest_closed["status"],
+                    "memo": latest_closed["memo"],
+                    "valid_from": now,
+                    "valid_to": MAX_TS,
+                    "created_at": latest_closed["created_at"],
+                    "created_by_user_id": latest_closed["created_by_user_id"],
+                },
+            )
+        return {"transaction_id": transaction_id}
+
     def create_transfer(
         self,
         *,

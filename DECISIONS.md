@@ -476,3 +476,26 @@ Keep the underlying prior-month-available formula, but present it as `Starting A
 ### Consequence
 
 Every displayed budget aggregate is now more directly reconcilable to either Aspire or dojo's own month formula: `available = starting available + budgeted + activity` for standard categories.
+
+## 2026-07-04 — SCD-correct undo semantics with restore endpoint
+
+### Context
+
+The frontend undo stack for deleted transactions previously called `createMutation.mutate(snapshot)`, which created a new `transaction_id` rather than restoring the same logical entity. This broke SCD history: the restored transaction had a different `transaction_id` than the original, so as-of queries would not find it during the gap period.
+
+### Decision
+
+Implement `POST /api/transactions/{transaction_id}/restore` endpoint that appends a new current version for the same `transaction_id` (not creating a new ID). The restore operation:
+1. Finds the latest closed version for the `transaction_id`
+2. Inserts a new current version with `valid_from=now`, `valid_to=MAX_TS` using the payload from the latest closed version
+3. Returns `{"transaction_id": transaction_id}`
+
+This creates an intentional gap in SCD history during which the transaction was inactive, preserving full audit trail.
+
+### Consequence
+
+- Undo delete now preserves the same `transaction_id` across delete/restore cycles.
+- SCD history shows: original version → gap (deleted) → restored version.
+- Property-based testing with Hypothesis validates SCD invariants (no overlapping intervals, single current version, as-of stability) before shipping.
+- Frontend undo stack calls `restoreTransaction` instead of `createMutation` for delete undo.
+- Vacuum/compaction is a separate future operation, not part of normal undo semantics.

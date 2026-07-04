@@ -243,3 +243,106 @@ def test_google_callback_stores_token_in_memory_and_updates_status(monkeypatch, 
         status = client.get("/api/onboarding/google/status")
         assert status.status_code == 200
         assert status.json()["authorized"] is True
+
+
+def test_delete_then_restore_preserves_transaction_id(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("SESSION_SECRET", "test-secret")
+    monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
+    monkeypatch.setenv(
+        "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
+    )
+    provisioned_main_module(monkeypatch, tmp_path, "api-test.duckdb")
+
+    with TestClient(main_module.app) as client:
+        imported = client.post(
+            "/api/import/google-sheet", json={"sheet_url_or_id": "fixture://default"}
+        )
+        assert imported.status_code == 200
+
+        # Get a transaction
+        page = client.get(
+            "/api/transactions",
+            params={"show_hidden": "true", "limit": 1, "sort_by": "date", "sort_dir": "desc"},
+        )
+        assert page.status_code == 200
+        tx = page.json()["items"][0]
+        tx_id = tx["transaction_id"]
+
+        # Delete it
+        delete_resp = client.delete(f"/api/transactions/{tx_id}")
+        assert delete_resp.status_code == 200
+        assert delete_resp.json()["ok"] is True
+
+        # Verify deleted
+        page_after_delete = client.get(
+            "/api/transactions",
+            params={"show_hidden": "true", "limit": 100, "sort_by": "date", "sort_dir": "desc"},
+        )
+        assert all(t["transaction_id"] != tx_id for t in page_after_delete.json()["items"])
+
+        # Restore it
+        restore_resp = client.post(f"/api/transactions/{tx_id}/restore")
+        assert restore_resp.status_code == 200
+        assert restore_resp.json()["transaction_id"] == tx_id
+
+        # Verify restored with same ID
+        page_after_restore = client.get(
+            "/api/transactions",
+            params={"show_hidden": "true", "limit": 100, "sort_by": "date", "sort_dir": "desc"},
+        )
+        restored_tx = next(
+            t for t in page_after_restore.json()["items"] if t["transaction_id"] == tx_id
+        )
+        assert restored_tx["date"] == tx["date"]
+        assert restored_tx["account_id"] == tx["account_id"]
+        assert restored_tx["amount_minor"] == tx["amount_minor"]
+        assert restored_tx["status"] == tx["status"]
+
+
+def test_restore_missing_transaction_returns_404(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("SESSION_SECRET", "test-secret")
+    monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
+    monkeypatch.setenv(
+        "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
+    )
+    provisioned_main_module(monkeypatch, tmp_path, "api-test.duckdb")
+
+    with TestClient(main_module.app) as client:
+        imported = client.post(
+            "/api/import/google-sheet", json={"sheet_url_or_id": "fixture://default"}
+        )
+        assert imported.status_code == 200
+
+        # Try to restore a non-existent transaction (use valid UUID format)
+        non_existent_id = "00000000-0000-0000-0000-000000000000"
+        restore_resp = client.post(f"/api/transactions/{non_existent_id}/restore")
+        assert restore_resp.status_code == 404
+        assert "Transaction not found" in restore_resp.json()["detail"]
+
+
+def test_restore_already_active_transaction_returns_400(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("SESSION_SECRET", "test-secret")
+    monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
+    monkeypatch.setenv(
+        "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
+    )
+    provisioned_main_module(monkeypatch, tmp_path, "api-test.duckdb")
+
+    with TestClient(main_module.app) as client:
+        imported = client.post(
+            "/api/import/google-sheet", json={"sheet_url_or_id": "fixture://default"}
+        )
+        assert imported.status_code == 200
+
+        # Get a transaction
+        page = client.get(
+            "/api/transactions",
+            params={"show_hidden": "true", "limit": 1, "sort_by": "date", "sort_dir": "desc"},
+        )
+        tx = page.json()["items"][0]
+        tx_id = tx["transaction_id"]
+
+        # Try to restore an already active transaction
+        restore_resp = client.post(f"/api/transactions/{tx_id}/restore")
+        assert restore_resp.status_code == 400
+        assert "already active" in restore_resp.json()["detail"]

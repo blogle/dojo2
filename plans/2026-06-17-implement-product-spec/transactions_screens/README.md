@@ -8,7 +8,7 @@ This bundle contains the curated, spec-aligned Transactions page mockup screens 
 2. `02-transaction-added-rapid-entry.png` — Successful add state: date/account retained, entry form reset for rapid entry, and success feedback visible.
 3. `03-filtered-ledger.png` — Filtered ledger state showing account, date range, category, amount range, status filter, active chips, and matching rows.
 4. `04-changes-since-last-reconciliation.png` — Current working-set view using the `Changes since last reconciliation` toggle and changed-record context banner.
-5. `05-inline-edit-row.png` — In-place row edit state with compact inline fields and local `Save` / `Cancel` actions.
+5. `05-inline-edit-row.png` — In-place row edit state with compact inline fields; changes commit on blur, Escape cancels the draft, and status is toggled via an inline pill. No Actions column — delete sits at the right edge of the active row.
 6. `06-remove-confirmation-modal.png` — Remove confirmation dialog shown over the ledger before marking the active transaction inactive.
 7. `07-removed-undo-toast.png` — Removed transaction state with bottom-right `Transaction removed` toast and `Undo` action.
 8. `08-oldest-first-logical-order.png` — Display order set to `Oldest first`, illustrating configurable logical entry order without manual pagination.

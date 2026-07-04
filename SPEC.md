@@ -650,22 +650,21 @@ The ledger supports:
 ### Edit Flow
 
 1. Select a row
-2. The row enters edit state
+2. The row enters inline edit state
 3. Edit fields in place
-4. Select Save or press Enter
-5. The previous version becomes inactive
-6. A replacement version becomes active
-7. The logical transaction remains in the same entry position
-
-Cancel exits editing without creating a new version.
+4. Changes commit when the row loses focus (blur)
+5. Press Escape to cancel the draft before commit
+6. The previous version becomes inactive
+7. A replacement version becomes active
+8. The logical transaction remains in the same entry position
+9. Status is toggled via an inline pill (Pending / Cleared)
 
 ### Remove and Undo
 
 1. Select a row
-2. Select Remove
-3. Confirm removal
-4. The current record becomes inactive
-5. A toast appears at the bottom right:
+2. Select the delete action at the right edge of the active row
+3. The current record becomes inactive
+4. A toast appears at the bottom right:
 
    * Transaction removed
    * Undo

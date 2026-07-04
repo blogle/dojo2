@@ -180,6 +180,12 @@ export async function deleteTransaction(transactionId: string): Promise<void> {
   await request(`/api/transactions/${transactionId}`, { method: "DELETE" });
 }
 
+export async function restoreTransaction(transactionId: string): Promise<void> {
+  await request(`/api/transactions/${transactionId}/restore`, {
+    method: "POST",
+  });
+}
+
 export async function createTransfer(payload: {
   date: string;
   from_account_id: string;

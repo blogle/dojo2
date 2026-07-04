@@ -241,6 +241,19 @@ def delete_transaction(request: Request, transaction_id: str) -> dict[str, Any]:
     return {"ok": True}
 
 
+@router.post("/transactions/{transaction_id}/restore")
+def restore_transaction(request: Request, transaction_id: str) -> dict[str, Any]:
+    try:
+        return get_service(request).restore_transaction(transaction_id)
+    except ValueError as exc:
+        detail = str(exc)
+        if "not found" in detail.lower():
+            raise HTTPException(status_code=404, detail=detail) from exc
+        if "already active" in detail.lower():
+            raise HTTPException(status_code=400, detail=detail) from exc
+        raise HTTPException(status_code=400, detail=detail) from exc
+
+
 @router.post("/transfers")
 def create_transfer(request: Request, payload: TransferPayload) -> dict[str, Any]:
     return get_service(request).create_transfer(

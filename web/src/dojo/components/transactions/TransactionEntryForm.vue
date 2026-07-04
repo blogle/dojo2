@@ -1,12 +1,7 @@
 <script setup lang="ts">
-import { ref, computed, watch } from "vue";
+import { ref, computed } from "vue";
 
-import type {
-  Account,
-  Category,
-  Transaction,
-  TransactionPayload,
-} from "../../types";
+import type { Account, Category, TransactionPayload } from "../../types";
 import { parseMoneyInput } from "../../utils/currency";
 import Button from "../actions/Button.vue";
 import DatePicker from "../forms/DatePicker.vue";
@@ -17,13 +12,10 @@ import TextField from "../forms/TextField.vue";
 const props = defineProps<{
   accounts: Account[];
   categories: Category[];
-  editingTransaction: Transaction | null;
 }>();
 
 const emit = defineEmits<{
   submit: [payload: TransactionPayload];
-  cancelEdit: [];
-  saveEdit: [payload: TransactionPayload];
 }>();
 
 const date = ref("");
@@ -39,34 +31,14 @@ function todayString() {
 }
 
 function resetForm() {
+  date.value = todayString();
   categoryId.value = "";
   amount.value = "";
   memo.value = "";
   direction.value = "outflow";
 }
 
-function initEdit(tx: Transaction) {
-  date.value = tx.date;
-  accountId.value = tx.account_id;
-  categoryId.value = tx.category_id ?? "";
-  const absAmount = Math.abs(tx.amount_minor) / 100;
-  amount.value = absAmount > 0 ? absAmount.toFixed(2) : "";
-  direction.value = tx.amount_minor >= 0 ? "inflow" : "outflow";
-  memo.value = tx.memo;
-}
-
-watch(
-  () => props.editingTransaction,
-  (tx) => {
-    if (tx) {
-      initEdit(tx);
-    } else {
-      date.value = todayString();
-      resetForm();
-    }
-  },
-  { immediate: true },
-);
+resetForm();
 
 function handleSubmit() {
   if (!date.value || !accountId.value || !amount.value) return;
@@ -77,31 +49,22 @@ function handleSubmit() {
   const finalAmount =
     direction.value === "outflow" ? -amountMinor : amountMinor;
 
-  const payload: TransactionPayload = {
+  emit("submit", {
     date: date.value,
     account_id: accountId.value,
     amount_minor: finalAmount,
     category_id: categoryId.value || null,
     system_category: null,
-    status: "CLEARED",
+    status: "PENDING",
     memo: memo.value,
-  };
-
-  if (props.editingTransaction) {
-    emit("saveEdit", payload);
-  } else {
-    emit("submit", payload);
-    resetForm();
-  }
+  });
+  resetForm();
 }
 
 function handleKeyDown(event: KeyboardEvent) {
   if (event.key === "Enter" && !event.shiftKey) {
     event.preventDefault();
     handleSubmit();
-  }
-  if (event.key === "Escape" && props.editingTransaction) {
-    emit("cancelEdit");
   }
 }
 
@@ -129,9 +92,7 @@ const directionOptions = [
     data-cy="transaction-entry-form"
     @keydown="handleKeyDown"
   >
-    <h3 class="entry-form__title">
-      {{ editingTransaction ? "Edit transaction" : "Add transaction" }}
-    </h3>
+    <h3 class="entry-form__title">Add transaction</h3>
     <div class="entry-form__row">
       <DatePicker v-model="date" label="Date" />
       <SelectField
@@ -152,16 +113,7 @@ const directionOptions = [
       />
       <TextField v-model="memo" label="Memo" placeholder="e.g., Whole Foods" />
       <div class="entry-form__actions">
-        <Button variant="primary" @click="handleSubmit">
-          {{ editingTransaction ? "Save" : "Add" }}
-        </Button>
-        <Button
-          v-if="editingTransaction"
-          variant="secondary"
-          @click="emit('cancelEdit')"
-        >
-          Cancel
-        </Button>
+        <Button variant="primary" @click="handleSubmit">Add</Button>
       </div>
     </div>
   </div>
