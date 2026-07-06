@@ -786,7 +786,9 @@ The transaction ledger remains account-centric. A transfer is still represented 
 
 The linked behavior determines whether those transfer rows create derived budget effects.
 
-Credit-card payment categories, investment contribution categories, and loan payment categories are all examples of account-linked budget behavior.
+Credit-card payment categories, investment contribution categories, and loan payment categories are all examples of account-linked budget behavior. A link is effective from a financial effective date. That effective date is distinct from SCD2 configuration history: configuration history records when dojo learned about the link, while the effective date controls which financial activity the link applies to.
+
+Links are one category to many accounts for a behavior. One account must not have two active categories for the same behavior at the same time. This keeps derived budget behavior unambiguous while allowing several brokerage accounts to share one Investments category.
 
 Examples:
 
@@ -806,6 +808,8 @@ Mortgage loan
 
 Transfers remain the source of account-balance truth. Linked account-category behavior determines how certain transfers affect budget categories.
 
+Derived budget effects are computed on read from ledger rows and account-budget links. dojo must not persist synthetic transaction rows merely to represent derived category activity unless future benchmarks prove a cache or derived table is required.
+
 ### Tracking Accounts
 
 A tracking account is a legacy or manual snapshot-authoritative entity outside the budget boundary.
@@ -821,6 +825,8 @@ A tracking account:
 
 Tracking accounts should remain simple. They should not be treated as transfer endpoints in normal budgeting workflows.
 
+Tracking accounts carry explicit asset/liability polarity. Aspire imports derive this from Aspire net-worth asset and debt metadata when available. If the source does not identify polarity, dojo infers it from the latest non-zero snapshot amount and flags the choice during onboarding so the user can correct it.
+
 ### Investment Accounts
 
 An investment account is a richer non-budget asset entity outside the budget boundary.
@@ -833,6 +839,8 @@ An investment account:
 * is not a budget account
 * does not make transfers count as income or economic spending
 * contributes to net worth from its current value, valuation, or activity according to the richer investment model
+
+Investment account value is derived from versioned holdings plus versioned cash. A holding records a ticker, quantity, and average basis. Prices are recorded separately from holdings so brokerage statement prices and future market-data prices can coexist without rewriting position history. Brokerage statement prices are authoritative for reconciliation-date values; market-data prices may be used for current estimate views when they do not override statement evidence.
 
 Moving cash from checking to brokerage is net-worth neutral. It is not income and it is not economic spending. It does affect budget planning because money has left the set of budget accounts available for spending.
 
@@ -958,6 +966,8 @@ A loan:
 * may have a default payment category
 * does not replace the related budget category
 
+A loan stores loan details such as original loan amount, origination date, and rate when known. Its current principal balance comes from reconciled or manually entered principal-balance snapshots. The related budget category plans the cash obligation; it does not by itself determine loan principal movement.
+
 A user may have both a `Mortgage` budget category and a `Mortgage` tracking account or richer loan entity.
 
 The category answers: “How much cash do we need to budget for this obligation?”
@@ -1005,6 +1015,8 @@ Interest / fees / escrow: $2,750 non-principal cost
 ```
 
 The exact internal representation may evolve, but the product semantics must remain stable.
+
+Until a dedicated loan-payment flow exists, dojo may let the user attribute an existing budget transaction to one loan. That attribution is editable domain data, not a reconciliation record. A single transaction is attributed to at most one loan. Principal versus non-principal cost is derived from attributed transaction totals and principal-balance snapshots. For example, if attributed mortgage transactions total $5,000 for a period and the principal balance decreases by $2,000, dojo can report $3,000 as non-principal cost for that period. dojo does not persist a finer interest, fee, or escrow split in the first model.
 
 ### Tangible Assets
 
@@ -1068,11 +1080,13 @@ Aspire migration behavior:
 5. Analyze Aspire net-worth snapshot categories.
 6. For each Aspire net-worth category, resolve one treatment: Duplicate of budget account, Import as tracking account, or Do not import.
 7. Budget-account duplicates do not create active tracking accounts and do not contribute snapshot values to active net worth.
-8. Non-budget net-worth categories become tracking accounts with imported snapshot history.
-9. The importer must not backfill linked investment contribution behavior, loan principal/interest splits, or rich account behavior from ordinary historical category transactions.
+8. Non-budget net-worth categories become tracking accounts with imported snapshot history and explicit asset/liability polarity.
+9. The importer must not infer investment accounts, loans, tangible assets, linked investment contribution behavior, loan principal/non-principal splits, or other rich account behavior from Aspire net-worth categories or ordinary historical category transactions.
 10. The importer must preserve historical Aspire behavior rather than rewriting it.
 
 Historical category activity like `Stonks` or `Mortgage` must not be automatically reclassified into linked investment behavior or rich loan behavior during migration.
+
+Users can later create richer investment, loan, or tangible-asset entities and cut over from legacy tracking accounts. That cutover is a representation change, not a ledger transfer.
 
 ## Assets & Liabilities
 
@@ -1236,6 +1250,8 @@ Each account or entity has:
 * a proposed reconciled state
 
 The working set depends on the account or entity type. Budget accounts use ledger records. Tracking accounts use snapshot values. Investment accounts use account-transfer rows plus value and activity records. Loans use obligation balances, payment records, and split state. Tangible assets use valuation records.
+
+Reconciliation commits are lightweight evidence that relevant records for one entity were verified as of a date. They record the entity, effective date, verification time, source summary, and references to relevant logical records and SCD2 version timestamps. They do not copy full domain records; the SCD2 tables remain the historical source of truth.
 
 The user reviews the difference between:
 
