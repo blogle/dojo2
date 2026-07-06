@@ -10,6 +10,7 @@ from dojo.sql import load_sql
 def apply_migrations(connection: duckdb.DuckDBPyConnection) -> None:
     connection.execute(load_sql("schema/current"))
     _migrate_legacy_transaction_constraint(connection)
+    _migrate_transaction_entry_order(connection)
 
 
 def provision_database(path: str) -> None:
@@ -42,6 +43,19 @@ def _migrate_legacy_transaction_constraint(connection: duckdb.DuckDBPyConnection
     )
     if has_legacy_constraint:
         connection.execute(load_sql("schema/migrations/legacy_transactions_constraint"))
+
+
+def _migrate_transaction_entry_order(connection: duckdb.DuckDBPyConnection) -> None:
+    transaction_table = connection.execute(
+        load_sql("queries/duckdb_table_sql_by_name"),
+        ("transactions",),
+    ).fetchone()
+    if transaction_table is None:
+        return
+    sql = str(transaction_table[0] or "")
+    normalized_sql = " ".join(sql.split()).casefold()
+    if "entry_order" not in normalized_sql:
+        connection.execute(load_sql("schema/migrations/add_transaction_entry_order"))
 
 
 def main() -> int:

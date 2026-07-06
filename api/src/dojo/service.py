@@ -482,6 +482,7 @@ class DojoService:
                         "system_category": transaction.system_category,
                         "status": transaction.status,
                         "memo": transaction.memo,
+                        "entry_order": transaction.source_row_offset,
                         "valid_from": imported_at,
                         "valid_to": MAX_TS,
                         "created_at": imported_at,
@@ -750,16 +751,17 @@ class DojoService:
         limit: int,
         offset: int = 0,
         show_hidden: bool,
-        sort_by: str = "date",
-        sort_dir: str = "desc",
+        sort_by: str = "entry_order",
+        sort_dir: str = "asc",
     ) -> dict[str, Any]:
         sort_expressions = {
             "date": {"asc": "date ASC", "desc": "date DESC"},
             "amount_minor": {"asc": "amount_minor ASC", "desc": "amount_minor DESC"},
             "status": {"asc": "status ASC", "desc": "status DESC"},
             "created_at": {"asc": "created_at ASC", "desc": "created_at DESC"},
+            "entry_order": {"asc": "entry_order ASC", "desc": "entry_order DESC"},
         }
-        sort_expression = sort_expressions.get(sort_by, sort_expressions["date"])[
+        sort_expression = sort_expressions.get(sort_by, sort_expressions["entry_order"])[
             "desc" if sort_dir == "desc" else "asc"
         ]
 
@@ -1190,7 +1192,24 @@ class DojoService:
         now = self.clock.now()
         transaction_id = str(uuid4())
         self._validate_transaction_payload(payload)
+        insert_after_id = payload.get("insert_after_transaction_id")
         with self.db.transaction() as connection:
+            if insert_after_id is not None:
+                anchor_row = connection.execute(
+                    load_sql("queries/current_transaction_entry_order_by_id"),
+                    (insert_after_id,),
+                ).fetchone()
+                if anchor_row is None:
+                    raise ValueError("insert_after_transaction_id not found")
+                anchor_order = int(anchor_row[0])
+                connection.execute(
+                    load_sql("queries/shift_transactions_entry_order_from"),
+                    (anchor_order + 1, MAX_TS),
+                )
+                entry_order = anchor_order + 1
+            else:
+                max_row = connection.execute(load_sql("queries/max_entry_order")).fetchone()
+                entry_order = int(max_row[0]) + 1 if max_row else 1
             insert_version(
                 connection,
                 "transactions",
@@ -1203,6 +1222,7 @@ class DojoService:
                     "system_category": payload.get("system_category"),
                     "status": payload["status"],
                     "memo": payload.get("memo", ""),
+                    "entry_order": entry_order,
                     "valid_from": now,
                     "valid_to": MAX_TS,
                     "created_at": now,
@@ -1236,6 +1256,7 @@ class DojoService:
                     "system_category": payload.get("system_category"),
                     "status": payload["status"],
                     "memo": payload.get("memo", ""),
+                    "entry_order": current["entry_order"],
                     "created_at": current["created_at"],
                     "created_by_user_id": None,
                 },
@@ -1280,7 +1301,6 @@ class DojoService:
                 raise ValueError("Transaction not found or not deleted")
 
             latest_closed = rows[0]
-            # Insert new current version with same payload
             insert_version(
                 connection,
                 "transactions",
@@ -1293,6 +1313,7 @@ class DojoService:
                     "system_category": latest_closed["system_category"],
                     "status": latest_closed["status"],
                     "memo": latest_closed["memo"],
+                    "entry_order": latest_closed["entry_order"],
                     "valid_from": now,
                     "valid_to": MAX_TS,
                     "created_at": latest_closed["created_at"],
@@ -1317,6 +1338,8 @@ class DojoService:
         source_transaction_id = str(uuid4())
         destination_transaction_id = str(uuid4())
         with self.db.transaction() as connection:
+            max_row = connection.execute(load_sql("queries/max_entry_order")).fetchone()
+            next_order = int(max_row[0]) + 1 if max_row else 1
             for transaction_id, account_id, signed_amount in (
                 (source_transaction_id, from_account_id, -amount_minor),
                 (destination_transaction_id, to_account_id, amount_minor),
@@ -1333,12 +1356,14 @@ class DojoService:
                         "system_category": SYSTEM_CATEGORY_TRANSFER,
                         "status": status,
                         "memo": memo,
+                        "entry_order": next_order,
                         "valid_from": now,
                         "valid_to": MAX_TS,
                         "created_at": now,
                         "created_by_user_id": None,
                     },
                 )
+                next_order += 1
         return {
             "source_transaction_id": source_transaction_id,
             "destination_transaction_id": destination_transaction_id,

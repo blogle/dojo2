@@ -215,8 +215,10 @@ def transactions(
     limit: int = Query(default=500, ge=1, le=10_000),
     offset: int = Query(default=0, ge=0),
     show_hidden: bool = False,
-    sort_by: str = Query(default="date", pattern=r"^(date|amount_minor|status|created_at)$"),
-    sort_dir: str = Query(default="desc", pattern=r"^(asc|desc)$"),
+    sort_by: str = Query(
+        default="entry_order", pattern=r"^(date|amount_minor|status|created_at|entry_order)$"
+    ),
+    sort_dir: str = Query(default="asc", pattern=r"^(asc|desc)$"),
 ) -> dict[str, Any]:
     return get_service(request).list_transactions(
         limit=limit, offset=offset, show_hidden=show_hidden, sort_by=sort_by, sort_dir=sort_dir

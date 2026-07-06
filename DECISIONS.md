@@ -499,3 +499,21 @@ This creates an intentional gap in SCD history during which the transaction was 
 - Property-based testing with Hypothesis validates SCD invariants (no overlapping intervals, single current version, as-of stability) before shipping.
 - Frontend undo stack calls `restoreTransaction` instead of `createMutation` for delete undo.
 - Vacuum/compaction is a separate future operation, not part of normal undo semantics.
+
+## 2026-07-04 — Add immutable logical entry position for transaction ordering
+
+### Context
+
+Transactions are currently inserted with random UUID `row_id`, stable-but-non-ordered `transaction_id`, and identical `created_at`. The list query falls back to `created_at DESC, transaction_id DESC`, which randomizes imported records when timestamps match. The spec requires immutable logical entry position.
+
+### Decision
+
+Add `entry_order INTEGER NOT NULL` column to `transactions`. For Aspire imports, store the source row offset (the 1-based index from the parsed transaction vectors). For manually created transactions, assign `max(entry_order) + 1`. On edit, preserve entry_order. On insert between existing records, shift following records by +1. Do not add SCD2 semantics for the index field — order shifts are mechanical, not meaningful transaction edits.
+
+### Consequence
+
+- Imported transactions maintain source-sheet order after import.
+- Between-row inserts are supported via `insert_after_transaction_id` parameter.
+- Edit preserves entry order without requiring user attention.
+- Default sort becomes `entry_order ASC` instead of `created_at DESC, transaction_id DESC`.
+- Entry order is a durable ordering field, not subject to SCD2 versioning.

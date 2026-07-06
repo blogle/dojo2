@@ -346,3 +346,65 @@ def test_restore_already_active_transaction_returns_400(monkeypatch, tmp_path) -
         restore_resp = client.post(f"/api/transactions/{tx_id}/restore")
         assert restore_resp.status_code == 400
         assert "already active" in restore_resp.json()["detail"]
+
+
+def test_import_results_in_entry_order_values_matching_source_order(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("SESSION_SECRET", "test-secret")
+    monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
+    monkeypatch.setenv(
+        "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
+    )
+    provisioned_main_module(monkeypatch, tmp_path, "api-test.duckdb")
+
+    with TestClient(main_module.app) as client:
+        imported = client.post(
+            "/api/import/google-sheet", json={"sheet_url_or_id": "fixture://default"}
+        )
+        assert imported.status_code == 200
+
+        page = client.get(
+            "/api/transactions",
+            params={
+                "show_hidden": "true",
+                "limit": 100,
+                "sort_by": "entry_order",
+                "sort_dir": "asc",
+            },
+        )
+        assert page.status_code == 200
+        items = page.json()["items"]
+        assert len(items) == 12
+        entry_orders = [item["entry_order"] for item in items]
+        assert entry_orders == sorted(entry_orders)
+        assert len(entry_orders) == len(set(entry_orders))
+
+
+def test_same_date_transactions_maintain_entry_order(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("SESSION_SECRET", "test-secret")
+    monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
+    monkeypatch.setenv(
+        "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
+    )
+    provisioned_main_module(monkeypatch, tmp_path, "api-test.duckdb")
+
+    with TestClient(main_module.app) as client:
+        imported = client.post(
+            "/api/import/google-sheet", json={"sheet_url_or_id": "fixture://default"}
+        )
+        assert imported.status_code == 200
+
+        page = client.get(
+            "/api/transactions",
+            params={
+                "show_hidden": "true",
+                "limit": 100,
+                "sort_by": "entry_order",
+                "sort_dir": "asc",
+            },
+        )
+        items = page.json()["items"]
+        dates = [item["date"] for item in items]
+        same_date_txs = [item for item in items if item["date"] == dates[0]]
+        if len(same_date_txs) > 1:
+            orders = [t["entry_order"] for t in same_date_txs]
+            assert orders == sorted(orders)

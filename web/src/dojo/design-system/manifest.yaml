@@ -116,6 +116,8 @@ sections:
         fixture: feedback/PreviewBox.fixtures.ts
       - component: ReorderModeBanner
         fixture: feedback/ReorderModeBanner.fixtures.ts
+      - component: StatusStepList
+        fixture: feedback/StatusStepList.fixtures.ts
 
   - id: overlays
     title: Overlays

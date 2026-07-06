@@ -37,6 +37,7 @@ class TransactionPayload(BaseModel):
     system_category: SystemCategory | None = None
     status: TransactionStatus
     memo: str = ""
+    insert_after_transaction_id: str | None = None
 
     @model_validator(mode="after")
     def validate_category_choice(self) -> "TransactionPayload":

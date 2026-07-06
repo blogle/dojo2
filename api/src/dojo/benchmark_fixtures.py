@@ -213,6 +213,7 @@ def build_synthetic_dataset(config: SyntheticDatasetConfig) -> ParsedImportBundl
                 system_category=SYSTEM_CATEGORY_STARTING_BALANCE,
                 status=STATUS_CLEARED,
                 memo="Starting balance",
+                source_row_offset=len(transactions) + 1,
             )
         )
 
@@ -260,6 +261,7 @@ def build_synthetic_dataset(config: SyntheticDatasetConfig) -> ParsedImportBundl
                     system_category=system_cat,
                     status=rng.choice([STATUS_CLEARED, STATUS_PENDING]),
                     memo="Benchmark tx",
+                    source_row_offset=len(transactions) + 1,
                 )
             )
 

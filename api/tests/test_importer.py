@@ -161,6 +161,15 @@ def test_transaction_row_zipping_and_break_row_skipping() -> None:
     )
 
 
+def test_parsed_transactions_carry_source_row_offset() -> None:
+    access = build_named_range_access(DEFAULT_FIXTURE["named_ranges"])
+    transactions = parse_transactions_named_ranges(access)
+    offsets = [t.source_row_offset for t in transactions]
+    assert offsets == sorted(offsets)
+    assert all(offset >= 1 for offset in offsets)
+    assert len(offsets) == len(set(offsets))
+
+
 def test_transaction_row_classification_distinguishes_real_blank_break_and_helper_rows() -> None:
     access = build_named_range_access(DEFAULT_FIXTURE["named_ranges"])
     labels = access.scalar_labels()

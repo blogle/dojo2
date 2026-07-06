@@ -7,6 +7,9 @@ settings:
 importers:
   .:
     dependencies:
+      "@phosphor-icons/vue":
+        specifier: ^2.2.1
+        version: 2.2.1(vue@3.5.35(typescript@5.9.3))
       "@tanstack/vue-query":
         specifier: ^5.101.2
         version: 5.101.2(vue@3.5.35(typescript@5.9.3))
@@ -587,6 +590,15 @@ packages:
       {
         integrity: sha512-XuySG1E38YScSJoMlqovLru4KTUNSjgVTIjyh7qMX6aNN5HY5Ct5LhRJdxO79JtTzKfzV/bnWpz+zquYrISsvw==,
       }
+
+  "@phosphor-icons/vue@2.2.1":
+    resolution:
+      {
+        integrity: sha512-3RNg1utc2Z5RwPKWFkW3eXI/0BfQAwXgtFxPUPeSzi55jGYUq16b+UqcgbKLazWFlwg5R92OCLKjDiJjeiJcnA==,
+      }
+    engines: { node: ">=14" }
+    peerDependencies:
+      vue: ">=3.2.39"
 
   "@pkgjs/parseargs@0.11.0":
     resolution:
@@ -4345,6 +4357,10 @@ snapshots:
       fastq: 1.20.1
 
   "@one-ini/wasm@0.1.1": {}
+
+  "@phosphor-icons/vue@2.2.1(vue@3.5.35(typescript@5.9.3))":
+    dependencies:
+      vue: 3.5.35(typescript@5.9.3)
 
   "@pkgjs/parseargs@0.11.0":
     optional: true

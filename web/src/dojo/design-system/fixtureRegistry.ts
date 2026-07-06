@@ -15,6 +15,7 @@ import historicalBanner from "@/dojo/components/feedback/HistoricalBanner.fixtur
 import persistentWarningBanner from "@/dojo/components/feedback/PersistentWarningBanner.fixtures";
 import previewBox from "@/dojo/components/feedback/PreviewBox.fixtures";
 import reorderModeBanner from "@/dojo/components/feedback/ReorderModeBanner.fixtures";
+import statusStepList from "@/dojo/components/feedback/StatusStepList.fixtures";
 import colorSwatchGrid from "@/dojo/components/foundations/ColorSwatchGrid.fixtures";
 import radiusScale from "@/dojo/components/foundations/RadiusScale.fixtures";
 import spacingScale from "@/dojo/components/foundations/SpacingScale.fixtures";
@@ -54,6 +55,7 @@ export const fixtureRegistry: Record<string, ComponentFixtureSet> = {
   "feedback/PersistentWarningBanner.fixtures.ts": persistentWarningBanner,
   "feedback/PreviewBox.fixtures.ts": previewBox,
   "feedback/ReorderModeBanner.fixtures.ts": reorderModeBanner,
+  "feedback/StatusStepList.fixtures.ts": statusStepList,
   "foundations/ColorSwatchGrid.fixtures.ts": colorSwatchGrid,
   "foundations/RadiusScale.fixtures.ts": radiusScale,
   "foundations/SpacingScale.fixtures.ts": spacingScale,

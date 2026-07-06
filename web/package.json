@@ -16,6 +16,7 @@
     "typecheck": "vue-tsc --noEmit"
   },
   "dependencies": {
+    "@phosphor-icons/vue": "^2.2.1",
     "@tanstack/vue-query": "^5.101.2",
     "@tanstack/vue-virtual": "^3.13.31",
     "reka-ui": "^2.10.1",

@@ -442,6 +442,7 @@ class ParsedTransaction:
     system_category: str | None
     status: str
     memo: str
+    source_row_offset: int
 
 
 @dataclass(slots=True)
@@ -1072,6 +1073,7 @@ def parse_transactions_named_ranges(access: NamedRangeAccess) -> list[ParsedTran
                     break_symbol=labels.break_symbol,
                 ),
                 memo=row["memo"].strip(),
+                source_row_offset=offset,
             )
         )
     return records
