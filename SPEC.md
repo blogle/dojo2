@@ -162,7 +162,7 @@ If the user denies permission or the flow fails, the user returns to the migrati
 
 ### Migration Progress Screen
 
-Once permission is granted, dojo displays a dedicated progress screen while migration runs.
+Once permission is granted, dojo displays a dedicated progress screen while it reads, analyzes, prepares, commits, or validates Aspire data.
 
 This screen contains:
 
@@ -170,7 +170,44 @@ This screen contains:
 * high-level progress messaging
 * a statement that the application is importing and validating records
 
-This is a blocking state. The user is not taken into the application until migration either succeeds or fails.
+This is a blocking state. The user is not taken into the application until required review steps are complete and migration either succeeds or fails.
+
+### Net-Worth Duplicate Review
+
+Aspire migration includes a required review step after dojo reads and analyzes the Aspire sheet and before migration is committed.
+
+Purpose:
+
+```text
+Confirm which Aspire net-worth snapshot categories duplicate budget accounts so dojo does not double count them in the first net-worth total.
+```
+
+The review screen shows:
+
+* budget accounts found
+* net-worth categories found
+* suggested duplicates
+* items needing review
+* items that will import as tracking accounts
+* each net-worth category’s latest snapshot value
+* suggested treatment
+* matched budget account when applicable
+* confidence level
+* action to change the treatment
+
+Each net-worth category must resolve to one treatment:
+
+* Duplicate of budget account
+* Import as tracking account
+* Do not import
+
+dojo suggests matches using best-effort heuristics such as normalized names, account metadata when available, latest snapshot value, ledger-derived budget-account balance, polarity, and account type.
+
+High-confidence duplicate matches may be preselected. Low-confidence likely duplicates are marked **Needs review** and require explicit user confirmation before migration can continue.
+
+This review is not a general migration editor. The user must not be asked to edit imported transactions, categories, historical values, or allocations during onboarding.
+
+Aspire net-worth snapshot categories that duplicate budget accounts are excluded from active net worth so dojo does not double count ledger-derived budget-account balances.
 
 ### Migration Completion Screen
 
@@ -191,6 +228,11 @@ Selecting **Details** opens a modal showing:
 * imported record counts
 * validation-check summary
 * non-blocking warnings
+* validation warnings
+* duplicate snapshot categories excluded from active net worth
+* tracking accounts created
+* net-worth categories not imported
+* enough detail for auditability
 
 The modal is informational and dismissible. Closing it returns the user to the migration completion screen, where they can continue to the application.
 
@@ -233,7 +275,7 @@ The following are explicitly not part of the current onboarding flow:
 * manual configuration walkthroughs
 * importing from sources other than Aspire
 * editing imported data during onboarding
-* advanced migration conflict resolution during onboarding
+* advanced migration conflict resolution beyond the required net-worth duplicate review
 * accepting anything other than the Google Sheet ID as migration input
 
 ## Core Screens
@@ -403,6 +445,16 @@ Once reconciliation is implemented, the Dashboard flags:
 * conflicting records that require resolution
 
 Selecting the warning navigates to the relevant account or entity detail page. Reconciliation is not performed directly on the Dashboard.
+
+### Income, Spending, and Budget Activity
+
+The Dashboard should distinguish income, economic spending, budget activity, and net-worth movement.
+
+Budget activity is how budgeted cash is assigned, consumed, released, or moved through categories. Economic spending is actual consumption or cost that reduces net worth, such as purchases, interest, fees, and losses.
+
+Investment contributions are budget activity, but they are not economic spending. Investment withdrawals are not income. Loan principal payments are budget activity and cash-flow obligations, but the principal portion is net-worth neutral. Loan interest and fees are economic spending.
+
+The Dashboard should avoid treating investment contributions or investment withdrawals as income or spending, while the Budget page should still show category activity for contribution planning.
 
 ### Dashboard Configuration
 
@@ -589,6 +641,14 @@ Use the terms:
 
 A secondary Budget-page action opens a large retired-items modal.
 
+### Budget Activity vs Economic Spending
+
+Budget activity and economic spending are different concepts.
+
+Budget activity records how money inside the budget is planned, assigned, consumed, released, or moved through categories. Economic spending records actual consumption or cost that reduces net worth.
+
+Investment contributions consume linked contribution-category funds for budget planning, but they are not economic spending. Loan payments record the full cash obligation against the payment category, but only interest, fees, losses, and other non-principal costs are economic spending.
+
 ## Transactions
 
 ### Page Summary
@@ -684,6 +744,336 @@ This includes:
 
 The Transactions page exposes a filter or indicator for **Changes since last reconciliation**.
 
+### Account Scope
+
+The Transactions page shows transaction-ledger activity for budget accounts and account transfers. Tracking accounts and tangible assets are outside the normal Transactions page unless a future feature explicitly adds a specialized flow for them.
+
+Investment account transfers remain two-leg account transfers on the transaction ledger. Tracking-account cutovers are not ledger transfers.
+
+## Account and Entity Semantics
+
+### Purpose
+
+dojo distinguishes budget accounts from other assets and liabilities so the application can preserve Aspire history, avoid double counting net worth, and support richer account types over time.
+
+Budget accounts are inside the budget boundary. Tracking accounts, investment accounts, loans, and tangible assets are outside the budget boundary unless a future feature explicitly states otherwise.
+
+Net-worth neutral does not always mean budget neutral.
+
+### Budget Accounts
+
+A budget account is an account inside the budget boundary.
+
+A budget account:
+
+* participates in the Transactions page
+* participates in budget category activity
+* contributes to Available to budget through existing budget mechanics
+* has a balance derived from transaction ledger entries
+* contributes to net worth from its ledger-derived actual balance
+* must not also contribute imported net-worth snapshot values
+* may be a deposit account or credit-card-style budget account
+
+Imported Aspire net-worth snapshots matching a budget account are not active net-worth entities. They may be retained as migration evidence, but they do not contribute to active net worth.
+
+Credit card budget accounts remain a special budget-account case with linked payment categories. This is an account-category linkage used for budget behavior and does not change the existing credit-card conceptual model.
+
+### Account-Linked Budget Behavior
+
+Some accounts define a linked budget category and a link behavior. This allows the budget engine to interpret ordinary ledger activity without changing the transaction row shape.
+
+The transaction ledger remains account-centric. A transfer is still represented as two transaction rows with `system_category = TX_ACCOUNT_TRANSFER`. The transaction rows are not assigned a budget category.
+
+The linked behavior determines whether those transfer rows create derived budget effects.
+
+Credit-card payment categories, investment contribution categories, and loan payment categories are all examples of account-linked budget behavior.
+
+Examples:
+
+```text
+Visa credit card
+  linked category: Visa Payment
+  behavior: CREDIT_CARD_PAYMENT
+
+Brokerage investment account
+  linked category: Investment Contributions
+  behavior: INVESTMENT_CONTRIBUTION
+
+Mortgage loan
+  linked category: Mortgage
+  behavior: LOAN_PAYMENT
+```
+
+Transfers remain the source of account-balance truth. Linked account-category behavior determines how certain transfers affect budget categories.
+
+### Tracking Accounts
+
+A tracking account is a legacy or manual snapshot-authoritative entity outside the budget boundary.
+
+A tracking account:
+
+* does not participate in the Transactions page
+* does not participate in budget categories
+* does not use ledger transactions as its source of truth
+* contributes to net worth from the latest snapshot at or before the selected as-of date
+* is the direct migration target for non-budget Aspire net-worth categories
+* exists primarily for Aspire compatibility and manually updated assets or liabilities
+
+Tracking accounts should remain simple. They should not be treated as transfer endpoints in normal budgeting workflows.
+
+### Investment Accounts
+
+An investment account is a richer non-budget asset entity outside the budget boundary.
+
+An investment account:
+
+* can receive investment contribution transfers
+* can send investment withdrawal or capital-return transfers
+* may have valuations, performance changes, holdings, or richer investment detail in the future
+* is not a budget account
+* does not make transfers count as income or economic spending
+* contributes to net worth from its current value, valuation, or activity according to the richer investment model
+
+Moving cash from checking to brokerage is net-worth neutral. It is not income and it is not economic spending. It does affect budget planning because money has left the set of budget accounts available for spending.
+
+dojo handles this through ordinary account-transfer rows plus linked account-category behavior. The transaction ledger remains account-centric, and the budget engine derives category effects from account configuration and transfer direction.
+
+#### Linked Investment Contribution Category
+
+An investment account may have a linked contribution category. This category is used to plan and reserve budget funds before investment contributions are made.
+
+The link is prospective:
+
+* Linking an existing category must never reinterpret historical category activity.
+* Linking an existing category must never create, mutate, or backfill ledger rows.
+* Linking an existing category must never initialize or change the investment account from prior category transactions.
+* Future transfer rows touching the linked investment account use the linked behavior for derived budget reporting.
+* Historical Aspire or pre-link transactions in a category such as `Stonks` remain unchanged.
+
+Linking a category to an investment account never causes historical category activity to create investment account activity.
+
+Linked investment categories do not create, mutate, or backfill ledger rows.
+
+The linked category affects budget reporting prospectively through derived budget behavior on future transfer rows.
+
+When creating or configuring an investment account, the UX should offer:
+
+* Create a new contribution category, such as `Investment Contributions`
+* Link an existing category from today or a chosen effective date forward
+* Do not link a category yet
+
+The UI must clearly state that past activity in a linked existing category remains unchanged.
+
+#### Investment Contribution Transfers
+
+A transfer from a budget account to an investment account remains a two-leg account transfer on the transaction ledger.
+
+The canonical ledger representation is:
+
+```text
+Checking account   -$1,000   TX_ACCOUNT_TRANSFER
+Brokerage account  +$1,000   TX_ACCOUNT_TRANSFER
+```
+
+If the destination investment account has linked behavior `INVESTMENT_CONTRIBUTION`, dojo derives budget activity for the linked category from the transfer amount. This reduces the linked category’s available amount, just as spending from a category would, but it does not count as economic spending or reportable income.
+
+The derived behavior represents:
+
+* budget-account cash outflow
+* investment-account value or cash increase
+* derived budget activity against the linked contribution category
+* net-worth-neutral balance-sheet movement
+* no reportable income
+* no economic spending
+
+Example:
+
+```text
+Checking account:                 -$1,000, TX_ACCOUNT_TRANSFER
+Brokerage account:                +$1,000, TX_ACCOUNT_TRANSFER
+Investment Contributions activity: -$1,000
+Net worth change:                  $0
+Reportable income:                 $0
+Economic spending:                 $0
+```
+
+The user mental model is:
+
+```text
+I budgeted $1,000 for investing.
+I transferred $600 to brokerage.
+I have $400 left available in Investment Contributions.
+```
+
+The linked contribution category should feel like a normal budget category from the user perspective, but the activity is derived from transfer rows touching the linked investment account rather than from `category_id` on the transfer transaction.
+
+The contribution category can be funded in advance through normal allocation from Available to budget. If the category is not sufficiently funded, the transfer flow should require the user to choose how to handle the shortfall. The default is to fund the linked contribution category from Available to budget, then perform the contribution. If that makes Available to budget negative, dojo uses the existing negative-ATB warning behavior.
+
+The transaction row is not augmented to carry both `category_id` and `system_category`.
+
+#### Investment Withdrawals
+
+A transfer from an investment account to a budget account remains a two-leg account transfer on the transaction ledger.
+
+Canonical ledger representation:
+
+```text
+Brokerage account  -$1,000   TX_ACCOUNT_TRANSFER
+Checking account   +$1,000   TX_ACCOUNT_TRANSFER
+```
+
+Default semantics:
+
+* investment account decreases
+* budget account increases
+* net worth is unchanged
+* not reportable income
+* not economic spending
+* returned cash increases Available to budget by default
+* a future UX may optionally route returned cash directly to a category
+
+Example:
+
+```text
+Brokerage account:  -$1,000, TX_ACCOUNT_TRANSFER
+Checking account:   +$1,000, TX_ACCOUNT_TRANSFER
+Available to budget +$1,000
+Net worth change:   $0
+Reportable income:  $0
+Economic spending:  $0
+```
+
+By default, the returned cash increases Available to budget. It is not income and does not represent investment performance. Future UX may allow routing returned cash directly to a category. Investment gains and losses are represented separately through valuation or performance records, not as income caused by withdrawals.
+
+### Loans
+
+A loan is a richer liability entity outside the budget boundary.
+
+A loan:
+
+* tracks an outstanding obligation
+* may have an opening balance
+* may have principal, interest, fees, escrow, manual adjustments, and reconciliation history
+* contributes to net worth as a liability
+* may have a default payment category
+* does not replace the related budget category
+
+A user may have both a `Mortgage` budget category and a `Mortgage` tracking account or richer loan entity.
+
+The category answers: “How much cash do we need to budget for this obligation?”
+
+The loan answers: “What is the outstanding balance-sheet liability?”
+
+Creating a richer loan entity does not require retiring the related budget category.
+
+#### Loan Payment Operations
+
+Future loan payments should be modeled as loan payment operations, not as simple account transfers.
+
+A loan payment operation links:
+
+* a budget-account cash outflow
+* a budget category, usually the loan’s default payment category
+* optional loan balance effects
+
+A loan payment may contain:
+
+* principal amount
+* interest amount
+* fee amount
+* escrow amount
+* split state: `unknown`, `estimated`, or `reconciled`
+
+Required semantics:
+
+* The budget category records the full cash obligation.
+* Principal reduction is net-worth neutral because cash decreases and liability decreases.
+* Interest and fees reduce net worth.
+* If the split is unknown when the payment is entered, dojo records the budget transaction and category activity first and marks the loan payment split as unknown.
+* The split may be completed later through edit or reconciliation.
+* Historical Aspire mortgage payments must not be backfilled into principal and interest components.
+
+Historical Aspire transactions are not backfilled into principal and interest components.
+
+Example:
+
+```text
+Checking account:        -$4,000
+Mortgage category:       $4,000 activity
+Mortgage loan principal: -$1,250 liability reduction
+Interest / fees / escrow: $2,750 non-principal cost
+```
+
+The exact internal representation may evolve, but the product semantics must remain stable.
+
+### Tangible Assets
+
+A tangible asset is a non-budget asset entity outside the budget boundary.
+
+A tangible asset:
+
+* normally uses valuation snapshots or manual valuations
+* contributes to net worth from its current valuation
+* does not participate in the Transactions page by default
+* does not create budget activity merely because its valuation changes
+* may later support purchase or sale flows, but valuation changes are not income, spending, or budget activity
+
+Examples include a home, vehicle, jewelry, or collectibles.
+
+### Budget Boundary
+
+Budget accounts are inside the budget boundary. Tracking accounts, investment accounts, loans, and tangible assets are outside the budget boundary unless a future feature explicitly states otherwise.
+
+Transfers and operations behave differently depending on whether they stay within or cross this boundary:
+
+| Movement                                 | Net worth         | Income/spending    | Budget effect                                          |
+| ---------------------------------------- | ----------------- | ------------------ | ------------------------------------------------------ |
+| Budget account → budget account          | neutral           | no                 | budget-neutral account transfer                        |
+| Budget account → investment account      | neutral           | no                 | investment contribution consumes linked category funds |
+| Investment account → budget account      | neutral           | no                 | returns cash to Available to budget by default         |
+| Budget account → loan                    | partially neutral | interest/fees cost | loan payment category records full cash obligation     |
+| Tracking account → richer entity cutover | neutral           | no                 | no budget effect; representation change                |
+| Tangible asset valuation change          | changes net worth | no                 | no budget effect                                       |
+
+### Tracking Account Upgrade and Cutover
+
+Users can progressively upgrade legacy tracking accounts to richer account types without rewriting history.
+
+A tracking account is not converted in place into a richer account type.
+
+The upgrade flow is:
+
+1. User creates a new richer entity, such as an investment account, loan, or tangible asset.
+2. dojo proposes an opening value or opening balance from the latest tracking-account snapshot at or before the cutover date.
+3. User confirms the cutover date and opening value or balance.
+4. dojo retires the old tracking account effective the same cutover date.
+5. dojo links the new entity to the retired tracking account as its replacement.
+6. Historical as-of views before the cutover use the tracking account.
+7. Current and future views after the cutover use the richer entity.
+
+The cutover opening value is not a transfer, income, spending, or budget activity. It is a representation change.
+
+The cutover must not be described as moving the balance through the ledger. For non-budget tracking-to-rich-entity upgrades, use **opening balance** or **opening value**, not **account transfer**.
+
+### Aspire Migration Rules
+
+Aspire data has both budget-ledger records and separate net-worth snapshot categories. dojo imports both concepts while avoiding double counting and without rewriting Aspire history.
+
+Aspire migration behavior:
+
+1. Import Aspire budget accounts as dojo budget accounts.
+2. Import Aspire transaction history into the ledger.
+3. Preserve existing Aspire account-transfer rows between budget accounts as budget-neutral account transfers.
+4. Import Aspire category allocations as dojo allocations.
+5. Analyze Aspire net-worth snapshot categories.
+6. For each Aspire net-worth category, resolve one treatment: Duplicate of budget account, Import as tracking account, or Do not import.
+7. Budget-account duplicates do not create active tracking accounts and do not contribute snapshot values to active net worth.
+8. Non-budget net-worth categories become tracking accounts with imported snapshot history.
+9. The importer must not backfill linked investment contribution behavior, loan principal/interest splits, or rich account behavior from ordinary historical category transactions.
+10. The importer must preserve historical Aspire behavior rather than rewriting it.
+
+Historical category activity like `Stonks` or `Mortgage` must not be automatically reclassified into linked investment behavior or rich loan behavior during migration.
+
 ## Assets & Liabilities
 
 ### Page Purpose
@@ -692,20 +1082,17 @@ The page remains named **Assets & Liabilities**.
 
 ### Structure
 
-Assets may be grouped into:
+The overview page groups entities into:
 
 * cash and equivalents
 * investments
 * tangible assets
-
-Liabilities may be grouped into:
-
 * credit
 * loans
 
-### Stacked Entity Cards
-
 Entities are displayed as stacked, full-width row cards rather than a tile grid.
+
+### Stacked Entity Cards
 
 A card may show:
 
@@ -717,8 +1104,11 @@ A card may show:
 * current balance or valuation
 * pending amount
 * period change
+* source of truth
 * reconciliation freshness
 * attention state
+
+The source of truth describes how the current value is determined. Examples include ledger, snapshot, investment activity or valuation, loan balance, and manual valuation.
 
 ### Add Entity
 
@@ -745,15 +1135,63 @@ All detail pages display:
 * name
 * type
 * metadata
-* current balance or valuation
 * reconciliation state and freshness
-* historical values
 * record history
 * edit configuration
 
-Budget account details include a filtered transaction ledger.
+#### Budget Account Detail
 
-Tracking account details include snapshot history.
+Budget account details include:
+
+* ledger-derived balance
+* transaction ledger filtered to that account
+* reconciliation status
+* account metadata
+* record history
+* edit configuration
+
+#### Tracking Account Detail
+
+Tracking account details include:
+
+* latest snapshot value
+* snapshot history
+* add or edit snapshot
+* replacement or cutover affordance
+* retired or replaced state when applicable
+
+#### Investment Account Detail
+
+Investment account details include:
+
+* current value
+* contribution category link
+* contribution and withdrawal activity
+* valuation or performance history
+* contribution flow
+* withdrawal flow
+* reconciliation status
+
+#### Loan Detail
+
+Loan details include:
+
+* current obligation
+* default payment category
+* payment activity
+* principal, interest, fees, and escrow split state
+* reconciliation status
+* payment flow
+* edit configuration
+
+#### Tangible Asset Detail
+
+Tangible asset details include:
+
+* current valuation
+* valuation history
+* metadata
+* reconciliation or manual update status
 
 ### Transaction Settlement and Balances
 
@@ -770,6 +1208,18 @@ Actual represents the current true balance or obligation presented at the accoun
 
 Reconciliation validates dojo’s current working records against an external source of truth.
 
+Reconciliation may validate:
+
+* budget-account ledger records against bank or source records
+* tracking-account snapshots against external statement values
+* investment-account value or activity against brokerage statements
+* loan balances and payment splits against lender statements
+* tangible-asset valuations against manual or external valuation sources
+
+For loan payments, reconciliation may complete or correct unknown principal, interest, fee, or escrow splits.
+
+For tracking-account upgrades, reconciliation must not backfill pre-cutover rich-account history.
+
 ### Entry Point
 
 Complex reconciliation begins from the relevant asset or liability detail page.
@@ -784,6 +1234,8 @@ Each account or entity has:
 * a current working set of changes made since that reconciliation
 * an external source value or record set
 * a proposed reconciled state
+
+The working set depends on the account or entity type. Budget accounts use ledger records. Tracking accounts use snapshot values. Investment accounts use account-transfer rows plus value and activity records. Loans use obligation balances, payment records, and split state. Tangible assets use valuation records.
 
 The user reviews the difference between:
 
@@ -932,4 +1384,3 @@ The following areas are intentionally directionally specified but not yet fully 
 * Monte Carlo, forecasting, and future dedicated net-worth planning screens
 * editing behavior, if any, while in future global historical mode
 * full browser e2e coverage and deterministic Cypress infrastructure
-
