@@ -185,6 +185,9 @@ export type AssetsLiabilitiesItem = Account & {
   value_minor: number;
   source_of_truth: string;
   metadata?: string;
+  institution?: string | null;
+  account_number_last4?: string | null;
+  latest_valuation_date?: string | null;
 };
 
 export type AssetsLiabilitiesGroup = {
