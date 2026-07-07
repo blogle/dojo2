@@ -12,13 +12,18 @@ from dojo.aggregate_validation import build_validation_report
 from dojo.clock import Clock, SystemClock, budget_month
 from dojo.constants import (
     ACCOUNT_CLASS_BUDGET,
-    ACCOUNT_CLASS_TRACKING_BALANCE,
+    ACCOUNT_CLASS_INVESTMENT,
+    ACCOUNT_CLASS_LOAN,
+    ACCOUNT_CLASS_TANGIBLE_ASSET,
+    ACCOUNT_CLASS_TRACKING,
     BUCKET_TYPE_ATB,
     BUCKET_TYPE_CATEGORY,
     BUDGET_ACCOUNT_TYPE_CREDIT_CARD,
     BUDGET_ACCOUNT_TYPE_DEPOSIT,
     CATEGORY_KIND_CREDIT_CARD_PAYMENT,
     CATEGORY_KIND_STANDARD,
+    LINK_BEHAVIOR_INVESTMENT_CONTRIBUTION,
+    LINK_BEHAVIOR_LOAN_PAYMENT,
     MAX_TS,
     SYSTEM_ATB_BUCKET_ID,
     SYSTEM_CATEGORY_ATB,
@@ -532,6 +537,7 @@ class DojoService:
         )
 
         tracking_account_rows: list[dict[str, Any]] = []
+        tracking_detail_rows: list[dict[str, Any]] = []
         valuation_rows: list[dict[str, Any]] = []
 
         def prepare_valuations() -> None:
@@ -546,7 +552,7 @@ class DojoService:
                         {
                             "row_id": str(uuid4()),
                             "account_id": new_account_id,
-                            "account_class": ACCOUNT_CLASS_TRACKING_BALANCE,
+                            "account_class": ACCOUNT_CLASS_TRACKING,
                             "name": valuation.raw_name,
                             "is_hidden": False,
                             "is_active": True,
@@ -557,6 +563,19 @@ class DojoService:
                                     "net_worth_match_candidates": list(valuation.match_candidates),
                                 }
                             ),
+                            "valid_from": imported_at,
+                            "valid_to": MAX_TS,
+                            "created_at": imported_at,
+                            "created_by_user_id": None,
+                        }
+                    )
+                    tracking_detail_rows.append(
+                        {
+                            "row_id": str(uuid4()),
+                            "account_id": new_account_id,
+                            "polarity": "LIABILITY" if valuation.is_debt else "ASSET",
+                            "source": "import",
+                            "apy_minor": None,
                             "valid_from": imported_at,
                             "valid_to": MAX_TS,
                             "created_at": imported_at,
@@ -597,6 +616,14 @@ class DojoService:
                 connection,
                 "accounts",
                 tracking_account_rows,
+            ),
+        )
+        run_phase(
+            "write_tracking_account_details_ms",
+            lambda: batch_insert_versions(
+                connection,
+                "tracking_account_details",
+                tracking_detail_rows,
             ),
         )
         run_phase(
@@ -722,18 +749,19 @@ class DojoService:
     def list_accounts(self, *, show_hidden: bool) -> list[dict[str, Any]]:
         accounts = self.db.fetch_all(load_sql("queries/list_accounts"))
         balances = self._account_balances()
+        valuations = self._latest_valuations_by_account()
         results = []
         for account in accounts:
             if account["is_hidden"] and not show_hidden:
                 continue
-            account_balances = balances.get(
-                account["account_id"], {"actual": 0, "pending": 0, "cleared": 0}
-            )
+            account_id = account["account_id"]
+            account_balances = balances.get(account_id, {"actual": 0, "pending": 0, "cleared": 0})
             display_balance = account_balances["actual"]
             if account.get(
                 "budget_account_type"
             ) == BUDGET_ACCOUNT_TYPE_CREDIT_CARD and account.get("display_liability_positive"):
                 display_balance = -display_balance
+            latest_valuation = valuations.get(account_id)
             results.append(
                 account
                 | {
@@ -741,9 +769,72 @@ class DojoService:
                     "pending_balance_minor": account_balances["pending"],
                     "cleared_balance_minor": account_balances["cleared"],
                     "display_balance_minor": display_balance,
+                    "latest_valuation_minor": (
+                        latest_valuation["amount_minor"] if latest_valuation else None
+                    ),
+                    "latest_valuation_date": (
+                        str(latest_valuation["effective_date"]) if latest_valuation else None
+                    ),
                 }
             )
         return results
+
+    def get_assets_liabilities(self) -> dict[str, Any]:
+        accounts = self.list_accounts(show_hidden=False)
+        groups: dict[str, list[dict[str, Any]]] = {
+            "CASH": [],
+            "INVESTMENTS": [],
+            "TANGIBLE_ASSETS": [],
+            "CREDIT": [],
+            "LOANS": [],
+        }
+        asset_total = 0
+        liability_total = 0
+        needs_attention = 0
+
+        for account in accounts:
+            account_class = account["account_class"]
+            budget_type = account.get("budget_account_type")
+            display_balance = account["display_balance_minor"]
+
+            if account_class == ACCOUNT_CLASS_BUDGET:
+                if budget_type == BUDGET_ACCOUNT_TYPE_CREDIT_CARD:
+                    groups["CREDIT"].append(account)
+                    liability_total += min(display_balance, 0)
+                else:
+                    groups["CASH"].append(account)
+                    asset_total += max(display_balance, 0)
+            elif account_class == ACCOUNT_CLASS_INVESTMENT:
+                groups["INVESTMENTS"].append(account)
+                valuation = account.get("latest_valuation_minor")
+                amount = valuation if valuation is not None else display_balance
+                asset_total += max(amount, 0)
+            elif account_class == ACCOUNT_CLASS_TRACKING:
+                valuation = account.get("latest_valuation_minor")
+                amount = valuation if valuation is not None else display_balance
+                polarity = account.get("tracking_polarity", "ASSET")
+                if polarity == "LIABILITY":
+                    groups["LOANS"].append(account)
+                    liability_total += min(amount, 0)
+                else:
+                    groups["CASH"].append(account)
+                    asset_total += max(amount, 0)
+            elif account_class == ACCOUNT_CLASS_LOAN:
+                groups["LOANS"].append(account)
+                liability_total += min(display_balance, 0)
+            elif account_class == ACCOUNT_CLASS_TANGIBLE_ASSET:
+                groups["TANGIBLE_ASSETS"].append(account)
+                valuation = account.get("latest_valuation_minor")
+                amount = valuation if valuation is not None else display_balance
+                asset_total += max(amount, 0)
+
+        return {
+            "assets_minor": asset_total,
+            "liabilities_minor": liability_total,
+            "net_worth_minor": asset_total + liability_total,
+            "needs_attention_count": needs_attention,
+            "groups": [{"key": key, "items": items} for key, items in groups.items() if items],
+        }
 
     def list_transactions(
         self,
@@ -938,6 +1029,23 @@ class DojoService:
         }
         month_start, month_end = self._month_bounds(month)
 
+        # Precompute account-budget link behavior
+        link_behaviors = {
+            row["category_id"]: row
+            for row in self.db.fetch_all(load_sql("queries/current_account_budget_links_all"))
+        }
+        link_derived_by_cat: dict[str, int] = defaultdict(int)
+        for cat_id, link in link_behaviors.items():
+            if link["link_behavior"] in {
+                LINK_BEHAVIOR_INVESTMENT_CONTRIBUTION,
+                LINK_BEHAVIOR_LOAN_PAYMENT,
+            }:
+                for t in self.db.fetch_all(
+                    load_sql("queries/current_transfers_in_by_account_from_date"),
+                    (link["account_id"], link["effective_date"]),
+                ):
+                    link_derived_by_cat[cat_id] += t["amount_minor"]
+
         # Precompute transaction sums per category (all-time for available, monthly for activity)
         tx_by_category: dict[str, int] = defaultdict(int)
         tx_month_activity: dict[str, int] = defaultdict(int)
@@ -1007,6 +1115,7 @@ class DojoService:
                     tx_by_category.get(cid, 0)
                     + alloc_to_bucket.get(bucket_id, 0)
                     - alloc_from_bucket.get(bucket_id, 0)
+                    - link_derived_by_cat.get(cid, 0)
                 )
 
             month_activity = tx_month_activity.get(cid, 0)
@@ -1380,6 +1489,8 @@ class DojoService:
                     "account_id": account_id,
                     "account_class": payload["account_class"],
                     "name": payload["name"],
+                    "institution": payload.get("institution"),
+                    "account_number_last4": payload.get("account_number_last4"),
                     "is_hidden": payload.get("is_hidden", False),
                     "is_active": payload.get("is_active", True),
                     "metadata": json_dumps({}),
@@ -1409,12 +1520,76 @@ class DojoService:
                             "display_liability_positive",
                             budget_account_type == BUDGET_ACCOUNT_TYPE_CREDIT_CARD,
                         ),
+                        "apy_minor": payload.get("apy_minor"),
                         "valid_from": now,
                         "valid_to": MAX_TS,
                         "created_at": now,
                         "created_by_user_id": None,
                     },
                 )
+            elif payload["account_class"] == ACCOUNT_CLASS_TRACKING:
+                insert_version(
+                    connection,
+                    "tracking_account_details",
+                    {
+                        "account_id": account_id,
+                        "polarity": payload.get("polarity", "ASSET"),
+                        "source": payload.get("source"),
+                        "apy_minor": payload.get("apy_minor"),
+                        "valid_from": now,
+                        "valid_to": MAX_TS,
+                        "created_at": now,
+                        "created_by_user_id": None,
+                    },
+                )
+            elif payload["account_class"] == ACCOUNT_CLASS_INVESTMENT:
+                insert_version(
+                    connection,
+                    "investment_account_details",
+                    {
+                        "account_id": account_id,
+                        "target_allocation": payload.get("target_allocation"),
+                        "expense_ratio_minor": payload.get("expense_ratio_minor"),
+                        "valid_from": now,
+                        "valid_to": MAX_TS,
+                        "created_at": now,
+                        "created_by_user_id": None,
+                    },
+                )
+            elif payload["account_class"] == ACCOUNT_CLASS_LOAN:
+                insert_version(
+                    connection,
+                    "loan_details",
+                    {
+                        "account_id": account_id,
+                        "original_amount_minor": payload.get("original_amount_minor"),
+                        "origination_date": payload.get("origination_date"),
+                        "rate_minor": payload.get("rate_minor"),
+                        "status": payload.get("status", "IN_REPAYMENT"),
+                        "valid_from": now,
+                        "valid_to": MAX_TS,
+                        "created_at": now,
+                        "created_by_user_id": None,
+                    },
+                )
+            elif payload["account_class"] == ACCOUNT_CLASS_TANGIBLE_ASSET:
+                if payload.get("opening_valuation_minor") is not None:
+                    insert_version(
+                        connection,
+                        "tangible_asset_valuations",
+                        {
+                            "valuation_id": str(uuid4()),
+                            "account_id": account_id,
+                            "effective_date": payload.get("opening_valuation_date", now.date()),
+                            "amount_minor": payload["opening_valuation_minor"],
+                            "source": payload.get("source", "manual"),
+                            "notes": "Opening valuation",
+                            "valid_from": now,
+                            "valid_to": MAX_TS,
+                            "created_at": now,
+                            "created_by_user_id": None,
+                        },
+                    )
         return {"account_id": account_id}
 
     def update_account(self, account_id: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1436,6 +1611,10 @@ class DojoService:
                     "account_id": account_id,
                     "account_class": current["account_class"],
                     "name": payload.get("name", current["name"]),
+                    "institution": payload.get("institution", current.get("institution")),
+                    "account_number_last4": payload.get(
+                        "account_number_last4", current.get("account_number_last4")
+                    ),
                     "is_hidden": payload.get("is_hidden", current["is_hidden"]),
                     "is_active": payload.get("is_active", current["is_active"]),
                     "metadata": current["metadata"],
@@ -1878,6 +2057,15 @@ class DojoService:
             }
             for row in rows
         }
+
+    def _latest_valuations_by_account(self) -> dict[str, dict[str, Any]]:
+        rows = self.db.fetch_all(load_sql("queries/current_net_worth_valuations_ordered"))
+        result: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            account_id = row.get("account_id")
+            if account_id and account_id not in result:
+                result[account_id] = row
+        return result
 
     def _validate_transaction_payload(self, payload: dict[str, Any]) -> None:
         has_category = payload.get("category_id") is not None

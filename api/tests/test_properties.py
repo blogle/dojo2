@@ -26,7 +26,7 @@ from dojo.constants import (
 from dojo.migrations import provision_database
 from dojo.scd import insert_version
 from dojo.service import DojoService
-from dojo.sql import render_sql
+from dojo.sql import load_sql, render_sql
 from tests.support.clock import MutableClock, default_test_clock
 from tests.support.scd_invariants import (
     assert_history_preserved_after_edit,
@@ -369,6 +369,10 @@ def _insert_account_budget_link(
     effective_date: date = date(2026, 2, 1),
 ) -> None:
     with service.db.transaction() as connection:
+        connection.execute(
+            load_sql("queries/close_account_budget_links_by_account_behavior"),
+            ("2026-02-01T00:00:00+00:00", account_id, link_behavior),
+        )
         insert_version(
             connection,
             "account_budget_links",

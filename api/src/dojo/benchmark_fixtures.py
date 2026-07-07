@@ -6,7 +6,7 @@ from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from dojo.constants import (
     ACCOUNT_CLASS_BUDGET,
-    ACCOUNT_CLASS_TRACKING_BALANCE,
+    ACCOUNT_CLASS_TRACKING,
     BUDGET_ACCOUNT_TYPE_CREDIT_CARD,
     BUDGET_ACCOUNT_TYPE_DEPOSIT,
     CATEGORY_KIND_CREDIT_CARD_PAYMENT,
@@ -182,7 +182,7 @@ def build_synthetic_dataset(config: SyntheticDatasetConfig) -> ParsedImportBundl
             ParsedAccount(
                 account_id=_account_id(a),
                 name=f"Account {a}",
-                account_class=ACCOUNT_CLASS_BUDGET if is_budget else ACCOUNT_CLASS_TRACKING_BALANCE,
+                account_class=ACCOUNT_CLASS_BUDGET if is_budget else ACCOUNT_CLASS_TRACKING,
                 is_hidden=False,
                 is_active=True,
                 budget_account_type=(
@@ -300,6 +300,7 @@ def build_synthetic_dataset(config: SyntheticDatasetConfig) -> ParsedImportBundl
                 effective_date=_month_start(base_year, config.num_months),
                 amount_minor=rng.randint(-500000, 2000000) * 100,
                 notes="Benchmark net worth",
+                is_debt=False,
             )
         )
 
