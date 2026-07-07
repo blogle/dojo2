@@ -82,6 +82,8 @@ sections:
         fixture: data/MetricStrip.fixtures.ts
       - component: PeriodSelector
         fixture: data/PeriodSelector.fixtures.ts
+      - component: StackedEntityCard
+        fixture: data/StackedEntityCard.fixtures.ts
 
   - id: display
     title: Display

@@ -180,3 +180,23 @@ export type TransactionPayload = {
   status: "PENDING" | "CLEARED";
   memo: string;
 };
+
+export type AssetsLiabilitiesItem = Account & {
+  value_minor: number;
+  source_of_truth: string;
+  metadata?: string;
+};
+
+export type AssetsLiabilitiesGroup = {
+  key: string;
+  items: AssetsLiabilitiesItem[];
+  total_minor: number;
+};
+
+export type AssetsLiabilitiesResponse = {
+  assets_minor: number;
+  liabilities_minor: number;
+  net_worth_minor: number;
+  needs_attention_count: number;
+  groups: AssetsLiabilitiesGroup[];
+};

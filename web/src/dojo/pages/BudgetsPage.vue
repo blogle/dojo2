@@ -109,10 +109,10 @@ const navItems = computed(() => [
   },
   {
     kind: "route" as const,
-    key: "assets",
+    key: "assets-liabilities",
     label: "Assets",
     icon: "assets",
-    href: "/assets",
+    href: "/assets-liabilities",
   },
 ]);
 

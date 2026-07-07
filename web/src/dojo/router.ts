@@ -23,6 +23,10 @@ const router = createRouter({
       path: "/transactions",
       component: () => import("./pages/TransactionsPage.vue"),
     },
+    {
+      path: "/assets-liabilities",
+      component: () => import("./pages/AssetsLiabilitiesPage.vue"),
+    },
   ],
 });
 

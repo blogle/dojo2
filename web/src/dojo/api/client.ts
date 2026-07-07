@@ -2,6 +2,7 @@ import type {
   Account,
   Allocation,
   AppStatus,
+  AssetsLiabilitiesResponse,
   BootstrapResponse,
   BudgetResponse,
   Category,
@@ -120,6 +121,10 @@ export async function fetchCategories(
 
 export async function fetchNetWorth(): Promise<NetWorthResponse> {
   return request<NetWorthResponse>("/api/net-worth");
+}
+
+export async function fetchAssetsLiabilities(): Promise<AssetsLiabilitiesResponse> {
+  return request<AssetsLiabilitiesResponse>("/api/assets-liabilities");
 }
 
 export async function startGoogleOnboarding(): Promise<GoogleOnboardingStatus> {
