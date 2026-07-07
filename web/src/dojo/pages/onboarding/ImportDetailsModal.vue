@@ -79,7 +79,7 @@ const importedRecords = computed(() => [
         <section class="import-details__section">
           <h3 class="import-details__heading">Imported records</h3>
           <Surface variant="raised" padding="0" :border="true">
-            <dl class="import-details__record-list" data-cy="import-records">
+            <div class="import-details__record-list" data-cy="import-records">
               <div
                 v-for="record in importedRecords"
                 :key="record.label"
@@ -87,11 +87,11 @@ const importedRecords = computed(() => [
               >
                 <span class="import-details__record-label">
                   <component :is="record.icon" :size="16" weight="regular" />
-                  <dt>{{ record.label }}</dt>
+                  <span>{{ record.label }}</span>
                 </span>
-                <dd>{{ record.value }}</dd>
+                <span>{{ record.value }}</span>
               </div>
-            </dl>
+            </div>
           </Surface>
         </section>
 
@@ -244,7 +244,7 @@ const importedRecords = computed(() => [
   line-height: var(--text-body-sm-line-height);
 }
 
-.import-details__record-row dt,
+.import-details__record-row span:first-child,
 .import-details__warning-message,
 .import-details__validation-row {
   font-family: var(--text-body-sm-font-family);
@@ -253,8 +253,7 @@ const importedRecords = computed(() => [
   line-height: var(--text-body-sm-line-height);
 }
 
-.import-details__record-row dd {
-  margin: 0;
+.import-details__record-row span:last-child {
   color: var(--color-on-surface);
   font-family: var(--text-body-md-font-family);
   font-size: var(--text-body-md-font-size);
