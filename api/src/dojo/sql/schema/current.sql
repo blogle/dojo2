@@ -26,6 +26,8 @@ CREATE TABLE IF NOT EXISTS accounts (
     account_id UUID NOT NULL,
     account_class TEXT NOT NULL,
     name TEXT NOT NULL,
+    institution TEXT,
+    account_number_last4 TEXT,
     is_hidden BOOLEAN NOT NULL DEFAULT FALSE,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     metadata JSON,
@@ -39,8 +41,124 @@ CREATE TABLE IF NOT EXISTS budget_account_settings (
     row_id UUID PRIMARY KEY,
     account_id UUID NOT NULL,
     budget_account_type TEXT NOT NULL,
-    linked_payment_category_id UUID,
     display_liability_positive BOOLEAN NOT NULL DEFAULT FALSE,
+    apy_minor BIGINT,
+    valid_from TIMESTAMPTZ NOT NULL,
+    valid_to TIMESTAMPTZ NOT NULL DEFAULT TIMESTAMPTZ '9999-12-31 23:59:59+00',
+    created_at TIMESTAMPTZ NOT NULL,
+    created_by_user_id UUID
+);
+
+CREATE TABLE IF NOT EXISTS tracking_account_details (
+    row_id UUID PRIMARY KEY,
+    account_id UUID NOT NULL,
+    polarity TEXT NOT NULL DEFAULT 'ASSET',
+    source TEXT,
+    apy_minor BIGINT,
+    valid_from TIMESTAMPTZ NOT NULL,
+    valid_to TIMESTAMPTZ NOT NULL DEFAULT TIMESTAMPTZ '9999-12-31 23:59:59+00',
+    created_at TIMESTAMPTZ NOT NULL,
+    created_by_user_id UUID
+);
+
+CREATE TABLE IF NOT EXISTS investment_account_details (
+    row_id UUID PRIMARY KEY,
+    account_id UUID NOT NULL,
+    target_allocation TEXT,
+    expense_ratio_minor BIGINT,
+    valid_from TIMESTAMPTZ NOT NULL,
+    valid_to TIMESTAMPTZ NOT NULL DEFAULT TIMESTAMPTZ '9999-12-31 23:59:59+00',
+    created_at TIMESTAMPTZ NOT NULL,
+    created_by_user_id UUID
+);
+
+CREATE TABLE IF NOT EXISTS loan_details (
+    row_id UUID PRIMARY KEY,
+    account_id UUID NOT NULL,
+    original_amount_minor BIGINT,
+    origination_date DATE,
+    rate_minor BIGINT,
+    status TEXT DEFAULT 'IN_REPAYMENT',
+    valid_from TIMESTAMPTZ NOT NULL,
+    valid_to TIMESTAMPTZ NOT NULL DEFAULT TIMESTAMPTZ '9999-12-31 23:59:59+00',
+    created_at TIMESTAMPTZ NOT NULL,
+    created_by_user_id UUID
+);
+
+CREATE TABLE IF NOT EXISTS loan_balance_snapshots (
+    row_id UUID PRIMARY KEY,
+    snapshot_id UUID NOT NULL,
+    account_id UUID NOT NULL,
+    effective_date DATE NOT NULL,
+    principal_balance_minor BIGINT NOT NULL,
+    accrued_interest_minor BIGINT,
+    notes TEXT,
+    valid_from TIMESTAMPTZ NOT NULL,
+    valid_to TIMESTAMPTZ NOT NULL DEFAULT TIMESTAMPTZ '9999-12-31 23:59:59+00',
+    created_at TIMESTAMPTZ NOT NULL,
+    created_by_user_id UUID
+);
+
+CREATE TABLE IF NOT EXISTS tangible_asset_valuations (
+    row_id UUID PRIMARY KEY,
+    valuation_id UUID NOT NULL,
+    account_id UUID NOT NULL,
+    effective_date DATE NOT NULL,
+    amount_minor BIGINT NOT NULL,
+    source TEXT,
+    notes TEXT,
+    valid_from TIMESTAMPTZ NOT NULL,
+    valid_to TIMESTAMPTZ NOT NULL DEFAULT TIMESTAMPTZ '9999-12-31 23:59:59+00',
+    created_at TIMESTAMPTZ NOT NULL,
+    created_by_user_id UUID
+);
+
+CREATE TABLE IF NOT EXISTS account_budget_links (
+    row_id UUID PRIMARY KEY,
+    account_id UUID NOT NULL,
+    category_id UUID NOT NULL,
+    link_behavior TEXT NOT NULL,
+    derivation_method TEXT NOT NULL DEFAULT 'TRANSFER_IN_ONLY',
+    effective_date DATE NOT NULL,
+    valid_from TIMESTAMPTZ NOT NULL,
+    valid_to TIMESTAMPTZ NOT NULL DEFAULT TIMESTAMPTZ '9999-12-31 23:59:59+00',
+    created_at TIMESTAMPTZ NOT NULL,
+    created_by_user_id UUID
+);
+
+CREATE TABLE IF NOT EXISTS investment_positions (
+    row_id UUID PRIMARY KEY,
+    position_id UUID NOT NULL,
+    account_id UUID NOT NULL,
+    ticker TEXT NOT NULL,
+    quantity_minor BIGINT NOT NULL,
+    average_basis_minor BIGINT,
+    valid_from TIMESTAMPTZ NOT NULL,
+    valid_to TIMESTAMPTZ NOT NULL DEFAULT TIMESTAMPTZ '9999-12-31 23:59:59+00',
+    created_at TIMESTAMPTZ NOT NULL,
+    created_by_user_id UUID
+);
+
+CREATE TABLE IF NOT EXISTS investment_cash_snapshots (
+    row_id UUID PRIMARY KEY,
+    snapshot_id UUID NOT NULL,
+    account_id UUID NOT NULL,
+    effective_date DATE NOT NULL,
+    cash_balance_minor BIGINT NOT NULL,
+    notes TEXT,
+    valid_from TIMESTAMPTZ NOT NULL,
+    valid_to TIMESTAMPTZ NOT NULL DEFAULT TIMESTAMPTZ '9999-12-31 23:59:59+00',
+    created_at TIMESTAMPTZ NOT NULL,
+    created_by_user_id UUID
+);
+
+CREATE TABLE IF NOT EXISTS investment_price_snapshots (
+    row_id UUID PRIMARY KEY,
+    snapshot_id UUID NOT NULL,
+    ticker TEXT NOT NULL,
+    effective_date DATE NOT NULL,
+    price_minor BIGINT NOT NULL,
+    source TEXT,
     valid_from TIMESTAMPTZ NOT NULL,
     valid_to TIMESTAMPTZ NOT NULL DEFAULT TIMESTAMPTZ '9999-12-31 23:59:59+00',
     created_at TIMESTAMPTZ NOT NULL,
@@ -152,6 +270,33 @@ SELECT * FROM accounts WHERE valid_to = TIMESTAMPTZ '9999-12-31 23:59:59+00';
 
 CREATE OR REPLACE VIEW current_budget_account_settings AS
 SELECT * FROM budget_account_settings WHERE valid_to = TIMESTAMPTZ '9999-12-31 23:59:59+00';
+
+CREATE OR REPLACE VIEW current_tracking_account_details AS
+SELECT * FROM tracking_account_details WHERE valid_to = TIMESTAMPTZ '9999-12-31 23:59:59+00';
+
+CREATE OR REPLACE VIEW current_investment_account_details AS
+SELECT * FROM investment_account_details WHERE valid_to = TIMESTAMPTZ '9999-12-31 23:59:59+00';
+
+CREATE OR REPLACE VIEW current_loan_details AS
+SELECT * FROM loan_details WHERE valid_to = TIMESTAMPTZ '9999-12-31 23:59:59+00';
+
+CREATE OR REPLACE VIEW current_loan_balance_snapshots AS
+SELECT * FROM loan_balance_snapshots WHERE valid_to = TIMESTAMPTZ '9999-12-31 23:59:59+00';
+
+CREATE OR REPLACE VIEW current_tangible_asset_valuations AS
+SELECT * FROM tangible_asset_valuations WHERE valid_to = TIMESTAMPTZ '9999-12-31 23:59:59+00';
+
+CREATE OR REPLACE VIEW current_account_budget_links AS
+SELECT * FROM account_budget_links WHERE valid_to = TIMESTAMPTZ '9999-12-31 23:59:59+00';
+
+CREATE OR REPLACE VIEW current_investment_positions AS
+SELECT * FROM investment_positions WHERE valid_to = TIMESTAMPTZ '9999-12-31 23:59:59+00';
+
+CREATE OR REPLACE VIEW current_investment_cash_snapshots AS
+SELECT * FROM investment_cash_snapshots WHERE valid_to = TIMESTAMPTZ '9999-12-31 23:59:59+00';
+
+CREATE OR REPLACE VIEW current_investment_price_snapshots AS
+SELECT * FROM investment_price_snapshots WHERE valid_to = TIMESTAMPTZ '9999-12-31 23:59:59+00';
 
 CREATE OR REPLACE VIEW current_category_groups AS
 SELECT * FROM category_groups WHERE valid_to = TIMESTAMPTZ '9999-12-31 23:59:59+00';

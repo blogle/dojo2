@@ -12,8 +12,17 @@ This repository is pre-alpha for local data compatibility. The implementation ma
 
 - [x] (2026-07-06) Interviewed product owner on account classes, links, loans, investments, tracking polarity, reconciliation, and first milestone scope.
 - [x] (2026-07-06) Captured agreed backend-first scope in this ExecPlan.
-- [ ] Implement first milestone: clean schema/domain foundation, Aspire import mapping, generic account-budget links, derived activity engine, tests, and user-facing one-page docs.
-- [ ] Implement later milestones for investment positions/cash/prices, loan details/snapshots/attributions, reconciliation evidence, normalized read APIs, and frontend page integration.
+- [x] (2026-07-07) Aligned on unified derived activity model: all three account types (credit card, investment, loan) use transfer-in to linked account as the derived activity trigger. Forward-only derivation. No retroactive interpretation of legacy data.
+- [x] (2026-07-07) Credit card link migration confirmed in scope: migrate `budget_account_settings.linked_payment_category_id` to `account_budget_links` now, not deferred.
+- [x] (2026-07-07) Investment model infrastructure confirmed in scope: positions, cash snapshots, and price snapshot tables plus basic CRUD.
+- [ ] Phase 1: Credit card link migration to unified `account_budget_links` model, import hygiene, domain table clearing.
+- [ ] Phase 2: Investment model infrastructure (positions, cash, prices schema and CRUD).
+- [ ] Phase 3: Snapshot and valuation CRUD APIs (tracking, loan, tangible).
+- [ ] Phase 4: Fix derived activity engine and liability math.
+- [ ] Phase 5: Read model enrichment (group totals, source-of-truth, as-of date).
+- [ ] Phase 6: Account detail read completeness (join investment/loan details).
+- [ ] Phase 7: Account update completeness and validation.
+- [ ] Phase 8: Cleanup and full verification.
 
 ## Surprises & Discoveries
 
@@ -55,9 +64,29 @@ This repository is pre-alpha for local data compatibility. The implementation ma
   Rationale: `valid_from` records when configuration changed in dojo; `effective_date` controls which financial activity the link applies to.
   Date/Author: 2026-07-06 / opencode and product owner
 
-- Decision: Loan category links are planning/context links only in the first pass.
-  Rationale: Plain mortgage-category transactions do not identify which loan changed when one category links to multiple loans. Loan balances change through balance snapshots/reconciliation, not category spend.
-  Date/Author: 2026-07-06 / opencode and product owner
+- Decision: Unify derived activity model across credit card, investment, and loan account types.
+  Rationale: All three use the same conceptual model: a transfer touches a linked account, and a budget category absorbs the transfer-in amount. This gives users one mental model rather than three separate patterns. Credit card payments, investment contributions, and loan payments all follow the same derivation rule: transfer-in to linked account on or after effective date reduces linked category available.
+  Date/Author: 2026-07-07 / opencode and product owner
+
+- Decision: Add `derivation_method` column to `account_budget_links` to distinguish credit card payment derivation (which sums spending plus transfer-in) from investment/loan derivation (which sums transfer-in only).
+  Rationale: Credit card payment categories account for categorized spending on the card account in addition to transfers. Investment and loan categories only account for transfer-in amounts. Both reduce the linked category, but the credit card formula includes an additional term. A `derivation_method` field makes this explicit in the schema rather than relying on behavioral name matching.
+  Date/Author: 2026-07-07 / opencode and product owner
+
+- Decision: All derivation is forward-only from the link effective date.
+  Rationale: Legacy Aspire data must not be retroactively reinterpreted. Transfers before the link effective date are untouched regardless of account type. This was previously agreed and is confirmed for the unified model.
+  Date/Author: 2026-07-07 / opencode and product owner
+
+- Decision: Transfer guardrails per account class are deferred to a later pass.
+  Rationale: While valid, transfer guardrails require additional backend machinery that is not needed for the MVP. The existing SPEC wording captures intended semantics. Guardrails can be added after core functionality is working.
+  Date/Author: 2026-07-07 / opencode and product owner
+
+- Decision: Detail routes per account class are deferred to frontend screen builds.
+  Rationale: The enriched `/api/accounts` response covers frontend needs for now. Dedicated per-class detail endpoints will be added when the corresponding frontend screens are built.
+  Date/Author: 2026-07-07 / opencode and product owner
+
+- Decision: Investment model infrastructure (positions, cash, prices tables) is included in this pass.
+  Rationale: The backend machinery needs to be ready so frontend work can progressively expose investment account data. Basic CRUD endpoints for positions, cash snapshots, and prices are included. Full valuation calculation (positions + cash + prices → account value) is deferred to when frontend screens need it.
+  Date/Author: 2026-07-07 / opencode and product owner
 
 - Decision: Loan payment attribution is SCD2 editable domain data linking one transaction to one loan; it does not store reconciliation IDs or principal/interest splits.
   Rationale: Reconciliation is a separate verification commit. Principal versus non-principal cost is derived from attributed transaction totals and principal balance snapshots.
@@ -81,7 +110,7 @@ This repository is pre-alpha for local data compatibility. The implementation ma
 
 ## Outcomes & Retrospective
 
-No implementation has started. This plan records the shared model and narrows the first task to a backend foundation that can be verified independently before frontend work continues.
+The first implementation pass has started. Schema tables for `tracking_account_details`, `investment_account_details`, `loan_details`, `loan_balance_snapshots`, `tangible_asset_valuations`, and `account_budget_links` have been added. Property tests for credit card, investment, and loan link behaviors have been added. The `/api/assets-liabilities` endpoint exists with basic grouping. However, the credit card link migration is incomplete (still using `budget_account_settings.linked_payment_category_id`), the derived activity engine has incorrect loan behavior, liability math is wrong for credit cards, and snapshot/valuation CRUD APIs are missing.
 
 ## Context and Orientation
 
@@ -95,40 +124,41 @@ The term "reconciliation commit" means a record that a user or source verified t
 
 ## Plan of Work
 
-First, update the backend schema in `api/src/dojo/sql/schema/current.sql` to use explicit account classes and add type-specific tables without preserving old local database compatibility. Keep `accounts` as the root table for every entity. Add `tracking_account_details` or equivalent for tracking polarity. Add `account_budget_links` with SCD2 fields, `account_id`, `category_id`, `link_behavior`, and `effective_date`. Add empty type-specific tables needed by later milestones: loan details and balance snapshots, loan payment attributions, investment positions, investment cash snapshots, investment price snapshots, tangible asset valuation snapshots, and generic reconciliation runs/evidence. Do not wire every table into the UI yet.
+The implementation proceeds in eight phases, building from schema correctness through API completeness. Each phase is independently verifiable.
 
-Second, update importer parsing and persistence so Aspire budget accounts remain `BUDGET`, and every non-duplicate Aspire net-worth category becomes a `TRACKING` account with explicit asset/liability polarity. Use Aspire asset/debt ranges when present. If polarity metadata is absent, infer from the latest non-zero imported amount and emit an onboarding/import validation warning. Do not infer `INVESTMENT`, `LOAN`, or `TANGIBLE_ASSET` from Aspire names or amounts.
+Phase 1 migrates credit card payment links from `budget_account_settings.linked_payment_category_id` to the generic `account_budget_links` table. This unifies all three account-budget link types (credit card, investment, loan) in a single table. A `derivation_method` column distinguishes credit card derivation (spending plus transfer-in) from investment/loan derivation (transfer-in only). The import flow and `create_account()` are updated to write `account_budget_links` rows for credit cards. `list_categories()` is refactored to derive all linked behavior from the unified table. The legacy `linked_payment_category_id` column is removed.
 
-Third, migrate credit-card linked payment categories into the new `account_budget_links` concept in the freshly provisioned schema and service write paths. Preserve `budget_account_type` for budget-account subtypes such as deposit and credit card. Remove the budget-only `linked_payment_category_id` decision from formulas after replacement, but keep behavior identical for current fixture data.
+Phase 2 adds investment model infrastructure: `investment_positions`, `investment_cash_snapshots`, and `investment_price_snapshots` schema tables with SCD2 history, `current_*` views, basic CRUD service methods, and route endpoints. Full valuation calculation is deferred.
 
-Fourth, extract a shared derived category activity function in backend domain/service code. It should handle `CREDIT_CARD_PAYMENT` and `INVESTMENT_CONTRIBUTION` explicitly. `LOAN_PAYMENT` links remain planning/context links and must not create automatic budget activity. The function must take plain rows or typed domain-shaped records and return derived category effects deterministically. Keep database access outside the pure function.
+Phase 3 adds snapshot and valuation CRUD APIs for tracking accounts, loans, and tangible assets using the payload models already defined.
 
-Fifth, add tests before and after the refactor. Existing fixture import, budget formulas, net-worth totals, and credit-card payment category behavior must not regress. Add property tests for investment contribution transfers once investment accounts and links exist: a transfer from a budget account to a linked investment account is net-worth neutral, does not create reportable income or economic spending, and reduces the linked contribution category available amount. Add tests that loan-linked category transactions do not change loan balances.
+Phase 4 fixes the derived activity engine to treat `LOAN_PAYMENT` links identically to `INVESTMENT_CONTRIBUTION` (transfer-in only). It also fixes `/api/assets-liabilities` liability math to use `actual_balance_minor` for credit cards.
 
-Sixth, update docs and product spec. `SPEC.md` should capture the clarified durable behavior: all Aspire net-worth entities import as tracking accounts, loan links are planning links until explicit attribution/reconciliation, investment values use positions/cash/prices, and reconciliation commits are lightweight evidence. `docs/src/assets-and-liabilities-domain.md` should be the single user-facing one-pager for now.
+Phase 5 enriches the `/api/assets-liabilities` response with per-group totals and per-item source-of-truth indicators.
 
-Seventh, only after the backend foundation is validated, add or update API read models. Prefer one normalized `GET /api/assets-liabilities` overview read model so the frontend does not compose accounts, tracking snapshots, investment positions, cash, prices, loan snapshots, and reconciliation state itself. Detail endpoints can be type-specific later.
+Phase 6 completes account detail reads by joining investment and loan detail tables in `list_accounts.sql`.
 
-Eighth, defer frontend page completion until the backend read model exists. Existing files under `web/src/dojo/pages/AssetsLiabilitiesPage.vue`, `AccountDetailPage.vue`, and `web/src/dojo/components/accounts/` may be reused, but they must not drive backend design.
+Phase 7 completes account updates to persist detail-table changes and adds typed validation for account-class-specific fields.
+
+Phase 8 cleans up stale references and runs full verification.
 
 ## Concrete Steps
 
 Run commands from the repository root `/home/ogle/src/dojo2`.
 
-Milestone 1 is the first implementation task. Edit `api/src/dojo/sql/schema/current.sql`, `api/src/dojo/api/models.py`, `api/src/dojo/service.py`, `api/src/dojo/importer.py`, and focused SQL files under `api/src/dojo/sql/queries/` as needed. Add or update backend tests under `api/tests/`, especially `test_migrations.py`, `test_importer.py`, `test_api_endpoints.py`, `test_budget_formulas.py`, and `test_properties.py`.
+Phase 1 is the first implementation task. Edit `api/src/dojo/sql/schema/current.sql` (add `derivation_method` to `account_budget_links`, remove `linked_payment_category_id` from `budget_account_settings`), `api/src/dojo/service.py` (refactor `list_categories()` to use unified link model, update `create_account()` for credit cards), `api/src/dojo/importer.py` (write `account_budget_links` rows for credit cards), and `api/src/dojo/sql/queries/list_accounts.sql` (remove legacy join). Add or update backend tests under `api/tests/`.
 
-After Milestone 1, run:
+After each phase, run the narrowest relevant verification:
+
+    just lint-api
+    just test-unit
+    just test-property
+    just test-integration
+
+After Phase 1, also run:
 
     just migration-check
-    just test-unit
-    just test-integration
-    just test-property
     just architecture-check
-
-If frontend or docs are touched in the same implementation batch, also run:
-
-    just docs
-    just test-web
 
 Before claiming the feature complete, run:
 
@@ -168,7 +198,9 @@ The frontend mock screens in `plans/2026-06-17-implement-product-spec/assets_lia
 
 Account classes should be explicit constants or literal types in Python and TypeScript after implementation. Avoid raw string dispatch outside boundary parsing.
 
-`account_budget_links.link_behavior` should support at least `CREDIT_CARD_PAYMENT`, `INVESTMENT_CONTRIBUTION`, and `LOAN_PAYMENT`. Only the first two create derived budget activity in the first implementation pass.
+`account_budget_links` is the single table for all account-category link relationships. It supports `link_behavior` values `CREDIT_CARD_PAYMENT`, `INVESTMENT_CONTRIBUTION`, and `LOAN_PAYMENT`. A `derivation_method` column distinguishes how derived activity is computed: `CC_SPEND_AND_TRANSFER` (credit card), `TRANSFER_IN_ONLY` (investment, loan), `NONE` (context-only placeholder).
+
+All three link behaviors derive budget activity going forward from the link's `effective_date`. No retroactive interpretation of legacy data occurs.
 
 Investment price selection should prefer brokerage statement prices for reconciliation-date views and market-data prices for current estimate views when no statement price applies.
 

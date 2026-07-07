@@ -16,6 +16,12 @@ from dojo.api.models import (
     CategoryUpdatePayload,
     GoalPayload,
     ImportRequest,
+    InvestmentCashSnapshotPayload,
+    InvestmentPositionPayload,
+    InvestmentPriceSnapshotPayload,
+    LoanBalanceSnapshotPayload,
+    TangibleAssetValuationPayload,
+    TrackingAccountSnapshotPayload,
     TransactionPayload,
     TransferPayload,
 )
@@ -283,6 +289,83 @@ def update_account(
     request: Request, account_id: str, payload: AccountUpdatePayload
 ) -> dict[str, Any]:
     return get_service(request).update_account(account_id, payload.model_dump(exclude_none=True))
+
+
+@router.get("/assets-liabilities")
+def assets_liabilities(request: Request) -> dict[str, Any]:
+    return get_service(request).get_assets_liabilities()
+
+
+@router.post("/accounts/{account_id}/positions")
+def create_position(
+    request: Request, account_id: str, payload: "InvestmentPositionPayload"
+) -> dict[str, Any]:
+    return get_service(request).create_investment_position(account_id, payload.model_dump())
+
+
+@router.get("/accounts/{account_id}/positions")
+def list_positions(request: Request, account_id: str) -> dict[str, Any]:
+    return {"items": get_service(request).list_investment_positions(account_id)}
+
+
+@router.post("/accounts/{account_id}/cash-snapshots")
+def create_cash_snapshot(
+    request: Request, account_id: str, payload: "InvestmentCashSnapshotPayload"
+) -> dict[str, Any]:
+    return get_service(request).create_investment_cash_snapshot(account_id, payload.model_dump())
+
+
+@router.get("/accounts/{account_id}/cash-snapshots")
+def list_cash_snapshots(request: Request, account_id: str) -> dict[str, Any]:
+    return {"items": get_service(request).list_investment_cash_snapshots(account_id)}
+
+
+@router.post("/price-snapshots")
+def create_price_snapshot(
+    request: Request, payload: "InvestmentPriceSnapshotPayload"
+) -> dict[str, Any]:
+    return get_service(request).create_investment_price_snapshot(payload.model_dump())
+
+
+@router.get("/tickers/{ticker}/price-snapshots")
+def list_price_snapshots(request: Request, ticker: str) -> dict[str, Any]:
+    return {"items": get_service(request).list_investment_price_snapshots(ticker)}
+
+
+@router.post("/accounts/{account_id}/tracking-snapshots")
+def create_tracking_snapshot(
+    request: Request, account_id: str, payload: TrackingAccountSnapshotPayload
+) -> dict[str, Any]:
+    return get_service(request).create_tracking_snapshot(account_id, payload.model_dump())
+
+
+@router.get("/accounts/{account_id}/tracking-snapshots")
+def list_tracking_snapshots(request: Request, account_id: str) -> dict[str, Any]:
+    return {"items": get_service(request).list_tracking_snapshots(account_id)}
+
+
+@router.post("/accounts/{account_id}/loan-snapshots")
+def create_loan_snapshot(
+    request: Request, account_id: str, payload: LoanBalanceSnapshotPayload
+) -> dict[str, Any]:
+    return get_service(request).create_loan_snapshot(account_id, payload.model_dump())
+
+
+@router.get("/accounts/{account_id}/loan-snapshots")
+def list_loan_snapshots(request: Request, account_id: str) -> dict[str, Any]:
+    return {"items": get_service(request).list_loan_snapshots(account_id)}
+
+
+@router.post("/accounts/{account_id}/tangible-valuations")
+def create_tangible_valuation(
+    request: Request, account_id: str, payload: TangibleAssetValuationPayload
+) -> dict[str, Any]:
+    return get_service(request).create_tangible_asset_valuation(account_id, payload.model_dump())
+
+
+@router.get("/accounts/{account_id}/tangible-valuations")
+def list_tangible_valuations(request: Request, account_id: str) -> dict[str, Any]:
+    return {"items": get_service(request).list_tangible_asset_valuations(account_id)}
 
 
 @router.get("/categories")

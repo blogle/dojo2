@@ -474,10 +474,9 @@ def _actual_category_snapshots(
     accounts = {
         row["account_id"]: row for row in service.db.fetch_all(load_sql("queries/current_accounts"))
     }
-    settings = {
-        row["linked_payment_category_id"]: row
-        for row in service.db.fetch_all(load_sql("queries/current_budget_account_settings"))
-        if row["linked_payment_category_id"] is not None
+    links = {
+        row["category_id"]: row
+        for row in service.db.fetch_all(load_sql("queries/current_account_budget_links_all"))
     }
     transactions = service.db.fetch_all(load_sql("queries/current_transactions"))
     allocations = service.db.fetch_all(load_sql("queries/current_allocations"))
@@ -489,7 +488,7 @@ def _actual_category_snapshots(
     }
     payment_category_by_account_name = {
         accounts[row["account_id"]]["name"]: category_name_by_id[category_id]
-        for category_id, row in settings.items()
+        for category_id, row in links.items()
     }
 
     bucket_balances = {row["name"]: 0 for row in categories}
@@ -560,9 +559,9 @@ def _actual_category_snapshots(
         if category["category_kind"] == CATEGORY_KIND_CREDIT_CARD_PAYMENT:
             available_minor = allocation_balance + credit_card_spend[category_name]
         linked_account_name = None
-        setting = settings.get(category["category_id"])
-        if setting is not None:
-            linked_account_name = accounts[setting["account_id"]]["name"]
+        link = links.get(category["category_id"])
+        if link is not None:
+            linked_account_name = accounts[link["account_id"]]["name"]
         snapshots[category_name] = SourceCategorySnapshot(
             group_name=groups[category["group_id"]]["name"],
             category_kind=category["category_kind"],

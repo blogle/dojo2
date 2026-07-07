@@ -22,8 +22,9 @@ from dojo.constants import (
     BUDGET_ACCOUNT_TYPE_DEPOSIT,
     CATEGORY_KIND_CREDIT_CARD_PAYMENT,
     CATEGORY_KIND_STANDARD,
-    LINK_BEHAVIOR_INVESTMENT_CONTRIBUTION,
-    LINK_BEHAVIOR_LOAN_PAYMENT,
+    DERIVATION_METHOD_CC_SPEND_AND_TRANSFER,
+    DERIVATION_METHOD_TRANSFER_IN_ONLY,
+    LINK_BEHAVIOR_CREDIT_CARD_PAYMENT,
     MAX_TS,
     SYSTEM_ATB_BUCKET_ID,
     SYSTEM_CATEGORY_ATB,
@@ -277,6 +278,15 @@ class DojoService:
             "budget_buckets",
             "categories",
             "category_groups",
+            "investment_positions",
+            "investment_cash_snapshots",
+            "investment_price_snapshots",
+            "account_budget_links",
+            "tangible_asset_valuations",
+            "loan_balance_snapshots",
+            "loan_details",
+            "investment_account_details",
+            "tracking_account_details",
             "budget_account_settings",
             "accounts",
             "import_batches",
@@ -437,17 +447,11 @@ class DojoService:
                     or account.budget_account_type is None
                 ):
                     continue
-                linked_payment_category_id = None
-                if account.linked_payment_category_name:
-                    linked_payment_category_id = category_by_name[
-                        account.linked_payment_category_name
-                    ].category_id
                 budget_setting_rows.append(
                     {
                         "row_id": str(uuid4()),
                         "account_id": account.account_id,
                         "budget_account_type": account.budget_account_type,
-                        "linked_payment_category_id": linked_payment_category_id,
                         "display_liability_positive": account.display_liability_positive,
                         "valid_from": imported_at,
                         "valid_to": MAX_TS,
@@ -463,6 +467,42 @@ class DojoService:
                 connection,
                 "budget_account_settings",
                 budget_setting_rows,
+            ),
+        )
+
+        cc_link_rows: list[dict[str, Any]] = []
+
+        def prepare_account_budget_links() -> None:
+            for account in bundle.accounts:
+                if (
+                    account.account_class != ACCOUNT_CLASS_BUDGET
+                    or account.budget_account_type != BUDGET_ACCOUNT_TYPE_CREDIT_CARD
+                    or not account.linked_payment_category_name
+                ):
+                    continue
+                category_id = category_by_name[account.linked_payment_category_name].category_id
+                cc_link_rows.append(
+                    {
+                        "row_id": str(uuid4()),
+                        "account_id": account.account_id,
+                        "category_id": category_id,
+                        "link_behavior": LINK_BEHAVIOR_CREDIT_CARD_PAYMENT,
+                        "derivation_method": DERIVATION_METHOD_CC_SPEND_AND_TRANSFER,
+                        "effective_date": imported_at.date(),
+                        "valid_from": imported_at,
+                        "valid_to": MAX_TS,
+                        "created_at": imported_at,
+                        "created_by_user_id": None,
+                    }
+                )
+
+        run_phase("prepare_account_budget_links_ms", prepare_account_budget_links)
+        run_phase(
+            "write_account_budget_links_ms",
+            lambda: batch_insert_versions(
+                connection,
+                "account_budget_links",
+                cc_link_rows,
             ),
         )
 
@@ -788,6 +828,13 @@ class DojoService:
             "CREDIT": [],
             "LOANS": [],
         }
+        group_totals: dict[str, int] = {
+            "CASH": 0,
+            "INVESTMENTS": 0,
+            "TANGIBLE_ASSETS": 0,
+            "CREDIT": 0,
+            "LOANS": 0,
+        }
         asset_total = 0
         liability_total = 0
         needs_attention = 0
@@ -799,33 +846,58 @@ class DojoService:
 
             if account_class == ACCOUNT_CLASS_BUDGET:
                 if budget_type == BUDGET_ACCOUNT_TYPE_CREDIT_CARD:
-                    groups["CREDIT"].append(account)
-                    liability_total += min(display_balance, 0)
+                    amount = account["actual_balance_minor"]
+                    groups["CREDIT"].append(
+                        account | {"source_of_truth": "ledger", "value_minor": amount}
+                    )
+                    group_totals["CREDIT"] += amount
+                    liability_total += min(amount, 0)
                 else:
-                    groups["CASH"].append(account)
+                    groups["CASH"].append(
+                        account | {"source_of_truth": "ledger", "value_minor": display_balance}
+                    )
+                    group_totals["CASH"] += display_balance
                     asset_total += max(display_balance, 0)
             elif account_class == ACCOUNT_CLASS_INVESTMENT:
-                groups["INVESTMENTS"].append(account)
                 valuation = account.get("latest_valuation_minor")
                 amount = valuation if valuation is not None else display_balance
+                source = "valuation" if valuation is not None else "ledger"
+                groups["INVESTMENTS"].append(
+                    account | {"source_of_truth": source, "value_minor": amount}
+                )
+                group_totals["INVESTMENTS"] += amount
                 asset_total += max(amount, 0)
             elif account_class == ACCOUNT_CLASS_TRACKING:
                 valuation = account.get("latest_valuation_minor")
                 amount = valuation if valuation is not None else display_balance
+                source = "valuation" if valuation is not None else "ledger"
                 polarity = account.get("tracking_polarity", "ASSET")
                 if polarity == "LIABILITY":
-                    groups["LOANS"].append(account)
+                    groups["LOANS"].append(
+                        account | {"source_of_truth": source, "value_minor": amount}
+                    )
+                    group_totals["LOANS"] += amount
                     liability_total += min(amount, 0)
                 else:
-                    groups["CASH"].append(account)
+                    groups["CASH"].append(
+                        account | {"source_of_truth": source, "value_minor": amount}
+                    )
+                    group_totals["CASH"] += amount
                     asset_total += max(amount, 0)
             elif account_class == ACCOUNT_CLASS_LOAN:
-                groups["LOANS"].append(account)
+                groups["LOANS"].append(
+                    account | {"source_of_truth": "ledger", "value_minor": display_balance}
+                )
+                group_totals["LOANS"] += display_balance
                 liability_total += min(display_balance, 0)
             elif account_class == ACCOUNT_CLASS_TANGIBLE_ASSET:
-                groups["TANGIBLE_ASSETS"].append(account)
                 valuation = account.get("latest_valuation_minor")
                 amount = valuation if valuation is not None else display_balance
+                source = "valuation" if valuation is not None else "ledger"
+                groups["TANGIBLE_ASSETS"].append(
+                    account | {"source_of_truth": source, "value_minor": amount}
+                )
+                group_totals["TANGIBLE_ASSETS"] += amount
                 asset_total += max(amount, 0)
 
         return {
@@ -833,7 +905,15 @@ class DojoService:
             "liabilities_minor": liability_total,
             "net_worth_minor": asset_total + liability_total,
             "needs_attention_count": needs_attention,
-            "groups": [{"key": key, "items": items} for key, items in groups.items() if items],
+            "groups": [
+                {
+                    "key": key,
+                    "items": items,
+                    "total_minor": group_totals[key],
+                }
+                for key, items in groups.items()
+                if items
+            ],
         }
 
     def list_transactions(
@@ -1022,29 +1102,41 @@ class DojoService:
             row["group_id"]: row
             for row in self.db.fetch_all(load_sql("queries/current_category_groups"))
         }
-        settings = {
-            row["linked_payment_category_id"]: row
-            for row in self.db.fetch_all(load_sql("queries/current_budget_account_settings"))
-            if row["linked_payment_category_id"] is not None
-        }
         month_start, month_end = self._month_bounds(month)
 
-        # Precompute account-budget link behavior
+        # Precompute account-budget link behavior (unified for all account types)
         link_behaviors = {
             row["category_id"]: row
             for row in self.db.fetch_all(load_sql("queries/current_account_budget_links_all"))
         }
         link_derived_by_cat: dict[str, int] = defaultdict(int)
         for cat_id, link in link_behaviors.items():
-            if link["link_behavior"] in {
-                LINK_BEHAVIOR_INVESTMENT_CONTRIBUTION,
-                LINK_BEHAVIOR_LOAN_PAYMENT,
-            }:
+            account_id = link["account_id"]
+            derivation_method = link["derivation_method"]
+            if derivation_method == DERIVATION_METHOD_TRANSFER_IN_ONLY:
                 for t in self.db.fetch_all(
                     load_sql("queries/current_transfers_in_by_account_from_date"),
-                    (link["account_id"], link["effective_date"]),
+                    (account_id, link["effective_date"]),
                 ):
                     link_derived_by_cat[cat_id] += t["amount_minor"]
+            elif derivation_method == DERIVATION_METHOD_CC_SPEND_AND_TRANSFER:
+                # Credit card: sum categorized spending (as negative) plus transfer-in
+                for t in self.db.fetch_all(
+                    load_sql("queries/current_transactions_by_account_categorized"),
+                    (account_id,),
+                ):
+                    link_derived_by_cat[cat_id] += -t["amount_minor"]
+                for t in self.db.fetch_all(
+                    load_sql("queries/current_transactions_by_account_positive_system_category"),
+                    (account_id, SYSTEM_CATEGORY_TRANSFER),
+                ):
+                    link_derived_by_cat[cat_id] += -t["amount_minor"]
+
+        # Precompute linked account ids for categories (used for context links)
+        linked_account_id_by_cat: dict[str, str] = {
+            row["category_id"]: row["account_id"]
+            for row in self.db.fetch_all(load_sql("queries/current_account_budget_links_all"))
+        }
 
         # Precompute transaction sums per category (all-time for available, monthly for activity)
         tx_by_category: dict[str, int] = defaultdict(int)
@@ -1077,22 +1169,6 @@ class DojoService:
                 alloc_pre_to[a["to_bucket_id"]] += amt
                 alloc_pre_from[a["from_bucket_id"]] += amt
 
-        # Precompute credit-card payment category data
-        cc_spend_by_cat: dict[str, int] = defaultdict(int)
-        cc_transfer_adj_by_cat: dict[str, int] = defaultdict(int)
-        for cid, setting in settings.items():
-            account_id = setting["account_id"]
-            for t in self.db.fetch_all(
-                load_sql("queries/current_transactions_by_account_categorized"),
-                (account_id,),
-            ):
-                cc_spend_by_cat[cid] += -t["amount_minor"]
-            for t in self.db.fetch_all(
-                load_sql("queries/current_transactions_by_account_positive_system_category"),
-                (account_id, SYSTEM_CATEGORY_TRANSFER),
-            ):
-                cc_transfer_adj_by_cat[cid] += -t["amount_minor"]
-
         results = []
         for category in categories:
             category = self._decode_json_fields(category, {"metadata"})
@@ -1100,22 +1176,38 @@ class DojoService:
                 continue
             cid = category["category_id"]
             bucket_id = self._bucket_id_for_category(cid)
-            is_cc = category["category_kind"] == CATEGORY_KIND_CREDIT_CARD_PAYMENT
             metadata = cast(dict[str, Any], category.get("metadata") or {})
+            category_link: dict[str, Any] | None = link_behaviors.get(cid)
+            is_cc = category["category_kind"] == CATEGORY_KIND_CREDIT_CARD_PAYMENT
 
-            if is_cc:
+            if (
+                is_cc
+                and category_link is not None
+                and category_link["derivation_method"] == DERIVATION_METHOD_CC_SPEND_AND_TRANSFER
+            ):
+                # Credit card payment category: alloc balance + derived CC activity
                 available = (
                     alloc_to_bucket.get(bucket_id, 0)
                     - alloc_from_bucket.get(bucket_id, 0)
-                    + cc_spend_by_cat.get(cid, 0)
-                    + cc_transfer_adj_by_cat.get(cid, 0)
+                    + link_derived_by_cat.get(cid, 0)
                 )
-            else:
+            elif (
+                category_link is not None
+                and category_link["derivation_method"] == DERIVATION_METHOD_TRANSFER_IN_ONLY
+            ):
+                # Linked category (investment/loan): tx + alloc - derived transfer-in
                 available = (
                     tx_by_category.get(cid, 0)
                     + alloc_to_bucket.get(bucket_id, 0)
                     - alloc_from_bucket.get(bucket_id, 0)
                     - link_derived_by_cat.get(cid, 0)
+                )
+            else:
+                # Unlinked category or context-only link: tx + alloc
+                available = (
+                    tx_by_category.get(cid, 0)
+                    + alloc_to_bucket.get(bucket_id, 0)
+                    - alloc_from_bucket.get(bucket_id, 0)
                 )
 
             month_activity = tx_month_activity.get(cid, 0)
@@ -1138,9 +1230,7 @@ class DojoService:
                     "month_budgeted_minor": month_budgeted,
                     "starting_available_minor": starting_available,
                     "monthly_funding_minor": monthly_funding,
-                    "linked_account_id": settings.get(category["category_id"], {}).get(
-                        "account_id"
-                    ),
+                    "linked_account_id": linked_account_id_by_cat.get(cid),
                     "icon": metadata.get("icon"),
                 }
             )
@@ -1504,10 +1594,17 @@ class DojoService:
                 budget_account_type = payload.get(
                     "budget_account_type", BUDGET_ACCOUNT_TYPE_DEPOSIT
                 )
-                linked_payment_category_id = None
                 if budget_account_type == BUDGET_ACCOUNT_TYPE_CREDIT_CARD:
-                    linked_payment_category_id = self._create_credit_card_payment_category(
+                    payment_category_id = self._create_credit_card_payment_category(
                         connection, payload["name"], now
+                    )
+                    self._create_account_budget_link(
+                        connection,
+                        account_id,
+                        payment_category_id,
+                        LINK_BEHAVIOR_CREDIT_CARD_PAYMENT,
+                        DERIVATION_METHOD_CC_SPEND_AND_TRANSFER,
+                        now,
                     )
                 insert_version(
                     connection,
@@ -1515,7 +1612,6 @@ class DojoService:
                     {
                         "account_id": account_id,
                         "budget_account_type": budget_account_type,
-                        "linked_payment_category_id": linked_payment_category_id,
                         "display_liability_positive": payload.get(
                             "display_liability_positive",
                             budget_account_type == BUDGET_ACCOUNT_TYPE_CREDIT_CARD,
@@ -1600,6 +1696,7 @@ class DojoService:
         if current is None:
             raise ValueError("Account not found")
         now = self.clock.now()
+        account_class = current["account_class"]
         with self.db.transaction() as connection:
             replace_current_version(
                 connection,
@@ -1609,7 +1706,7 @@ class DojoService:
                 {
                     "row_id": str(uuid4()),
                     "account_id": account_id,
-                    "account_class": current["account_class"],
+                    "account_class": account_class,
                     "name": payload.get("name", current["name"]),
                     "institution": payload.get("institution", current.get("institution")),
                     "account_number_last4": payload.get(
@@ -1623,7 +1720,279 @@ class DojoService:
                 },
                 now=now,
             )
+            if account_class == ACCOUNT_CLASS_BUDGET:
+                budget_current = self.db.fetch_one(
+                    load_sql("queries/current_budget_account_settings_by_account"),
+                    (account_id,),
+                )
+                if budget_current is not None:
+                    replace_current_version(
+                        connection,
+                        "budget_account_settings",
+                        "account_id",
+                        account_id,
+                        {
+                            "row_id": str(uuid4()),
+                            "account_id": account_id,
+                            "budget_account_type": budget_current["budget_account_type"],
+                            "display_liability_positive": budget_current[
+                                "display_liability_positive"
+                            ],
+                            "apy_minor": payload.get("apy_minor", budget_current.get("apy_minor")),
+                            "created_at": budget_current["created_at"],
+                            "created_by_user_id": budget_current["created_by_user_id"],
+                        },
+                        now=now,
+                    )
+            elif account_class == ACCOUNT_CLASS_TRACKING:
+                tracking_current = self.db.fetch_one(
+                    load_sql("queries/current_tracking_account_details_by_account"),
+                    (account_id,),
+                )
+                if tracking_current is not None:
+                    replace_current_version(
+                        connection,
+                        "tracking_account_details",
+                        "account_id",
+                        account_id,
+                        {
+                            "row_id": str(uuid4()),
+                            "account_id": account_id,
+                            "polarity": payload.get("polarity", tracking_current["polarity"]),
+                            "source": payload.get("source", tracking_current.get("source")),
+                            "apy_minor": payload.get(
+                                "apy_minor", tracking_current.get("apy_minor")
+                            ),
+                            "created_at": tracking_current["created_at"],
+                            "created_by_user_id": tracking_current["created_by_user_id"],
+                        },
+                        now=now,
+                    )
+            elif account_class == ACCOUNT_CLASS_INVESTMENT:
+                inv_current = self.db.fetch_one(
+                    load_sql("queries/current_investment_account_details_by_account"),
+                    (account_id,),
+                )
+                if inv_current is not None:
+                    replace_current_version(
+                        connection,
+                        "investment_account_details",
+                        "account_id",
+                        account_id,
+                        {
+                            "row_id": str(uuid4()),
+                            "account_id": account_id,
+                            "target_allocation": payload.get(
+                                "target_allocation", inv_current.get("target_allocation")
+                            ),
+                            "expense_ratio_minor": payload.get(
+                                "expense_ratio_minor", inv_current.get("expense_ratio_minor")
+                            ),
+                            "created_at": inv_current["created_at"],
+                            "created_by_user_id": inv_current["created_by_user_id"],
+                        },
+                        now=now,
+                    )
+            elif account_class == ACCOUNT_CLASS_LOAN:
+                loan_current = self.db.fetch_one(
+                    load_sql("queries/current_loan_details_by_account"),
+                    (account_id,),
+                )
+                if loan_current is not None:
+                    replace_current_version(
+                        connection,
+                        "loan_details",
+                        "account_id",
+                        account_id,
+                        {
+                            "row_id": str(uuid4()),
+                            "account_id": account_id,
+                            "original_amount_minor": payload.get(
+                                "original_amount_minor", loan_current.get("original_amount_minor")
+                            ),
+                            "origination_date": payload.get(
+                                "origination_date", loan_current.get("origination_date")
+                            ),
+                            "rate_minor": payload.get("rate_minor", loan_current.get("rate_minor")),
+                            "status": payload.get("loan_status", loan_current.get("status")),
+                            "created_at": loan_current["created_at"],
+                            "created_by_user_id": loan_current["created_by_user_id"],
+                        },
+                        now=now,
+                    )
         return {"account_id": account_id}
+
+    def create_investment_position(
+        self, account_id: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        now = self.clock.now()
+        position_id = str(uuid4())
+        with self.db.transaction() as connection:
+            insert_version(
+                connection,
+                "investment_positions",
+                {
+                    "position_id": position_id,
+                    "account_id": account_id,
+                    "ticker": payload["ticker"],
+                    "quantity_minor": payload["quantity_minor"],
+                    "average_basis_minor": payload.get("average_basis_minor"),
+                    "valid_from": now,
+                    "valid_to": MAX_TS,
+                    "created_at": now,
+                    "created_by_user_id": None,
+                },
+            )
+        return {"position_id": position_id}
+
+    def list_investment_positions(self, account_id: str) -> list[dict[str, Any]]:
+        return self.db.fetch_all(
+            load_sql("queries/current_investment_positions_by_account"),
+            (account_id,),
+        )
+
+    def create_investment_cash_snapshot(
+        self, account_id: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        now = self.clock.now()
+        snapshot_id = str(uuid4())
+        with self.db.transaction() as connection:
+            insert_version(
+                connection,
+                "investment_cash_snapshots",
+                {
+                    "snapshot_id": snapshot_id,
+                    "account_id": account_id,
+                    "effective_date": payload["effective_date"],
+                    "cash_balance_minor": payload["cash_balance_minor"],
+                    "notes": payload.get("notes", ""),
+                    "valid_from": now,
+                    "valid_to": MAX_TS,
+                    "created_at": now,
+                    "created_by_user_id": None,
+                },
+            )
+        return {"snapshot_id": snapshot_id}
+
+    def list_investment_cash_snapshots(self, account_id: str) -> list[dict[str, Any]]:
+        return self.db.fetch_all(
+            load_sql("queries/current_investment_cash_snapshots_by_account"),
+            (account_id,),
+        )
+
+    def create_investment_price_snapshot(self, payload: dict[str, Any]) -> dict[str, Any]:
+        now = self.clock.now()
+        snapshot_id = str(uuid4())
+        with self.db.transaction() as connection:
+            insert_version(
+                connection,
+                "investment_price_snapshots",
+                {
+                    "snapshot_id": snapshot_id,
+                    "ticker": payload["ticker"],
+                    "effective_date": payload["effective_date"],
+                    "price_minor": payload["price_minor"],
+                    "source": payload.get("source", "manual"),
+                    "valid_from": now,
+                    "valid_to": MAX_TS,
+                    "created_at": now,
+                    "created_by_user_id": None,
+                },
+            )
+        return {"snapshot_id": snapshot_id}
+
+    def list_investment_price_snapshots(self, ticker: str) -> list[dict[str, Any]]:
+        return self.db.fetch_all(
+            load_sql("queries/current_investment_price_snapshots_by_ticker"),
+            (ticker,),
+        )
+
+    def create_tracking_snapshot(self, account_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        now = self.clock.now()
+        snapshot_id = str(uuid4())
+        with self.db.transaction() as connection:
+            insert_version(
+                connection,
+                "net_worth_valuations",
+                {
+                    "valuation_id": snapshot_id,
+                    "account_id": account_id,
+                    "raw_name": "",
+                    "effective_date": payload["effective_date"],
+                    "amount_minor": payload["amount_minor"],
+                    "notes": payload.get("notes", ""),
+                    "metadata": json_dumps({"source": payload.get("source", "manual")}),
+                    "valid_from": now,
+                    "valid_to": MAX_TS,
+                    "created_at": now,
+                    "created_by_user_id": None,
+                },
+            )
+        return {"snapshot_id": snapshot_id}
+
+    def list_tracking_snapshots(self, account_id: str) -> list[dict[str, Any]]:
+        return self.db.fetch_all(
+            load_sql("queries/current_net_worth_valuations_by_account"),
+            (account_id,),
+        )
+
+    def create_loan_snapshot(self, account_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        now = self.clock.now()
+        snapshot_id = str(uuid4())
+        with self.db.transaction() as connection:
+            insert_version(
+                connection,
+                "loan_balance_snapshots",
+                {
+                    "snapshot_id": snapshot_id,
+                    "account_id": account_id,
+                    "effective_date": payload["effective_date"],
+                    "principal_balance_minor": payload["principal_balance_minor"],
+                    "accrued_interest_minor": payload.get("accrued_interest_minor"),
+                    "notes": payload.get("notes", ""),
+                    "valid_from": now,
+                    "valid_to": MAX_TS,
+                    "created_at": now,
+                    "created_by_user_id": None,
+                },
+            )
+        return {"snapshot_id": snapshot_id}
+
+    def list_loan_snapshots(self, account_id: str) -> list[dict[str, Any]]:
+        return self.db.fetch_all(
+            load_sql("queries/current_loan_balance_snapshots_by_account"),
+            (account_id,),
+        )
+
+    def create_tangible_asset_valuation(
+        self, account_id: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        now = self.clock.now()
+        valuation_id = str(uuid4())
+        with self.db.transaction() as connection:
+            insert_version(
+                connection,
+                "tangible_asset_valuations",
+                {
+                    "valuation_id": valuation_id,
+                    "account_id": account_id,
+                    "effective_date": payload["effective_date"],
+                    "amount_minor": payload["amount_minor"],
+                    "source": payload.get("source", "manual"),
+                    "notes": payload.get("notes", ""),
+                    "valid_from": now,
+                    "valid_to": MAX_TS,
+                    "created_at": now,
+                    "created_by_user_id": None,
+                },
+            )
+        return {"valuation_id": valuation_id}
+
+    def list_tangible_asset_valuations(self, account_id: str) -> list[dict[str, Any]]:
+        return self.db.fetch_all(
+            load_sql("queries/current_tangible_asset_valuations_by_account"),
+            (account_id,),
+        )
 
     def create_category_group(self, payload: dict[str, Any]) -> dict[str, Any]:
         now = self.clock.now()
@@ -2021,11 +2390,11 @@ class DojoService:
         transactions: list[dict[str, Any]],
         allocations: list[dict[str, Any]],
     ) -> int:
-        setting = self.db.fetch_one(
-            load_sql("queries/current_budget_account_setting_by_payment_category"),
+        link = self.db.fetch_one(
+            load_sql("queries/current_account_budget_links_by_category"),
             (category_id,),
         )
-        if setting is None:
+        if link is None:
             return 0
         total = 0
         for allocation in allocations:
@@ -2035,12 +2404,12 @@ class DojoService:
                 total -= allocation["amount_minor"]
         for transaction in transactions:
             if (
-                transaction["account_id"] == setting["account_id"]
+                transaction["account_id"] == link["account_id"]
                 and transaction["category_id"] is not None
             ):
                 total += -transaction["amount_minor"]
             if (
-                transaction["account_id"] == setting["account_id"]
+                transaction["account_id"] == link["account_id"]
                 and transaction["system_category"] == SYSTEM_CATEGORY_TRANSFER
                 and transaction["amount_minor"] > 0
             ):
@@ -2114,6 +2483,31 @@ class DojoService:
             },
         )
         return category_id
+
+    def _create_account_budget_link(
+        self,
+        connection: Any,
+        account_id: str,
+        category_id: str,
+        link_behavior: str,
+        derivation_method: str,
+        now: datetime,
+    ) -> None:
+        insert_version(
+            connection,
+            "account_budget_links",
+            {
+                "account_id": account_id,
+                "category_id": category_id,
+                "link_behavior": link_behavior,
+                "derivation_method": derivation_method,
+                "effective_date": now.date(),
+                "valid_from": now,
+                "valid_to": MAX_TS,
+                "created_at": now,
+                "created_by_user_id": None,
+            },
+        )
 
     def _bucket_id_from_name(self, name: str, categories: dict[str, Any]) -> str:
         if name.casefold() == "available to budget":

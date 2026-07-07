@@ -5,7 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
-AccountClass = Literal["BUDGET", "TRACKING_BALANCE", "TRACKING_POSITIONS", "TRACKING_DEBT"]
+AccountClass = Literal["BUDGET", "TRACKING", "INVESTMENT", "LOAN", "TANGIBLE_ASSET"]
 BudgetAccountType = Literal["DEPOSIT", "CREDIT_CARD"]
 TransactionStatus = Literal["PENDING", "CLEARED"]
 SystemCategory = Literal[
@@ -59,15 +59,39 @@ class AccountPayload(BaseModel):
     name: str = Field(min_length=1)
     account_class: AccountClass
     budget_account_type: BudgetAccountType | None = None
+    institution: str | None = None
+    account_number_last4: str | None = None
     is_hidden: bool = False
     is_active: bool = True
     display_liability_positive: bool | None = None
+    apy_minor: int | None = None
+    polarity: str | None = None
+    source: str | None = None
+    target_allocation: str | None = None
+    expense_ratio_minor: int | None = None
+    original_amount_minor: int | None = None
+    origination_date: str | None = None
+    rate_minor: int | None = None
+    status: str | None = None
+    opening_valuation_minor: int | None = None
+    opening_valuation_date: str | None = None
 
 
 class AccountUpdatePayload(BaseModel):
     name: str | None = None
     is_hidden: bool | None = None
     is_active: bool | None = None
+    institution: str | None = None
+    account_number_last4: str | None = None
+    apy_minor: int | None = None
+    polarity: str | None = None
+    source: str | None = None
+    target_allocation: str | None = None
+    expense_ratio_minor: int | None = None
+    original_amount_minor: int | None = None
+    origination_date: str | None = None
+    rate_minor: int | None = None
+    loan_status: str | None = None
 
 
 class CategoryGroupPayload(BaseModel):
@@ -118,3 +142,42 @@ class GoalPayload(BaseModel):
     goal_amount_minor: int | None = None
     goal_frequency: str | None = None
     goal_due_date: str | None = None
+
+
+class TrackingAccountSnapshotPayload(BaseModel):
+    effective_date: date
+    amount_minor: int
+    source: str = "manual"
+    notes: str = ""
+
+
+class LoanBalanceSnapshotPayload(BaseModel):
+    effective_date: date
+    principal_balance_minor: int
+    accrued_interest_minor: int | None = None
+    notes: str = ""
+
+
+class TangibleAssetValuationPayload(BaseModel):
+    effective_date: date
+    amount_minor: int
+    source: str = "manual"
+    notes: str = ""
+
+
+class InvestmentPositionPayload(BaseModel):
+    ticker: str = Field(min_length=1)
+    quantity_minor: int
+    average_basis_minor: int | None = None
+
+
+class InvestmentCashSnapshotPayload(BaseModel):
+    effective_date: date
+    cash_balance_minor: int
+    notes: str = ""
+
+
+class InvestmentPriceSnapshotPayload(BaseModel):
+    effective_date: date
+    price_minor: int = Field(gt=0)
+    source: str = "manual"

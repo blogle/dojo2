@@ -332,7 +332,7 @@ def describe_dataset(bundle: ParsedImportBundle) -> dict[str, Any]:
     return {
         "accounts": len(bundle.accounts),
         "budget_accounts": accounts_by_class.get("BUDGET", 0),
-        "tracking_accounts": accounts_by_class.get("TRACKING_BALANCE", 0),
+        "tracking_accounts": accounts_by_class.get("TRACKING", 0),
         "groups": len(bundle.groups),
         "categories": len(bundle.categories),
         "standard_categories": categories_by_kind.get("STANDARD", 0),

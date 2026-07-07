@@ -466,6 +466,7 @@ class ParsedValuation:
     effective_date: date
     amount_minor: int
     notes: str
+    is_debt: bool
 
 
 @dataclass(slots=True)
@@ -1341,6 +1342,7 @@ def parse_net_worth_named_ranges(
                 effective_date=parse_date_value(date_raw),
                 amount_minor=amount_minor,
                 notes=row["notes"].strip(),
+                is_debt=raw_name in debt_names or normalized_name in normalized_debt_names,
             )
         )
     return records

@@ -15,6 +15,8 @@ from dojo.constants import (
     ACCOUNT_CLASS_LOAN,
     BUDGET_ACCOUNT_TYPE_CREDIT_CARD,
     BUDGET_ACCOUNT_TYPE_DEPOSIT,
+    DERIVATION_METHOD_CC_SPEND_AND_TRANSFER,
+    DERIVATION_METHOD_TRANSFER_IN_ONLY,
     LINK_BEHAVIOR_CREDIT_CARD_PAYMENT,
     LINK_BEHAVIOR_INVESTMENT_CONTRIBUTION,
     LINK_BEHAVIOR_LOAN_PAYMENT,
@@ -367,7 +369,13 @@ def _insert_account_budget_link(
     category_id: str,
     link_behavior: str,
     effective_date: date = date(2026, 2, 1),
+    derivation_method: str | None = None,
 ) -> None:
+    if derivation_method is None:
+        if link_behavior == LINK_BEHAVIOR_CREDIT_CARD_PAYMENT:
+            derivation_method = DERIVATION_METHOD_CC_SPEND_AND_TRANSFER
+        else:
+            derivation_method = DERIVATION_METHOD_TRANSFER_IN_ONLY
     with service.db.transaction() as connection:
         connection.execute(
             load_sql("queries/close_account_budget_links_by_account_behavior"),
@@ -380,6 +388,7 @@ def _insert_account_budget_link(
                 "account_id": account_id,
                 "category_id": category_id,
                 "link_behavior": link_behavior,
+                "derivation_method": derivation_method,
                 "effective_date": effective_date,
                 "valid_from": "2026-02-01T00:00:00+00:00",
                 "valid_to": MAX_TS,
