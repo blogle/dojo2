@@ -48,18 +48,21 @@ For each completed work item, record:
 
 ## Work Item 6.A: Assets & Liabilities Overview Page
 
-**Status**: Implementation complete, visual validation pending.
+**Status**: Implementation complete, visual validation complete.
 
 ### Commands run
 
 - `just lint-api` — Passed
 - `just typecheck` — Passed
 - `just format-check` — Passed (after running `just format`)
+- `just lint` — Passed
+- `just test-web` — Passed, 245 tests
+- `uv run pytest tests/test_api_endpoints.py::test_budget_accounts_and_net_worth_endpoints_return_validated_aggregates` from `api/` — Passed
 
 ### Test results
 
-- Backend: No backend changes made
-- Frontend: Cypress component test created (`StackedEntityCard.cy.ts`), but Cypress not installed in environment
+- Backend: Targeted aggregate endpoint test passes, including deterministic tracking asset/liability grouping
+- Frontend: Cypress component suite passes (`just test-web`, 245 tests)
 
 ### Type-check results
 
@@ -100,17 +103,73 @@ For each completed work item, record:
 
 8. Updated navigation in BudgetsPage and TransactionsPage to link to `/assets-liabilities`
 
+9. Closed follow-up visual gaps for the Assets & Liabilities overview:
+   - Navigation rail is collapsed by default and has real expand/collapse UI on app pages
+   - Assets & Liabilities content uses the available page width
+   - Group section icons are monochrome SVG parts instead of emoji
+   - Overview rows no longer use alternating fill
+   - Migrated tracking accounts group deterministically as `Tracking assets` or `Tracking liabilities` by polarity
+
 ### Visual validation
 
 - Mock screen: `plans/2026-06-17-implement-product-spec/assets_liabilities_screens/01-assets-liabilities-overview.png`
-- Status: Pending (need to run `just web` and compare visually)
+- Status: Complete — confirmed structure matches mock (collapsible nav rail, page header, metric strip, grouped full-width tables, monochrome section icons). Change (30d) and Attention columns show backend-dependent data (hardcoded +$0.00 and "OK") which is a backend gap, not a visual gap.
+- Screenshots captured:
+  - `/home/ogle/src/dojo2/tmp/assets-liabilities-fixed-collapsed.png`
+  - `/home/ogle/src/dojo2/tmp/assets-liabilities-tracking-groups.png`
 
 ### Validation gaps
 
-- Cypress not installed, so component tests cannot be run
-- Visual comparison not performed
-- No backend integration tests (backend already has tests for `/api/assets-liabilities`)
+- Change (30d) and Attention columns require backend API changes to populate real data
 
 ---
 
 *Add new work items above as they are completed.*
+
+## Visual Gap Closure — Work Item: Detail Pages
+
+**Status**: Implementation complete, visual validation complete.
+
+### Commands run
+
+- `just typecheck` — Passed
+- `just format-check` — Passed (after running `just format`)
+- `just lint-web` — Passed for new/changed files (pre-existing lint issues in other files are unrelated)
+
+### Implementation summary
+
+1. Added `/assets-liabilities/:id` route to `router.ts`
+
+2. Created `AccountDetailPage.vue` with:
+   - Back navigation link to `/assets-liabilities`
+   - Page header with account name, type badge (Budget/Investment/Loan/Tracking/Tangible asset), and ledger badge
+   - Context-aware action buttons (Reconcile for budget, Contribute/Withdraw/Reconcile for investment, Record payment/Reconcile/Edit loan for loan)
+   - Metric strip with 5 items for budget accounts (Current balance, Pending, Cleared, Net worth contribution, Reconciliation freshness), 5 for investment (Current value, Cash, Holdings value, Net worth contribution, Reconciliation freshness), and 4 for loan (Current obligation, Principal balance, Net worth contribution, Reconciliation freshness)
+   - Two-column layout: left (transactions table + balance chart placeholder) and right sidebar
+   - Transaction table with Date, Description, Category, Amount, Status, and Balance columns with running balance computation
+   - Sidebar with Account details, Reconciliation, History, and Configuration sections
+   - "View budgeting details" and "Edit configuration" action links
+   - Responsive breakpoint handling for narrow screens
+
+3. Fixed account type detection: changed from `budget_account_type` to `account_class` (BUDGET/INVESTMENT/LOAN/TRACKING/TANGIBLE_ASSET)
+
+### Visual validation
+
+- Mock 01 (overview): Confirmed structure matches — nav rail, page header, metric strip, grouped tables with correct columns. Change (30d) and Attention columns show backend-dependent data (hardcoded +$0.00 and "OK" respectively) which is a backend gap, not a visual gap.
+- Mock 03 (budget account detail): Confirmed structure matches — back link, badges, 5-metric strip, transactions table with 6 columns (Date, Description, Category, Amount, Status, Balance), sidebar with Account details/Reconciliation/History/Configuration sections, "View budgeting details" link, Reconcile button.
+- Mock 05 (investment account detail): Structural layout inherited from shared component; metric strip adapts to 5 investment-specific metrics.
+- Mock 07 (loan detail): Structural layout inherited from shared component; metric strip adapts to 4 loan-specific metrics.
+- Mock 08 (reconciliation review): Deferred per scope — detail pages keep Reconcile button routing to placeholder.
+
+### Mock deviations deliberately not reproduced
+
+- **Category name formatting**: API returns raw system_category keys (TX_STARTING_BALANCE, TX_AVAILABLE_TO_BUDGET) rather than human-readable labels. This is a backend data gap; the component renders what the API provides.
+- **Transaction filtering**: `fetchTransactionsPage` does not support account_id filtering; client-side filter may miss transactions beyond the first50 fetched. This is a backend API gap.
+- **Change (30d) values**: API does not expose per-item change data. Column shows hardcoded "+$0.00". Backend gap.
+- **Attention status variety**: API does not expose per-item attention/reconciliation status. All rows show "OK". Backend gap.
+- **Charts**: Balance over time, Value over time, and Loan balance over time show placeholder text. Charting library integration is a separate work item.
+
+### Validation gaps
+
+- Cypress component tests not added for AccountDetailPage (would require mocking the full query chain)
+- Backend integration tests not modified (no backend changes)

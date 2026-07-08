@@ -27,6 +27,28 @@ describe("MetricStrip", () => {
     cy.get("[data-cy=metric-strip-root]").should("contain.text", "Expenses");
   });
 
+  it("distributes metric columns evenly", () => {
+    const scenario = fixtures.scenarios.find(({ name }) => name === "default");
+
+    mount(fixtures.component, {
+      props: scenario?.props,
+      slots: scenario?.slots,
+    });
+
+    cy.get("[data-cy=metric-strip-root]")
+      .find(".metric-strip__item")
+      .then(($items) => {
+        const widths = [...$items].map(
+          (item) => item.getBoundingClientRect().width,
+        );
+        const [firstWidth, ...remainingWidths] = widths;
+
+        remainingWidths.forEach((width) => {
+          expect(width).to.be.closeTo(firstWidth, 0.5);
+        });
+      });
+  });
+
   it("renders metric values", () => {
     mount(MetricStrip, {
       props: {

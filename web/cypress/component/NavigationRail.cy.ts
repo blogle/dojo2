@@ -1,5 +1,5 @@
 import { mount } from "cypress/vue";
-import { defineComponent, h, ref } from "vue";
+import { h } from "vue";
 
 import fixtures from "../../src/dojo/components/navigation/NavigationRail.fixtures";
 
@@ -16,9 +16,8 @@ describe("NavigationRail", () => {
   });
 
   it("widens when expanded and keeps the current item inside bounds", () => {
-    const Harness = defineComponent({
+    const Harness = {
       setup() {
-        const expanded = ref(false);
         const collapsed = fixtures.scenarios.find(
           (scenario) => scenario.name === "collapsed",
         );
@@ -27,7 +26,6 @@ describe("NavigationRail", () => {
         );
 
         return {
-          expanded,
           items:
             expandedScenario?.props?.items ?? collapsed?.props?.items ?? [],
         };
@@ -42,17 +40,13 @@ describe("NavigationRail", () => {
           [
             h(fixtures.component, {
               items: this.items,
-              expanded: this.expanded,
               collapsible: true,
               fullHeight: true,
-              onToggle: () => {
-                this.expanded = !this.expanded;
-              },
             }),
           ],
         );
       },
-    });
+    };
 
     mount(Harness);
 
@@ -61,10 +55,18 @@ describe("NavigationRail", () => {
 
       cy.get("[data-cy=navigation-rail-toggle]").click();
 
-      cy.get("[data-cy=navigation-rail-root]").then(($expandedRail) => {
+      cy.get("[data-cy=navigation-rail-root]").should(($expandedRail) => {
         const expandedRect = $expandedRail[0].getBoundingClientRect();
         expect(expandedRect.width).to.be.greaterThan(collapsedRect.width);
+      });
 
+      cy.get("[data-cy=navigation-rail-root]").should(($expandedRail) => {
+        const expandedRect = $expandedRail[0].getBoundingClientRect();
+        expect(expandedRect.width).to.be.greaterThan(160);
+      });
+
+      cy.get("[data-cy=navigation-rail-root]").then(($expandedRail) => {
+        const expandedRect = $expandedRail[0].getBoundingClientRect();
         cy.get("[data-cy=navigation-rail-item-transactions]").then(($item) => {
           const itemRect = $item[0].getBoundingClientRect();
 
@@ -101,6 +103,42 @@ describe("NavigationRail", () => {
       "not.contain.text",
       "1. Foundations",
     );
+  });
+
+  it("keeps a full-height rail pinned while the page scrolls", () => {
+    const scenario = fixtures.scenarios.find(({ name }) => name === "expanded");
+
+    const Harness = {
+      setup() {
+        return {
+          items: scenario?.props?.items ?? [],
+        };
+      },
+      render() {
+        return h(
+          "div",
+          {
+            style:
+              "display: flex; min-height: 1600px; background: var(--color-background);",
+          },
+          [
+            h(fixtures.component, {
+              items: this.items,
+              fullHeight: true,
+            }),
+            h("main", { style: "flex: 1;" }, "Scrollable content"),
+          ],
+        );
+      },
+    };
+
+    mount(Harness);
+
+    cy.scrollTo(0, 600);
+
+    cy.get("[data-cy=navigation-rail-root]").should(($rail) => {
+      expect($rail[0].getBoundingClientRect().top).to.equal(0);
+    });
   });
 
   it("keeps demo items inert while rendering the same anchor markup", () => {

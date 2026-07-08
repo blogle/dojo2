@@ -10,7 +10,9 @@ describe("DesignSystemPage", () => {
     cy.get("[data-cy=design-system-page-container]").then(($container) => {
       const collapsedLeft = $container[0].getBoundingClientRect().left;
 
-      cy.get("[data-cy=navigation-rail-toggle]").click();
+      cy.get("[data-cy=design-system-page-nav-shell]")
+        .find("[data-cy=navigation-rail-toggle]")
+        .click();
 
       cy.get("[data-cy=design-system-page-container]").should(
         ($expandedContainer) => {
@@ -27,7 +29,9 @@ describe("DesignSystemPage", () => {
     cy.viewport(390, 844);
     mount(DesignSystemPage);
 
-    cy.get("[data-cy=navigation-rail-toggle]").should("not.exist");
+    cy.get("[data-cy=design-system-page-nav-shell]")
+      .find("[data-cy=navigation-rail-toggle]")
+      .should("not.exist");
     cy.get("[data-cy=design-system-page-nav-shell]").should(($shell) => {
       expect($shell[0].getBoundingClientRect().width).to.equal(56);
     });

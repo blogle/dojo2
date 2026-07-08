@@ -4,7 +4,6 @@ import { computed, ref } from "vue";
 import { useRouter } from "vue-router";
 
 import { fetchAssetsLiabilities } from "@/dojo/api/client";
-import Button from "@/dojo/components/actions/Button.vue";
 import DropdownButton from "@/dojo/components/actions/DropdownButton.vue";
 import MetricStrip from "@/dojo/components/data/MetricStrip.vue";
 import NavigationRail from "@/dojo/components/navigation/NavigationRail.vue";
@@ -18,8 +17,8 @@ const navItems = computed(() => [
   {
     kind: "route" as const,
     key: "home",
-    label: "Home",
-    icon: "foundations",
+    label: "Dashboard",
+    icon: "dashboard",
     href: "/",
   },
   {
@@ -93,16 +92,50 @@ const groupLabels: Record<string, string> = {
   CASH: "Cash & equivalents",
   INVESTMENTS: "Investments",
   TANGIBLE_ASSETS: "Tangible assets",
+  TRACKING_ASSETS: "Tracking assets",
   CREDIT: "Credit",
   LOANS: "Loans",
+  TRACKING_LIABILITIES: "Tracking liabilities",
 };
 
-const groupIcons: Record<string, string> = {
-  CASH: "💰",
-  INVESTMENTS: "📈",
-  TANGIBLE_ASSETS: "🏠",
-  CREDIT: "💳",
-  LOANS: "🏦",
+interface IconPart {
+  tag: "path" | "rect" | "circle";
+  attrs: Record<string, number | string>;
+}
+
+const groupIcons: Record<string, IconPart[]> = {
+  CASH: [
+    { tag: "rect", attrs: { x: 4, y: 7, width: 16, height: 10, rx: 1.5 } },
+    { tag: "path", attrs: { d: "M7 12h.01M17 12h.01M4 10h16" } },
+  ],
+  INVESTMENTS: [
+    { tag: "path", attrs: { d: "M5 17l4-4 3 2 5-7" } },
+    { tag: "path", attrs: { d: "M17 8v5h-5" } },
+    { tag: "path", attrs: { d: "M5 19h14" } },
+  ],
+  TANGIBLE_ASSETS: [
+    { tag: "path", attrs: { d: "M4 11l8-6 8 6" } },
+    { tag: "path", attrs: { d: "M6 10v9h12v-9" } },
+    { tag: "path", attrs: { d: "M10 19v-5h4v5" } },
+  ],
+  TRACKING_ASSETS: [
+    { tag: "path", attrs: { d: "M5 7h14M5 12h14M5 17h14" } },
+    { tag: "circle", attrs: { cx: 7, cy: 7, r: 1 } },
+    { tag: "circle", attrs: { cx: 7, cy: 12, r: 1 } },
+    { tag: "circle", attrs: { cx: 7, cy: 17, r: 1 } },
+  ],
+  CREDIT: [
+    { tag: "rect", attrs: { x: 4, y: 6, width: 16, height: 12, rx: 1.5 } },
+    { tag: "path", attrs: { d: "M4 10h16M7 14h4" } },
+  ],
+  LOANS: [
+    { tag: "path", attrs: { d: "M4 10h16L12 5 4 10z" } },
+    { tag: "path", attrs: { d: "M6 10v7M10 10v7M14 10v7M18 10v7M4 19h16" } },
+  ],
+  TRACKING_LIABILITIES: [
+    { tag: "path", attrs: { d: "M6 6h12v12H6z" } },
+    { tag: "path", attrs: { d: "M9 10h6M9 14h4" } },
+  ],
 };
 
 const collapsedGroups = ref<Set<string>>(new Set());
@@ -116,10 +149,6 @@ const toggleGroup = (key: string) => {
 };
 
 const isGroupCollapsed = (key: string) => collapsedGroups.value.has(key);
-
-const handleAddItem = () => {
-  router.push("/assets-liabilities/add");
-};
 
 const addItems = [
   { key: "budget-account", label: "Budget account" },
@@ -172,7 +201,7 @@ const getSourceLabel = (source: string) => {
   <div class="assets-liabilities-page" data-cy="assets-liabilities-page">
     <NavigationRail
       :items="navItems"
-      :expanded="true"
+      :full-height="true"
       brand="dojo"
       aria-label="Main navigation"
     />
@@ -217,9 +246,19 @@ const getSourceLabel = (source: string) => {
             @click="toggleGroup(group.key)"
           >
             <div class="assets-liabilities-page__group-title-row">
-              <span class="assets-liabilities-page__group-icon">{{
-                groupIcons[group.key]
-              }}</span>
+              <span
+                class="assets-liabilities-page__group-icon"
+                aria-hidden="true"
+              >
+                <svg viewBox="0 0 24 24" fill="none">
+                  <template
+                    v-for="(part, index) in groupIcons[group.key]"
+                    :key="index"
+                  >
+                    <component :is="part.tag" v-bind="part.attrs" />
+                  </template>
+                </svg>
+              </span>
               <h2 class="assets-liabilities-page__group-title">
                 {{ groupLabels[group.key] || group.key }}
               </h2>
@@ -414,10 +453,9 @@ const getSourceLabel = (source: string) => {
   flex: 1;
   display: grid;
   gap: var(--space-lg);
-  padding: var(--space-xl);
-  max-width: var(--layout-page-max-width);
-  margin: 0 auto;
+  padding: var(--space-page-block) var(--space-page-inline);
   min-width: 0;
+  align-content: start;
 }
 
 .assets-liabilities-page__metrics {
@@ -471,7 +509,22 @@ const getSourceLabel = (source: string) => {
 }
 
 .assets-liabilities-page__group-icon {
-  font-size: 18px;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-primary);
+  flex-shrink: 0;
+}
+
+.assets-liabilities-page__group-icon svg {
+  width: 20px;
+  height: 20px;
+  stroke: currentColor;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .assets-liabilities-page__group-title {
@@ -567,10 +620,6 @@ const getSourceLabel = (source: string) => {
   text-align: left;
   width: 100%;
   align-items: center;
-}
-
-.assets-liabilities-page__row:nth-child(even) {
-  background: var(--color-surface-muted);
 }
 
 .assets-liabilities-page__row:last-child {

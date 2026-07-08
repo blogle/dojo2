@@ -88,8 +88,8 @@ const navItems = computed(() => [
   {
     kind: "route" as const,
     key: "home",
-    label: "Home",
-    icon: "foundations",
+    label: "Dashboard",
+    icon: "dashboard",
     href: "/",
   },
   {
@@ -110,7 +110,7 @@ const navItems = computed(() => [
   {
     kind: "route" as const,
     key: "assets-liabilities",
-    label: "Assets",
+    label: "Assets & Liabilities",
     icon: "assets",
     href: "/assets-liabilities",
   },
@@ -587,6 +587,7 @@ function submitFundGroup(
   <div class="budgets-page" data-cy="budgets-page-root">
     <NavigationRail
       :items="navItems"
+      :full-height="true"
       brand="dojo"
       aria-label="Main navigation"
     />
@@ -857,20 +858,14 @@ function submitFundGroup(
 
 .budgets-page__main {
   flex: 1;
-  margin-left: var(--space-nav-collapsed);
   padding: var(--space-page-block) var(--space-page-inline);
   display: grid;
   gap: var(--space-lg);
   align-content: start;
 }
 
-.budgets-page__main :deep(.metric-strip__item) {
-  flex: 1;
-}
-
 @media (max-width: 720px) {
   .budgets-page__main {
-    margin-left: 0;
     padding: var(--space-md);
   }
 }

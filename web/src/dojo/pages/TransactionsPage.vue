@@ -120,8 +120,8 @@ const navItems = computed(() => [
   {
     kind: "route" as const,
     key: "home",
-    label: "Home",
-    icon: "foundations",
+    label: "Dashboard",
+    icon: "dashboard",
     href: "/",
   },
   {
@@ -142,7 +142,7 @@ const navItems = computed(() => [
   {
     kind: "route" as const,
     key: "assets-liabilities",
-    label: "Assets",
+    label: "Assets & Liabilities",
     icon: "assets",
     href: "/assets-liabilities",
   },
@@ -253,6 +253,7 @@ onUnmounted(() => {
   <div class="transactions-page" data-cy="transactions-page-root">
     <NavigationRail
       :items="navItems"
+      :full-height="true"
       brand="dojo"
       aria-label="Main navigation"
     />
@@ -312,16 +313,11 @@ onUnmounted(() => {
 
 .transactions-page__main {
   flex: 1;
-  margin-left: var(--space-nav-collapsed);
   padding: var(--space-page-block) var(--space-page-inline);
   display: grid;
   gap: var(--space-lg);
   align-content: start;
   position: relative;
-}
-
-.transactions-page__main :deep(.metric-strip__item) {
-  flex: 1;
 }
 
 .transactions-page__month-nav {
@@ -376,7 +372,6 @@ onUnmounted(() => {
 
 @media (max-width: 720px) {
   .transactions-page__main {
-    margin-left: 0;
     padding: var(--space-md);
   }
 }

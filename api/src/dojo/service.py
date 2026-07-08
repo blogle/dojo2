@@ -825,15 +825,19 @@ class DojoService:
             "CASH": [],
             "INVESTMENTS": [],
             "TANGIBLE_ASSETS": [],
+            "TRACKING_ASSETS": [],
             "CREDIT": [],
             "LOANS": [],
+            "TRACKING_LIABILITIES": [],
         }
         group_totals: dict[str, int] = {
             "CASH": 0,
             "INVESTMENTS": 0,
             "TANGIBLE_ASSETS": 0,
+            "TRACKING_ASSETS": 0,
             "CREDIT": 0,
             "LOANS": 0,
+            "TRACKING_LIABILITIES": 0,
         }
         asset_total = 0
         liability_total = 0
@@ -873,16 +877,16 @@ class DojoService:
                 source = "valuation" if valuation is not None else "ledger"
                 polarity = account.get("tracking_polarity", "ASSET")
                 if polarity == "LIABILITY":
-                    groups["LOANS"].append(
+                    groups["TRACKING_LIABILITIES"].append(
                         account | {"source_of_truth": source, "value_minor": amount}
                     )
-                    group_totals["LOANS"] += amount
+                    group_totals["TRACKING_LIABILITIES"] += amount
                     liability_total += min(amount, 0)
                 else:
-                    groups["CASH"].append(
+                    groups["TRACKING_ASSETS"].append(
                         account | {"source_of_truth": source, "value_minor": amount}
                     )
-                    group_totals["CASH"] += amount
+                    group_totals["TRACKING_ASSETS"] += amount
                     asset_total += max(amount, 0)
             elif account_class == ACCOUNT_CLASS_LOAN:
                 groups["LOANS"].append(

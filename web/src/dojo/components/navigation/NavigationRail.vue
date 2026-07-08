@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { computed, ref } from "vue";
+
 const emit = defineEmits<{
   toggle: [];
 }>();
@@ -20,10 +22,10 @@ export interface NavigationRailItem {
   interactive?: boolean;
 }
 
-withDefaults(
+const props = withDefaults(
   defineProps<{
     items: NavigationRailItem[];
-    expanded?: boolean;
+    expanded?: boolean | null;
     ariaLabel?: string;
     width?: string;
     fullHeight?: boolean;
@@ -32,14 +34,19 @@ withDefaults(
     brand?: string;
   }>(),
   {
-    expanded: false,
+    expanded: null,
     ariaLabel: "Navigation rail",
     width: undefined,
     fullHeight: false,
-    fixed: true,
-    collapsible: false,
+    fixed: false,
+    collapsible: true,
     brand: undefined,
   },
+);
+
+const internalExpanded = ref(false);
+const effectiveExpanded = computed(
+  () => props.expanded ?? internalExpanded.value,
 );
 
 const iconParts = (icon: string): IconPart[] => {
@@ -61,12 +68,28 @@ const iconParts = (icon: string): IconPart[] => {
       { tag: "rect", attrs: { x: 11, y: 11, width: 9, height: 2.5, rx: 1.25 } },
       { tag: "rect", attrs: { x: 11, y: 16, width: 9, height: 2.5, rx: 1.25 } },
     ],
-    transactions: [{ tag: "path", attrs: { d: "M5 7h14M12 7v10" } }],
-    budget: [
-      { tag: "path", attrs: { d: "M7 18h10M8 18V6h8v12" } },
-      { tag: "path", attrs: { d: "M10 10h4M10 13h4" } },
+    dashboard: [
+      { tag: "path", attrs: { d: "M5 18V9" } },
+      { tag: "path", attrs: { d: "M10 18V6" } },
+      { tag: "path", attrs: { d: "M15 18v-4" } },
+      { tag: "path", attrs: { d: "M4 20h16" } },
     ],
-    assets: [{ tag: "path", attrs: { d: "M5 15h4l2-6 3 9 2-5h3" } }],
+    transactions: [
+      { tag: "rect", attrs: { x: 6, y: 4, width: 12, height: 16, rx: 1.5 } },
+      { tag: "path", attrs: { d: "M9 8h6M9 12h6M9 16h4" } },
+    ],
+    budget: [
+      { tag: "circle", attrs: { cx: 12, cy: 12, r: 7 } },
+      { tag: "path", attrs: { d: "M12 5v14M5 12h14" } },
+      { tag: "path", attrs: { d: "M7 7l10 10M17 7L7 17" } },
+    ],
+    assets: [
+      { tag: "circle", attrs: { cx: 12, cy: 12, r: 7 } },
+      {
+        tag: "path",
+        attrs: { d: "M5 12h14M12 5a10 10 0 010 14M12 5a10 10 0 000 14" },
+      },
+    ],
     expand: [{ tag: "path", attrs: { d: "M9 6l6 6-6 6" } }],
     collapse: [{ tag: "path", attrs: { d: "M15 6l-6 6 6 6" } }],
   };
@@ -79,17 +102,24 @@ const onItemClick = (event: MouseEvent, item: NavigationRailItem) => {
     event.preventDefault();
   }
 };
+
+const toggleExpanded = () => {
+  if (props.expanded === null) {
+    internalExpanded.value = !internalExpanded.value;
+  }
+  emit("toggle");
+};
 </script>
 
 <template>
   <nav
     class="navigation-rail"
     :class="{
-      'navigation-rail--expanded': expanded,
+      'navigation-rail--expanded': effectiveExpanded,
       'navigation-rail--full-height': fullHeight,
       'navigation-rail--fixed': fixed,
     }"
-    :style="width && !expanded ? { width } : undefined"
+    :style="width && !effectiveExpanded ? { width } : undefined"
     :aria-label="ariaLabel"
     data-cy="navigation-rail-root"
   >
@@ -124,11 +154,11 @@ const onItemClick = (event: MouseEvent, item: NavigationRailItem) => {
             />
           </svg>
         </span>
-        <span v-if="expanded" class="navigation-rail__label">{{
+        <span v-if="effectiveExpanded" class="navigation-rail__label">{{
           item.visibleLabel ?? item.label
         }}</span>
         <span
-          v-if="item.badge !== undefined && expanded"
+          v-if="item.badge !== undefined && effectiveExpanded"
           class="navigation-rail__badge"
           >{{ item.badge }}</span
         >
@@ -141,9 +171,11 @@ const onItemClick = (event: MouseEvent, item: NavigationRailItem) => {
       class="navigation-rail__toggle"
       data-cy="navigation-rail-toggle"
       :aria-label="
-        expanded ? 'Collapse navigation rail' : 'Expand navigation rail'
+        effectiveExpanded
+          ? 'Collapse navigation rail'
+          : 'Expand navigation rail'
       "
-      @click="emit('toggle')"
+      @click="toggleExpanded"
     >
       <span class="navigation-rail__icon" aria-hidden="true">
         <svg
@@ -156,7 +188,9 @@ const onItemClick = (event: MouseEvent, item: NavigationRailItem) => {
         >
           <component
             :is="part.tag"
-            v-for="(part, index) in iconParts(expanded ? 'collapse' : 'expand')"
+            v-for="(part, index) in iconParts(
+              effectiveExpanded ? 'collapse' : 'expand',
+            )"
             :key="`toggle-${index}`"
             v-bind="part.attrs"
           />
@@ -168,13 +202,15 @@ const onItemClick = (event: MouseEvent, item: NavigationRailItem) => {
 
 <style scoped>
 .navigation-rail {
+  box-sizing: border-box;
   width: var(--space-nav-collapsed);
   display: grid;
   gap: 0;
-  padding: 0;
-  border: 1px solid var(--color-outline);
+  padding: var(--space-sm);
+  border-right: 1px solid var(--color-outline);
   background: var(--color-surface);
   overflow: hidden;
+  transition: width var(--transition-normal) var(--transition-ease-out);
 }
 
 .navigation-rail--fixed:not(.navigation-rail--full-height) {
@@ -188,7 +224,11 @@ const onItemClick = (event: MouseEvent, item: NavigationRailItem) => {
 }
 
 .navigation-rail--full-height {
-  height: 100%;
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  min-height: 100vh;
+  height: 100vh;
   grid-template-rows: 1fr auto;
 }
 
@@ -197,7 +237,7 @@ const onItemClick = (event: MouseEvent, item: NavigationRailItem) => {
   gap: var(--space-xs);
   align-content: start;
   min-width: 0;
-  padding: var(--space-sm) 0;
+  padding: 0;
 }
 
 .navigation-rail__item,
@@ -209,7 +249,7 @@ const onItemClick = (event: MouseEvent, item: NavigationRailItem) => {
   gap: var(--space-sm);
   padding: 0 10px;
   border: 0;
-  border-radius: 0;
+  border-radius: var(--radius-all);
   background: transparent;
   color: var(--color-on-surface-muted);
   text-decoration: none;
@@ -226,7 +266,6 @@ const onItemClick = (event: MouseEvent, item: NavigationRailItem) => {
   width: 100%;
   cursor: pointer;
   justify-content: center;
-  border-top: 1px solid var(--color-outline);
 }
 
 .navigation-rail__item:hover,
@@ -242,7 +281,7 @@ const onItemClick = (event: MouseEvent, item: NavigationRailItem) => {
 
 .navigation-rail__brand {
   display: block;
-  padding: var(--space-sm) 10px;
+  padding: var(--space-sm) 0 var(--space-xl);
   font-family: var(--text-headline-sm-font-family);
   font-size: var(--text-headline-sm-font-size);
   font-weight: var(--text-headline-sm-font-weight);
@@ -253,7 +292,7 @@ const onItemClick = (event: MouseEvent, item: NavigationRailItem) => {
 
 .navigation-rail:not(.navigation-rail--expanded) .navigation-rail__brand {
   text-align: center;
-  padding: var(--space-sm) 0;
+  padding: var(--space-sm) 0 var(--space-xl);
 }
 
 .navigation-rail__icon {

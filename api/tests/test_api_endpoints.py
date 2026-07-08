@@ -103,6 +103,17 @@ def test_budget_accounts_and_net_worth_endpoints_return_validated_aggregates(
         assert checking_ignored["ignored_import_value"] is True
         assert checking_ignored["ignored_reason"] == "duplicate_budget_account"
 
+        assets_liabilities = client.get("/api/assets-liabilities")
+        assert assets_liabilities.status_code == 200
+        groups = {
+            group["key"]: {item["name"] for item in group["items"]}
+            for group in assets_liabilities.json()["groups"]
+        }
+        assert "House Value" in groups["TRACKING_ASSETS"]
+        assert "House Value" not in groups["CASH"]
+        assert "Car Loan" in groups["TRACKING_LIABILITIES"]
+        assert "Car Loan" not in groups.get("LOANS", set())
+
 
 def test_bootstrap_response_stays_shell_sized(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("SESSION_SECRET", "test-secret")

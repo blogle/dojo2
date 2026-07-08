@@ -6,6 +6,7 @@ import introCallout from "@/dojo/components/content/IntroCallout.fixtures";
 import metricStrip from "@/dojo/components/data/MetricStrip.fixtures";
 import pageHeader from "@/dojo/components/data/PageHeader.fixtures";
 import periodSelector from "@/dojo/components/data/PeriodSelector.fixtures";
+import stackedEntityCard from "@/dojo/components/data/StackedEntityCard.fixtures";
 import keyValueList from "@/dojo/components/display/KeyValueList.fixtures";
 import progressBar from "@/dojo/components/display/ProgressBar.fixtures";
 import progressRing from "@/dojo/components/display/ProgressRing.fixtures";
@@ -46,6 +47,7 @@ export const fixtureRegistry: Record<string, ComponentFixtureSet> = {
   "data/MetricStrip.fixtures.ts": metricStrip,
   "data/PageHeader.fixtures.ts": pageHeader,
   "data/PeriodSelector.fixtures.ts": periodSelector,
+  "data/StackedEntityCard.fixtures.ts": stackedEntityCard,
   "display/KeyValueList.fixtures.ts": keyValueList,
   "display/ProgressBar.fixtures.ts": progressBar,
   "display/ProgressRing.fixtures.ts": progressRing,

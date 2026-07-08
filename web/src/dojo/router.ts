@@ -27,6 +27,10 @@ const router = createRouter({
       path: "/assets-liabilities",
       component: () => import("./pages/AssetsLiabilitiesPage.vue"),
     },
+    {
+      path: "/assets-liabilities/:id",
+      component: () => import("./pages/AccountDetailPage.vue"),
+    },
   ],
 });
 

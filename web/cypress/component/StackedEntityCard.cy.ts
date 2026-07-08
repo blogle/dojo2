@@ -38,6 +38,7 @@ describe("StackedEntityCard", () => {
         name: "Clickable Account",
         primaryValue: "$500.00",
         clickable: true,
+        onSelect,
       },
     });
     cy.get("[data-cy=stacked-entity-card-root]").click();

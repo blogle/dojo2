@@ -104,15 +104,25 @@ const formatDelta = (delta: number) => `${delta > 0 ? "+" : ""}${delta}`;
 }
 
 .metric-strip__item {
+  position: relative;
+  flex: 1 1 0;
   min-width: 140px;
   display: grid;
   gap: 2px;
   padding: 0 var(--space-lg);
-  border-right: 1px solid var(--color-outline);
 }
 
-.metric-strip__item:last-child {
-  border-right: 0;
+.metric-strip--scrollable .metric-strip__item {
+  flex: 0 0 auto;
+}
+
+.metric-strip__item:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: 0;
+  width: 1px;
+  background: var(--color-outline);
 }
 
 .metric-strip__item--clickable {
