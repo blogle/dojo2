@@ -9,9 +9,9 @@ After this work, dojo will have a complete Assets & Liabilities frontend surface
 ## Progress
 
 - [x] (2026-07-07) Created ExecPlan for frontend implementation.
-- [x] (2026-07-07) Work Item A: Overview page with `/assets-liabilities` route, MetricStrip, grouped stacked entity cards (partial - implementation complete, visual validation pending).
+- [x] (2026-07-07) Work Item A: Overview page with `/assets-liabilities` route, MetricStrip, grouped stacked entity cards, Cypress component coverage, and visual validation against mock 01.
 - [ ] Work Item B: Add item wizard with entity type selection and type-specific forms.
-- [ ] Work Item C: EntityDetailLayout shared component + budget account detail page.
+- [ ] Work Item C: EntityDetailLayout shared component + budget account detail page. Partial implementation exists as `AccountDetailPage.vue` with `/assets-liabilities/:id` routing and visual validation for budget, investment, and loan detail structures; remaining work should decide whether to extract a shared `EntityDetailLayout` component.
 - [ ] Work Item D: Tracking account detail page + cutover modal.
 - [ ] Work Item E: Investment account detail page + contribution flow.
 - [ ] Work Item F: Loan detail page + payment flow.
@@ -20,7 +20,8 @@ After this work, dojo will have a complete Assets & Liabilities frontend surface
 
 ## Surprises & Discoveries
 
-- (To be filled as discoveries are made)
+- Observation: The committed overview dropdown currently pushes `/assets-liabilities/add?type=...`, but the router only defines `/assets-liabilities` and `/assets-liabilities/:id`. Until Work Item B adds an explicit `/assets-liabilities/add` route before the dynamic `:id` route, selecting Add item can be interpreted as an account detail route for id `add`.
+  Evidence: `web/src/dojo/router.ts` defines `/assets-liabilities/:id`; `web/src/dojo/pages/AssetsLiabilitiesPage.vue` pushes `/assets-liabilities/add?type=${key}`.
 
 ## Decision Log
 
@@ -45,15 +46,20 @@ After this work, dojo will have a complete Assets & Liabilities frontend surface
 - All lint, typecheck, and format checks pass.
 
 **What remains:**
-- Visual validation loop against mock screen 01-assets-liabilities-overview.png.
-- Cypress component test for StackedEntityCard.
-- VALIDATION.md update.
-- Commit.
+- Work Item B must add the `/assets-liabilities/add` route and wizard so the existing Add item dropdown no longer falls through to the dynamic detail route.
 
 **Lessons learned:**
 - The existing Account type needed extension with `value_minor`, `source_of_truth`, and `metadata` fields for the assets-liabilities response.
 - The navigation pattern is page-level (each page includes NavigationRail), not global layout.
 - DESIGN.md tokens are already available as CSS custom properties, making component styling straightforward.
+
+### Work Item A Completion (2026-07-07)
+
+Work Item A is complete. The overview page, route, API client integration, shared `StackedEntityCard` component, component fixtures, manifest entry, Cypress component tests, validation record, visual validation artifacts, and commit history are present. The latest rerun of `just test-web` passes 247 Cypress component tests, including 13 `StackedEntityCard` tests. The latest rerun of `just check` passes after the plan and baton refresh.
+
+### Detail Page Visual Gap Closure (2026-07-07)
+
+A later committed pass added `/assets-liabilities/:id` and `AccountDetailPage.vue`, with visual validation recorded in `VALIDATION.md` for budget account, investment account, and loan detail structures. This advances part of the detail-page scope before Work Item B, but the plan still lists Work Item B next because the Add item wizard and explicit add route do not exist yet.
 
 ## Context and Orientation
 

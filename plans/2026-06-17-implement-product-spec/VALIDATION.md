@@ -56,13 +56,14 @@ For each completed work item, record:
 - `just typecheck` — Passed
 - `just format-check` — Passed (after running `just format`)
 - `just lint` — Passed
-- `just test-web` — Passed, 245 tests
+- `just test-web` — Passed, 247 tests on latest rerun; earlier run passed with 245 tests
+- `just check` — Passed on latest rerun after baton/plan validation updates
 - `uv run pytest tests/test_api_endpoints.py::test_budget_accounts_and_net_worth_endpoints_return_validated_aggregates` from `api/` — Passed
 
 ### Test results
 
 - Backend: Targeted aggregate endpoint test passes, including deterministic tracking asset/liability grouping
-- Frontend: Cypress component suite passes (`just test-web`, 245 tests)
+- Frontend: Cypress component suite passes (`just test-web`, 247 tests on latest rerun). `StackedEntityCard.cy.ts` specifically passes 13 tests.
 
 ### Type-check results
 
