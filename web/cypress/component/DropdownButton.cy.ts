@@ -57,6 +57,20 @@ describe("DropdownButton", () => {
     cy.get("@onSelect").should("have.been.calledWith", "a");
   });
 
+  it("emits primaryClick when the primary button is clicked", () => {
+    const onPrimaryClick = cy.spy().as("onPrimaryClick");
+    mount(fixtures.component, {
+      props: {
+        items: [{ key: "a", label: "Item A" }],
+        onPrimaryClick,
+      },
+    });
+    cy.get("[data-cy=dropdown-button-root]")
+      .find(".dropdown-button__primary")
+      .click();
+    cy.get("@onPrimaryClick").should("have.been.calledOnce");
+  });
+
   it("closes the menu after selection", () => {
     mount(fixtures.component, {
       props: {

@@ -10,7 +10,7 @@ After this work, dojo will have a complete Assets & Liabilities frontend surface
 
 - [x] (2026-07-07) Created ExecPlan for frontend implementation.
 - [x] (2026-07-07) Work Item A: Overview page with `/assets-liabilities` route, MetricStrip, grouped stacked entity cards, Cypress component coverage, and visual validation against mock 01.
-- [ ] Work Item B: Add item wizard with entity type selection and type-specific forms.
+- [x] (2026-07-07) Work Item B: Add item wizard with explicit `/assets-liabilities/add` route, entity type selection, type-specific account forms, and Cypress coverage.
 - [ ] Work Item C: EntityDetailLayout shared component + budget account detail page. Partial implementation exists as `AccountDetailPage.vue` with `/assets-liabilities/:id` routing and visual validation for budget, investment, and loan detail structures; remaining work should decide whether to extract a shared `EntityDetailLayout` component.
 - [ ] Work Item D: Tracking account detail page + cutover modal.
 - [ ] Work Item E: Investment account detail page + contribution flow.
@@ -23,6 +23,9 @@ After this work, dojo will have a complete Assets & Liabilities frontend surface
 - Observation: The committed overview dropdown currently pushes `/assets-liabilities/add?type=...`, but the router only defines `/assets-liabilities` and `/assets-liabilities/:id`. Until Work Item B adds an explicit `/assets-liabilities/add` route before the dynamic `:id` route, selecting Add item can be interpreted as an account detail route for id `add`.
   Evidence: `web/src/dojo/router.ts` defines `/assets-liabilities/:id`; `web/src/dojo/pages/AssetsLiabilitiesPage.vue` pushes `/assets-liabilities/add?type=${key}`.
 
+- Observation: Browser validation found the first add-wizard modal initially used too much vertical space and created an inner scrollbar on a desktop viewport.
+  Evidence: The first screenshot at `/home/ogle/src/dojo2/tmp/add-item-wizard-step1.png` showed the boundary note partly below the modal body scroll. Tightening card height and modal spacing produced `/home/ogle/src/dojo2/tmp/add-item-wizard-step1-tightened.png`, which fits the full first step like mock 02.
+
 ## Decision Log
 
 - Decision: Create ExecPlan for frontend implementation separate from domain model ExecPlan.
@@ -31,6 +34,14 @@ After this work, dojo will have a complete Assets & Liabilities frontend surface
 
 - Decision: Start with Work Item A (overview page) as it establishes the route and page structure.
   Rationale: The overview page is the entry point for all Assets & Liabilities functionality and establishes the API integration pattern.
+  Date/Author: 2026-07-07 / opencode
+
+- Decision: Keep the Add item wizard page-local rather than adding it to the design-system catalog.
+  Rationale: The wizard is a SPEC-specific workflow assembled from existing design-system primitives and does not yet define a reusable component contract.
+  Date/Author: 2026-07-07 / opencode
+
+- Decision: Add `/assets-liabilities/add` before `/assets-liabilities/:id` and let the overview split button open that route from its primary half.
+  Rationale: Route order prevents `add` from being interpreted as an account id, and the primary Add item action now matches mock 02 while dropdown selections remain direct type shortcuts.
   Date/Author: 2026-07-07 / opencode
 
 ## Outcomes & Retrospective
@@ -60,6 +71,10 @@ Work Item A is complete. The overview page, route, API client integration, share
 ### Detail Page Visual Gap Closure (2026-07-07)
 
 A later committed pass added `/assets-liabilities/:id` and `AccountDetailPage.vue`, with visual validation recorded in `VALIDATION.md` for budget account, investment account, and loan detail structures. This advances part of the detail-page scope before Work Item B, but the plan still lists Work Item B next because the Add item wizard and explicit add route do not exist yet.
+
+### Work Item B Completion (2026-07-07)
+
+Work Item B is complete. `/assets-liabilities/add` now renders a modal wizard over the Assets & Liabilities overview instead of falling through to the dynamic detail route. The first step aligns with mock 02: title, three-step progress rail, five entity-type row cards, the budget-boundary explainer, and the Aspire onboarding note. The second step collects minimal common and type-specific fields, then submits to the existing `POST /api/accounts` endpoint and routes to the created account detail page. Cypress coverage proves route safety, type selection, and the create-account payload; `DropdownButton` coverage proves the primary split-button click now emits an event for the Add item route.
 
 ## Context and Orientation
 
@@ -99,7 +114,7 @@ The API client is in `web/src/dojo/api/client.ts` using vue-query for caching.
 
 1. Create wizard component (page-level composition, NOT cataloged)
 2. Step 1: Choose entity type (budget account, tracking account, investment account, loan, tangible asset)
-3. Step 2: Type-specific minimal form using FormModal
+3. Step 2: Type-specific minimal form using existing form controls
 4. Include SPEC-mandated "Need to bring in Aspire data? Use Onboarding." line
 
 ### Work Item C: EntityDetailLayout + Budget Account Detail

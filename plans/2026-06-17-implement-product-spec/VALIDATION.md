@@ -125,6 +125,61 @@ For each completed work item, record:
 
 ---
 
+## Work Item 6.B: Assets & Liabilities Add Item Wizard
+
+**Status**: Implementation complete, visual validation complete.
+
+### Commands run
+
+- `just lint-web` — Passed
+- `just typecheck` — Passed
+- `just test-web` — Passed, 251 tests
+- `just check` — Passed
+
+### Test results
+
+- Frontend: Cypress component suite passes (`just test-web`, 251 tests).
+- Added `AddItemWizardPage.cy.ts` with 3 tests covering modal rendering, explicit add-route safety, and the account creation payload for a loan.
+- Updated `DropdownButton.cy.ts` to cover the new primary split-button click event.
+
+### Type-check results
+
+- `just typecheck` passes cleanly after adding the wizard route, page, and typed `createAccount` return payload.
+
+### Lint results
+
+- Initial `just lint-web` run found one Cypress assertion style issue.
+- Fixed the assertion and reran `just lint-web` successfully.
+
+### Implementation summary
+
+1. Added explicit `/assets-liabilities/add` route before `/assets-liabilities/:id` so the Add item route no longer falls through to account detail id `add`.
+
+2. Created `AddItemWizardPage.vue` as a page-local modal workflow over the existing overview page.
+
+3. Added step 1 with five mock-aligned entity type cards: budget account, tracking account, investment account, loan, and tangible asset.
+
+4. Added step 2 with minimal common fields and type-specific fields backed by the existing `POST /api/accounts` endpoint.
+
+5. Updated `DropdownButton.vue` so the primary half emits `primaryClick`; the overview page uses this to open `/assets-liabilities/add`, while dropdown options still open direct type-specific wizard URLs.
+
+6. Updated `createAccount` to return the created `account_id`, letting the wizard route to the new detail page after successful creation.
+
+### Visual validation
+
+- Mock screen: `plans/2026-06-17-implement-product-spec/assets_liabilities_screens/02-add-item-type-wizard.png`
+- Status: Complete — confirmed modal-over-overview structure, title, close button, three-step rail, five full-width entity cards, budget-boundary note, Aspire onboarding note, and footer actions match the mock. The tightened desktop modal fits without internal scrolling.
+- Screenshots captured:
+  - `/home/ogle/src/dojo2/tmp/add-item-wizard-step1.png`
+  - `/home/ogle/src/dojo2/tmp/add-item-wizard-step1-tightened.png`
+
+### Validation gaps
+
+- No backend changes were made; account creation uses existing endpoint behavior.
+- Browser validation did not submit a real account to the local DuckDB database to avoid mutating developer data; Cypress verifies the outgoing payload with a mocked response.
+
+---
+
 *Add new work items above as they are completed.*
 
 ## Visual Gap Closure — Work Item: Detail Pages

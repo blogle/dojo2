@@ -30,6 +30,7 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   select: [key: string];
+  primaryClick: [];
 }>();
 
 const toggleLabel = computed(() => `${props.label} options`);
@@ -49,7 +50,12 @@ const onSelect = (item: DropdownButtonItem) => {
     :class="`dropdown-button--${variant}`"
     data-cy="dropdown-button-root"
   >
-    <button type="button" class="dropdown-button__primary" :disabled="disabled">
+    <button
+      type="button"
+      class="dropdown-button__primary"
+      :disabled="disabled"
+      @click="emit('primaryClick')"
+    >
       {{ label }}
     </button>
 

@@ -162,6 +162,10 @@ const handleAdd = (key: string) => {
   router.push(`/assets-liabilities/add?type=${key}`);
 };
 
+const handleAddPrimary = () => {
+  router.push("/assets-liabilities/add");
+};
+
 const handleRowSelect = (accountId: string) => {
   router.push(`/assets-liabilities/${accountId}`);
 };
@@ -212,6 +216,7 @@ const getSourceLabel = (source: string) => {
           <DropdownButton
             label="Add item"
             :items="addItems"
+            @primary-click="handleAddPrimary"
             @select="handleAdd"
           />
         </template>

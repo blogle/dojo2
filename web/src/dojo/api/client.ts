@@ -207,8 +207,8 @@ export async function createTransfer(payload: {
 
 export async function createAccount(
   payload: Record<string, unknown>,
-): Promise<void> {
-  await request("/api/accounts", {
+): Promise<{ account_id: string }> {
+  return request("/api/accounts", {
     method: "POST",
     body: JSON.stringify(payload),
   });

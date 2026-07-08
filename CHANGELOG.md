@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added the Assets & Liabilities Add item wizard with an explicit `/assets-liabilities/add` route, entity-type selection, minimal type-specific account forms, and Cypress coverage for route safety and account creation payloads.
 - Added `POST /api/transactions/{transaction_id}/restore` endpoint for SCD-correct undo of deleted transactions, preserving the same `transaction_id` across delete/restore cycles with full audit history.
 - Added pure SCD algebra/model with Hypothesis property-based testing to validate SCD invariants (no overlapping intervals, single current version, as-of stability) before shipping the restore endpoint.
 - Updated frontend undo stack to use restore endpoint instead of create, ensuring deleted transactions are restored with the same `transaction_id`.
