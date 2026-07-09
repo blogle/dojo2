@@ -64,13 +64,31 @@ Relevant contributor guidance:
   - Decided not to extract or catalog `EntityDetailLayout` yet because the current page shell remains account-class-specific and is not a durable shared catalog contract.
   - Moved import-draft SQL statements into `api/src/dojo/sql/queries/*.sql` to satisfy the repository architecture policy surfaced by `just check`.
   - Relevant commit subject: `feat(assets-liabilities): align budget account detail`.
+- (2026-07-09) Scoped transaction ledger and account detail refinements — Complete:
+  - Added server-side transaction filtering (`account_id`, `category_id`, `status`, `date_from`/`date_to`, `amount_min`/`max`) via parameterized DuckDB queries replacing ad-hoc hidden-account/category SQL variants with a unified filter-clause builder.
+  - Added `status_counts` to the transaction page response, computed over the full filtered set (not the page).
+  - Added `TransactionFilterBar` prop-lift: filter state is now owned by the page, enabling locked-account mode and infinite-scroll filter re-queries.
+  - Replaced client-side transaction table in `AccountDetailPage.vue` with `TransactionLedger` + `TransactionFilterBar`, infinite-scroll via `useInfiniteQuery`, locked account filter, running-balance column, load-more trigger, edit/delete mutations.
+  - Added `BalanceTrendChart.vue` with period selector, SVG line chart, hover, drag-measurement, and tooltip.
+  - Added edit-configuration `FormModal` for account metadata with retire-account action.
+  - Added Cypress coverage for edit-configuration submit, balance-trend-chart visibility, and removed assertions for deleted history/configuration sidebar sections.
+  - Relevant commit: `30d8ac3 feat(transactions): add scoped account ledger`.
+- (2026-07-09) Server-side summary and chart computation in DuckDB — Complete:
+  - Created `account_transaction_summary.sql` — windowed aggregate (inflow/outflow/net/count) + daily-spine average daily balance via `generate_series` + cumulative sum anchored to `display_balance_minor`.
+  - Created `account_balance_series.sql` — per-transaction-day balance via backward window cumulative from anchor, downsampled per period bucket (`date_trunc` to day/week/month).
+  - Added `GET /api/accounts/{id}/transactions/summary` and `GET /api/accounts/{id}/balance-trend` routes.
+  - Added service methods `account_transaction_summary`, `account_balance_trend`, and `_account_display_balance` helper.
+  - Updated `AccountDetailPage.vue` to fetch summary and trend as independent `useQuery` calls keyed by account/period, removing client-side paged-derived computations.
+  - Chart now refetches when period selector changes; summary is fixed 30-day window independent of ledger filter.
+  - Added integration tests validating both endpoints against reference Python computation using the same anchored-daily-spine formula.
+  - Relevant commit: `5ba2d8f fix(account-detail): compute summary and chart server-side in DuckDB`.
 
 ## Current repository state
 
 - **Branch**: `master`
-- **Working tree**: Clean after commit `feat(assets-liabilities): align budget account detail`.
-- **Last completed task**: Work Item C budget-account detail alignment, focused Cypress coverage, visual validation, and SQL-boundary cleanup required by `just check`.
-- **Known failing checks**: None known. Latest checks run: `just typecheck`, `just lint-web`, `cd web && pnpm test:component --spec "cypress/component/AccountDetailPage.cy.ts"`, `just test-web`, and `just check` all passed. The first `just check` attempt surfaced API format drift and import-draft inline SQL policy violations; `just format` and SQL file extraction resolved them.
+- **Working tree**: Clean after commit `fix(account-detail): compute summary and chart server-side in DuckDB`.
+- **Last completed task**: Server-side summary and chart computation in DuckDB, scoped transaction ledger, account detail refinements.
+- **Known failing checks**: None known. Latest checks run: `just lint-api`, `just lint-web`, `just typecheck`, `just architecture-check`, `just migration-check`, `just test-api` (core + property), `just test-web`, `just build` all passed.
 - **Required services**: DuckDB (provisioned by `just api`), Google OAuth (optional)
 - **Feature flags**: None
 - **Aspire data**: Deterministic fixture available at `fixture://default`
@@ -81,12 +99,20 @@ Backend capabilities already exist:
 - `GET /api/assets-liabilities` returns grouped cards with source_of_truth, value_minor, group_totals, asset/liability/net totals.
 - `POST/PUT /api/accounts`, `GET /api/accounts`.
 - Snapshot/valuation CRUD: positions, cash-snapshots, price-snapshots, tracking-snapshots, loan-snapshots, tangible-valuations.
+- `GET /api/transactions` with server-side filtering: `account_id`, `category_id`, `status`, `date_from`/`date_to`, `amount_min_minor`/`amount_max_minor`, plus `status_counts` in response.
+- `GET /api/accounts/{id}/transactions/summary` — windowed aggregate (inflow, outflow, net flow, count, average daily balance) pushed to DuckDB.
+- `GET /api/accounts/{id}/balance-trend` — anchored balance timeseries downsampled per period bucket, pushed to DuckDB.
 
 Frontend capabilities now present:
 - Overview page with `/assets-liabilities` route
 - StackedEntityCard shared component
 - Account detail page at `/assets-liabilities/:id` with budget, investment, loan, tracking, and tangible-asset type handling
 - Budget-account detail page now exposes mock-03-aligned header actions, metrics, scoped transaction table, chart/summary area, reconciliation/history/configuration affordances, and responsive narrow rendering.
+- Transaction filter bar with account/date/category/amount/status filters; account filter can be locked to the current account on the detail page.
+- `TransactionLedger` virtualized table with running-balance column, infinite-scroll load-more, edit/delete mutations, and locked-account support.
+- `BalanceTrendChart` SVG component with period selector, hover crosshair, drag-measurement tooltip, and server-side-downsampled data.
+- Edit-configuration `FormModal` for account metadata with retire-account action.
+- Summary and balance trend fetched as independent server-side queries, no longer derived from the paged transaction ledger.
 - Add item wizard at `/assets-liabilities/add` with type selection and minimal account creation forms. The overview header now uses a plain `Add item` button; direct type shortcuts are no longer exposed from the overview header.
 - Onboarding import review flow that analyzes Aspire data, lets users review every net-worth category treatment, asks for simple low-confidence confirmation, then commits the reviewed import.
 - Import details modal supports both legacy validation-report imports and review-based imports with imported-record counts and net-worth decision summaries.
@@ -125,7 +151,7 @@ Align tracking-account detail behavior with SPEC.md and mock 04. The current `Ac
 1. Use `SPEC.md` for product terminology and `DESIGN.md` tokens/components for visual decisions.
 2. Avoid cataloging any tracking detail layout or `EntityDetailLayout` unless it is truly reusable and fixtureable under the design-system rules.
 3. Preserve route order: `/assets-liabilities/add` must remain before `/assets-liabilities/:id`.
-4. Treat the current lack of server-side account filtering in `fetchTransactionsPage` as a known API gap unless this work item explicitly adds backend support.
+4. `fetchTransactionsPage` now supports server-side account filtering via the `account_id` query parameter.
 5. `/budgets` must continue to load without requiring `vue-draggable-plus` during initial route resolution.
 
 ### Remaining tasks
@@ -155,10 +181,11 @@ None.
 
 - The `StackedEntityCard` component uses simplified metadata display. May need enhancement for more complex entity types.
 - The overview page currently shows all groups. May need filtering or sorting options in future.
-- `fetchTransactionsPage` does not support account-id filtering; current detail-page transaction scoping is limited to transactions returned by the current fetched page.
 - The latest onboarding import review work intentionally counts unique Aspire net-worth categories for decision summaries, not raw valuation rows.
 - `vue-draggable-plus` is now a lazy dependency of `HierarchicalCategoryTable.vue`; tests that mount reorder mode may need Vite optimized-dependency prewarming, which is handled by `web/vite.config.ts`.
 - Work Item C required mechanical formatting in several files and SQL-boundary cleanup to satisfy `just check`; avoid undoing these when starting Work Item D.
+- The balance trend chart's `BalanceTrendPoint` type (`date` + `valueMinor`) differs from the API response type (`date` + `balance_minor`); the mapping is explicit in `AccountDetailPage.vue`. Both should be kept aligned if the chart component is reused elsewhere.
+- The `_account_display_balance` helper loads all accounts to find one; acceptable for the small account set, but could be replaced with a direct query if performance becomes a concern.
 
 ## Handoff instruction
 
