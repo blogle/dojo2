@@ -48,13 +48,23 @@ Relevant contributor guidance:
   - Updated `DropdownButton.vue` so the primary Add item button opens the wizard while dropdown choices remain type-specific shortcuts.
   - Added Cypress coverage for wizard rendering, route safety, account creation payloads, and primary split-button clicks.
   - Ran visual validation against mock `02-add-item-type-wizard.png` and recorded results in `VALIDATION.md`.
+  - Relevant commit: `c572696 feat(assets-liabilities): add item wizard`.
+- (2026-07-08) Onboarding import review and Assets & Liabilities wizard remediation — Complete:
+  - Added Aspire import analyze/review/commit flow with editable net-worth category decisions and low-confidence confirmation.
+  - Added backend `import_drafts` persistence plus `/api/import/google-sheet/analyze` and `/api/import/google-sheet/commit` endpoints.
+  - Changed Assets & Liabilities `Add item` from a dropdown to a plain primary button.
+  - Removed stale onboarding copy and removed low-value fields from tracking, investment, and tangible asset creation forms.
+  - Added investment-account `self_managed` and `tax_treatment` metadata through API models, SQL schema, frontend form payloads, and Cypress coverage.
+  - Fixed import details modal rendering for review-based imports that have `import_summary` and `decisions_summary` but no legacy `validation_report`.
+  - Protected `/budgets` route loading by lazy-loading `vue-draggable-plus` only when category reordering is enabled, while pre-optimizing it for Vite/Cypress stability.
+  - Relevant commit: `d27913b feat(onboarding): add import review flow`.
 
 ## Current repository state
 
 - **Branch**: `master`
-- **Working tree**: Tracked files clean after the Work Item B commit; untracked local artifacts exist (`PROMPT-assets-liabilities.md`, `PROMPT-visual-gaps.md`, `tmp/`) and should remain uncommitted unless explicitly requested.
-- **Last completed task**: Work Item B Add Item Wizard implementation and visual validation.
-- **Known failing checks**: None. `just lint-web`, `just typecheck`, `just test-web`, and `just check` pass.
+- **Working tree**: Clean after commit `d27913b feat(onboarding): add import review flow`.
+- **Last completed task**: Onboarding import review flow, Assets & Liabilities wizard remediation, import details modal fixes, and `/budgets` route-load fix.
+- **Known failing checks**: None known. Latest post-fix checks run: `just typecheck`, `just lint-web`, and `cd web && pnpm test:component --spec "cypress/component/HierarchicalCategoryTable.cy.ts"` passed. Earlier in the same implementation pass, `just lint-api`, `just test-integration`, and `cd web && pnpm test:component --spec "cypress/component/OnboardingImportDetailsModal.cy.ts"` passed. Full `just check` was not rerun after the final lazy-draggable/Vite fix.
 - **Required services**: DuckDB (provisioned by `just api`), Google OAuth (optional)
 - **Feature flags**: None
 - **Aspire data**: Deterministic fixture available at `fixture://default`
@@ -70,7 +80,10 @@ Frontend capabilities now present:
 - Overview page with `/assets-liabilities` route
 - StackedEntityCard shared component
 - Account detail page at `/assets-liabilities/:id` with budget, investment, loan, tracking, and tangible-asset type handling
-- Add item wizard at `/assets-liabilities/add` with type selection and minimal account creation forms
+- Add item wizard at `/assets-liabilities/add` with type selection and minimal account creation forms. The overview header now uses a plain `Add item` button; direct type shortcuts are no longer exposed from the overview header.
+- Onboarding import review flow that analyzes Aspire data, lets users review every net-worth category treatment, asks for simple low-confidence confirmation, then commits the reviewed import.
+- Import details modal supports both legacy validation-report imports and review-based imports with imported-record counts and net-worth decision summaries.
+- Budget page route loading is resilient to `vue-draggable-plus` optimized dependency load issues because draggable behavior is loaded only when reorder mode is enabled.
 
 Frontend capabilities still planned:
 - EntityDetailLayout extraction, if the detail-page implementation should become a shared component
@@ -91,6 +104,7 @@ Create or extract a reusable `EntityDetailLayout` shared component and align the
 3. Ensure the budget account detail page includes back navigation, name/type/badges, ledger-derived balance metrics, transaction ledger filtered or clearly scoped to the account, reconciliation status, account metadata, record history affordance, and edit configuration entry point.
 4. Keep existing investment, loan, tracking, and tangible-asset rendering from regressing while budget-account detail is aligned.
 5. Add focused tests for the detail route and budget-account detail behavior.
+6. Confirm the latest onboarding import review and `/budgets` route-load fixes are not regressed by any detail-page imports or route changes.
 
 ### Non-scope
 
@@ -105,6 +119,7 @@ Create or extract a reusable `EntityDetailLayout` shared component and align the
 2. Avoid cataloging `EntityDetailLayout` unless it is truly reusable and fixtureable under the design-system rules.
 3. Preserve route order: `/assets-liabilities/add` must remain before `/assets-liabilities/:id`.
 4. Treat the current lack of server-side account filtering in `fetchTransactionsPage` as a known API gap unless this work item explicitly adds backend support.
+5. `/budgets` must continue to load without requiring `vue-draggable-plus` during initial route resolution.
 
 ### Remaining tasks
 
@@ -113,7 +128,7 @@ Create or extract a reusable `EntityDetailLayout` shared component and align the
 3. Align budget-account detail behavior and copy with `SPEC.md` and mock 03.
 4. Add or update focused Cypress coverage.
 5. Update `VALIDATION.md`, this ExecPlan, and this baton.
-6. Run `just test-web`, then `just check` before claiming done.
+6. Run the narrow relevant Cypress coverage first, then `just test-web`, then `just check` before claiming done.
 7. Commit changes in one concise Work Item C commit.
 
 ### Definition of done
@@ -134,6 +149,8 @@ None.
 - The `StackedEntityCard` component uses simplified metadata display. May need enhancement for more complex entity types.
 - The overview page currently shows all groups. May need filtering or sorting options in future.
 - `fetchTransactionsPage` does not support account-id filtering; current detail-page transaction scoping may be incomplete for accounts with transactions outside the first fetched page.
+- The latest onboarding import review work intentionally counts unique Aspire net-worth categories for decision summaries, not raw valuation rows.
+- `vue-draggable-plus` is now a lazy dependency of `HierarchicalCategoryTable.vue`; tests that mount reorder mode may need Vite optimized-dependency prewarming, which is handled by `web/vite.config.ts`.
 
 ## Handoff instruction
 
