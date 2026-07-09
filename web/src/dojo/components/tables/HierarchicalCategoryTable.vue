@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
-import { useDraggable } from "vue-draggable-plus";
+import { onMounted, ref, watch } from "vue";
 
 import StateBadge from "@/dojo/components/display/StateBadge.vue";
 import IconGlyph from "@/dojo/components/display/IconGlyph.vue";
@@ -15,6 +14,12 @@ type StateBadgeVariant =
   | "error"
   | "info"
   | "historical";
+
+type DraggableEvent = {
+  item: HTMLElement;
+  newIndex?: number;
+  oldIndex?: number;
+};
 
 export interface HierarchicalCategoryColumn {
   key: string;
@@ -166,77 +171,99 @@ const handleToggle = (key: string) => {
 
 const isSelected = (key: string) => props.selectedKeys.includes(key);
 
-useDraggable(tbodyRef, {
-  animation: 150,
-  draggable: "tr",
-  handle: ".hierarchical-category-table__drag-handle",
-  onStart(event) {
-    isDragging.value = true;
-    const movedEl = event.item;
-    const isGroup = movedEl.hasAttribute("data-drag-group");
-    if (isGroup) {
-      const groupKey = movedEl.dataset.dragGroup!;
-      preDragExpansion.value = { ...expandedState.value };
-      if (expandedState.value[groupKey] !== false) {
-        expandedState.value[groupKey] = false;
+const draggableLoaded = ref(false);
+
+const setupDraggable = async () => {
+  if (!props.reorderable || draggableLoaded.value) return;
+  try {
+    const { useDraggable } = await import("vue-draggable-plus");
+    draggableLoaded.value = true;
+    useDraggable(tbodyRef, {
+      animation: 150,
+      draggable: "tr",
+      handle: ".hierarchical-category-table__drag-handle",
+      onStart(event: DraggableEvent) {
+        isDragging.value = true;
+        const movedEl = event.item;
+        const isGroup = movedEl.hasAttribute("data-drag-group");
+        if (isGroup) {
+          const groupKey = movedEl.dataset.dragGroup!;
+          preDragExpansion.value = { ...expandedState.value };
+          if (expandedState.value[groupKey] !== false) {
+            expandedState.value[groupKey] = false;
+            rebuildFlatRows();
+          }
+        }
+      },
+      onEnd() {
+        isDragging.value = false;
+        if (Object.keys(preDragExpansion.value).length > 0) {
+          expandedState.value = { ...preDragExpansion.value };
+          preDragExpansion.value = {};
+          rebuildFlatRows();
+        }
+      },
+      onUpdate(event: DraggableEvent) {
+        const movedEl = event.item;
+        const isGroup = movedEl.hasAttribute("data-drag-group");
+        const src = isGroup
+          ? movedEl.dataset.dragGroup!
+          : movedEl.dataset.dragChild!;
+        const newIndex = event.newIndex!;
+        const oldIndex = event.oldIndex!;
+        const pos = newIndex > oldIndex ? "after" : "before";
+
+        if (isGroup) {
+          const container = movedEl.parentElement;
+          if (container) {
+            const move = resolveGroupMove(
+              rowsFromDom(container),
+              buildChildParent(props.rows),
+              topOrder.value,
+              src,
+            );
+            if (move) {
+              topOrder.value = move.order;
+              emit("reorder", src, move.targetKey, move.position);
+            }
+          }
+        } else {
+          let srcParent: string | undefined;
+          for (const [parentKey, children] of Object.entries(childOrder.value)) {
+            if (children.includes(src)) {
+              srcParent = parentKey;
+              break;
+            }
+          }
+          if (srcParent) {
+            const siblings = childOrder.value[srcParent];
+            const srcIdx = siblings.indexOf(src);
+            if (srcIdx !== -1) siblings.splice(srcIdx, 1);
+            const insertIdx = newIndex > srcIdx ? newIndex - 1 : newIndex;
+            siblings.splice(insertIdx, 0, src);
+            const tgt = siblings[newIndex];
+            emit("reorder", src, tgt, pos);
+          }
+        }
+
         rebuildFlatRows();
-      }
-    }
-  },
-  onEnd() {
-    isDragging.value = false;
-    if (Object.keys(preDragExpansion.value).length > 0) {
-      expandedState.value = { ...preDragExpansion.value };
-      preDragExpansion.value = {};
-      rebuildFlatRows();
-    }
-  },
-  onUpdate(event) {
-    const movedEl = event.item;
-    const isGroup = movedEl.hasAttribute("data-drag-group");
-    const src = isGroup
-      ? movedEl.dataset.dragGroup!
-      : movedEl.dataset.dragChild!;
-    const newIndex = event.newIndex!;
-    const oldIndex = event.oldIndex!;
-    const pos = newIndex > oldIndex ? "after" : "before";
+      },
+    });
+  } catch {
+    draggableLoaded.value = false;
+  }
+};
 
-    if (isGroup) {
-      const container = movedEl.parentElement;
-      if (container) {
-        const move = resolveGroupMove(
-          rowsFromDom(container),
-          buildChildParent(props.rows),
-          topOrder.value,
-          src,
-        );
-        if (move) {
-          topOrder.value = move.order;
-          emit("reorder", src, move.targetKey, move.position);
-        }
-      }
-    } else {
-      let srcParent: string | undefined;
-      for (const [parentKey, children] of Object.entries(childOrder.value)) {
-        if (children.includes(src)) {
-          srcParent = parentKey;
-          break;
-        }
-      }
-      if (srcParent) {
-        const siblings = childOrder.value[srcParent];
-        const srcIdx = siblings.indexOf(src);
-        if (srcIdx !== -1) siblings.splice(srcIdx, 1);
-        const insertIdx = newIndex > srcIdx ? newIndex - 1 : newIndex;
-        siblings.splice(insertIdx, 0, src);
-        const tgt = siblings[newIndex];
-        emit("reorder", src, tgt, pos);
-      }
-    }
-
-    rebuildFlatRows();
-  },
+onMounted(() => {
+  void setupDraggable();
 });
+
+watch(
+  () => props.reorderable,
+  () => {
+    void setupDraggable();
+  },
+);
 
 defineExpose({ isDragging });
 </script>

@@ -88,16 +88,14 @@ const form = reactive({
   accountNumberLast4: "",
   budgetAccountType: "DEPOSIT",
   trackingPolarity: "ASSET",
-  trackingSource: "manual",
   apyPercent: "",
-  targetAllocation: "",
-  expenseRatioPercent: "",
+  investmentSelfManaged: "false",
+  investmentTaxTreatment: "TAXABLE_BROKERAGE",
   originalAmount: "",
   originationDate: "",
   ratePercent: "",
   openingValuation: "",
   openingValuationDate: "",
-  valuationSource: "manual",
 });
 
 watch(
@@ -137,6 +135,29 @@ const budgetTypeOptions = [
 const polarityOptions = [
   { value: "ASSET", label: "Asset" },
   { value: "LIABILITY", label: "Liability" },
+];
+
+const taxTreatmentOptions = [
+  { value: "TAXABLE_BROKERAGE", label: "Taxable brokerage" },
+  { value: "TRADITIONAL_IRA", label: "Traditional IRA" },
+  { value: "ROTH_IRA", label: "Roth IRA" },
+  { value: "SEP_IRA", label: "SEP IRA" },
+  { value: "SIMPLE_IRA", label: "SIMPLE IRA" },
+  { value: "TRADITIONAL_401K", label: "Traditional 401(k)" },
+  { value: "ROTH_401K", label: "Roth 401(k)" },
+  { value: "TRADITIONAL_403B", label: "Traditional 403(b)" },
+  { value: "ROTH_403B", label: "Roth 403(b)" },
+  { value: "TRADITIONAL_457B", label: "Traditional 457(b)" },
+  { value: "ROTH_457B", label: "Roth 457(b)" },
+  { value: "HSA", label: "HSA" },
+  { value: "EDUCATION_529", label: "529 education account" },
+  { value: "CUSTODIAL", label: "Custodial account" },
+  { value: "OTHER_TAX_ADVANTAGED", label: "Other tax-advantaged" },
+];
+
+const managementStyleOptions = [
+  { value: "false", label: "Managed" },
+  { value: "true", label: "Self-managed" },
 ];
 
 const parseCurrencyMinor = (value: string) => {
@@ -192,17 +213,9 @@ const buildPayload = () => {
     if (apyMinor !== undefined) payload.apy_minor = apyMinor;
   } else if (selectedType.value === "tracking-account") {
     payload.polarity = form.trackingPolarity;
-    const source = nonEmpty(form.trackingSource);
-    const apyMinor = parsePercentMinor(form.apyPercent);
-    if (source) payload.source = source;
-    if (apyMinor !== undefined) payload.apy_minor = apyMinor;
   } else if (selectedType.value === "investment-account") {
-    const targetAllocation = nonEmpty(form.targetAllocation);
-    const expenseRatioMinor = parsePercentMinor(form.expenseRatioPercent);
-    if (targetAllocation) payload.target_allocation = targetAllocation;
-    if (expenseRatioMinor !== undefined) {
-      payload.expense_ratio_minor = expenseRatioMinor;
-    }
+    payload.self_managed = form.investmentSelfManaged === "true";
+    payload.tax_treatment = form.investmentTaxTreatment;
   } else if (selectedType.value === "loan") {
     const originalAmountMinor = parseCurrencyMinor(form.originalAmount);
     const rateMinor = parsePercentMinor(form.ratePercent);
@@ -220,8 +233,6 @@ const buildPayload = () => {
     if (form.openingValuationDate) {
       payload.opening_valuation_date = form.openingValuationDate;
     }
-    const source = nonEmpty(form.valuationSource);
-    if (source) payload.source = source;
   }
 
   return payload;
@@ -494,34 +505,20 @@ const backWizard = () => {
                 name="polarity"
                 :options="polarityOptions"
               />
-              <TextField
-                v-model="form.trackingSource"
-                label="Source of truth"
-                name="tracking-source"
-                placeholder="manual"
-              />
-              <TextField
-                v-model="form.apyPercent"
-                label="APY"
-                name="tracking-apy"
-                placeholder="Optional percent"
-                inputmode="decimal"
-              />
             </template>
 
             <template v-else-if="selectedType === 'investment-account'">
-              <TextField
-                v-model="form.targetAllocation"
-                label="Target allocation"
-                name="target-allocation"
-                placeholder="Optional"
+              <SelectField
+                v-model="form.investmentSelfManaged"
+                label="Management style"
+                name="self-managed"
+                :options="managementStyleOptions"
               />
-              <TextField
-                v-model="form.expenseRatioPercent"
-                label="Expense ratio"
-                name="expense-ratio"
-                placeholder="Optional percent"
-                inputmode="decimal"
+              <SelectField
+                v-model="form.investmentTaxTreatment"
+                label="Tax treatment"
+                name="tax-treatment"
+                :options="taxTreatmentOptions"
               />
             </template>
 
@@ -558,12 +555,6 @@ const backWizard = () => {
                 label="Valuation date"
                 name="opening-valuation-date"
               />
-              <TextField
-                v-model="form.valuationSource"
-                label="Valuation source"
-                name="valuation-source"
-                placeholder="manual"
-              />
             </template>
           </div>
 
@@ -577,17 +568,6 @@ const backWizard = () => {
         </form>
 
         <footer class="add-item-modal__footer">
-          <div class="add-item-modal__onboarding-note">
-            <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
-              <circle cx="10" cy="10" r="8" />
-              <path d="M10 9.5v4M10 6.5h.01" />
-            </svg>
-            <span>
-              Need to bring in Aspire data? Use
-              <RouterLink to="/onboarding">Onboarding</RouterLink>.
-              <small>We'll help you safely import your data.</small>
-            </span>
-          </div>
           <div class="add-item-modal__actions">
             <Button variant="secondary" @click="backWizard">
               {{ step === 1 ? "Cancel" : "Back" }}

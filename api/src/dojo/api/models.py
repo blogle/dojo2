@@ -7,6 +7,23 @@ from pydantic import BaseModel, Field, model_validator
 
 AccountClass = Literal["BUDGET", "TRACKING", "INVESTMENT", "LOAN", "TANGIBLE_ASSET"]
 BudgetAccountType = Literal["DEPOSIT", "CREDIT_CARD"]
+InvestmentTaxTreatment = Literal[
+    "TAXABLE_BROKERAGE",
+    "TRADITIONAL_IRA",
+    "ROTH_IRA",
+    "SEP_IRA",
+    "SIMPLE_IRA",
+    "TRADITIONAL_401K",
+    "ROTH_401K",
+    "TRADITIONAL_403B",
+    "ROTH_403B",
+    "TRADITIONAL_457B",
+    "ROTH_457B",
+    "HSA",
+    "EDUCATION_529",
+    "CUSTODIAL",
+    "OTHER_TAX_ADVANTAGED",
+]
 TransactionStatus = Literal["PENDING", "CLEARED"]
 SystemCategory = Literal[
     "TX_AVAILABLE_TO_BUDGET",
@@ -19,6 +36,28 @@ CategoryKind = Literal["STANDARD", "CREDIT_CARD_PAYMENT"]
 
 class ImportRequest(BaseModel):
     sheet_url_or_id: str = Field(min_length=1)
+
+
+NetWorthTreatment = Literal[
+    "DUPLICATE_BUDGET_ACCOUNT",
+    "IMPORT_TRACKING_ACCOUNT",
+    "DO_NOT_IMPORT",
+]
+TrackingPolarity = Literal["ASSET", "LIABILITY"]
+ReviewConfidence = Literal["HIGH", "MEDIUM", "LOW", "NONE"]
+
+
+class ImportReviewDecision(BaseModel):
+    raw_name: str
+    treatment: NetWorthTreatment
+    matched_account_id: str | None = None
+    polarity: TrackingPolarity | None = None
+
+
+class ImportCommitRequest(BaseModel):
+    draft_id: str = Field(min_length=1)
+    decisions: list[ImportReviewDecision]
+    low_confidence_confirmed: bool = False
 
 
 class AllocationRequest(BaseModel):
@@ -67,8 +106,8 @@ class AccountPayload(BaseModel):
     apy_minor: int | None = None
     polarity: str | None = None
     source: str | None = None
-    target_allocation: str | None = None
-    expense_ratio_minor: int | None = None
+    self_managed: bool | None = None
+    tax_treatment: InvestmentTaxTreatment | None = None
     original_amount_minor: int | None = None
     origination_date: str | None = None
     rate_minor: int | None = None
@@ -86,8 +125,8 @@ class AccountUpdatePayload(BaseModel):
     apy_minor: int | None = None
     polarity: str | None = None
     source: str | None = None
-    target_allocation: str | None = None
-    expense_ratio_minor: int | None = None
+    self_managed: bool | None = None
+    tax_treatment: InvestmentTaxTreatment | None = None
     original_amount_minor: int | None = None
     origination_date: str | None = None
     rate_minor: int | None = None

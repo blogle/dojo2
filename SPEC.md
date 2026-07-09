@@ -839,6 +839,7 @@ An investment account:
 * is not a budget account
 * does not make transfers count as income or economic spending
 * contributes to net worth from its current value, valuation, or activity according to the richer investment model
+* carries self-managed flag and tax treatment metadata for portfolio and withdrawal planning
 
 Investment account value is derived from versioned holdings plus versioned cash. A holding records a ticker, quantity, and average basis. Prices are recorded separately from holdings so brokerage statement prices and future market-data prices can coexist without rewriting position history. Brokerage statement prices are authoritative for reconciliation-date values; market-data prices may be used for current estimate views when they do not override statement evidence.
 
@@ -1179,6 +1180,8 @@ Tracking account details include:
 Investment account details include:
 
 * current value
+* self-managed flag
+* tax treatment
 * contribution category link
 * contribution and withdrawal activity
 * valuation or performance history

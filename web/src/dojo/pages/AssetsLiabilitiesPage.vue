@@ -4,7 +4,7 @@ import { computed, ref } from "vue";
 import { useRouter } from "vue-router";
 
 import { fetchAssetsLiabilities } from "@/dojo/api/client";
-import DropdownButton from "@/dojo/components/actions/DropdownButton.vue";
+import Button from "@/dojo/components/actions/Button.vue";
 import MetricStrip from "@/dojo/components/data/MetricStrip.vue";
 import NavigationRail from "@/dojo/components/navigation/NavigationRail.vue";
 import PageHeader from "@/dojo/components/data/PageHeader.vue";
@@ -150,19 +150,7 @@ const toggleGroup = (key: string) => {
 
 const isGroupCollapsed = (key: string) => collapsedGroups.value.has(key);
 
-const addItems = [
-  { key: "budget-account", label: "Budget account" },
-  { key: "tracking-account", label: "Tracking account" },
-  { key: "investment-account", label: "Investment account" },
-  { key: "loan", label: "Loan" },
-  { key: "tangible-asset", label: "Tangible asset" },
-];
-
-const handleAdd = (key: string) => {
-  router.push(`/assets-liabilities/add?type=${key}`);
-};
-
-const handleAddPrimary = () => {
+const handleAdd = () => {
   router.push("/assets-liabilities/add");
 };
 
@@ -213,12 +201,7 @@ const getSourceLabel = (source: string) => {
     <main class="assets-liabilities-page__main">
       <PageHeader title="Assets & Liabilities" :primary-actions="true">
         <template #actions>
-          <DropdownButton
-            label="Add item"
-            :items="addItems"
-            @primary-click="handleAddPrimary"
-            @select="handleAdd"
-          />
+          <Button @click="handleAdd">Add item</Button>
         </template>
       </PageHeader>
 
@@ -437,9 +420,6 @@ const getSourceLabel = (source: string) => {
         data-cy="assets-liabilities-empty"
       >
         <p>No accounts or assets configured yet.</p>
-        <p class="assets-liabilities-page__empty-hint">
-          Need to bring in Aspire data? Use Onboarding.
-        </p>
       </div>
 
       <p class="assets-liabilities-page__footer">All balances are in USD</p>

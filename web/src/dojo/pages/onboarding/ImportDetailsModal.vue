@@ -27,12 +27,16 @@ const emit = defineEmits<{
 }>();
 
 function summaryNumber(key: string): string {
-  const value = props.result?.validation_report.summary[key];
+  const value = importSummary.value?.[key];
   return typeof value === "number" ? value.toLocaleString() : "0";
 }
 
+const importSummary = computed(
+  () => props.result?.validation_report?.summary ?? props.result?.import_summary,
+);
+
 const validationSummary = computed(() => {
-  if (!props.result) return null;
+  if (!props.result?.validation_report) return null;
   const report = props.result.validation_report;
   return {
     passed: report.checks.filter((check) => check.passed).length,
@@ -65,6 +69,29 @@ const importedRecords = computed(() => [
     icon: PhUser,
   },
 ]);
+
+const decisionsSummary = computed(() => {
+  if (!props.result?.decisions_summary) return null;
+  const ds = props.result.decisions_summary;
+  return [
+    {
+      label: "Net-worth categories matched to budget accounts",
+      value: ds.duplicates_excluded,
+    },
+    {
+      label: "Tracking accounts created from net-worth categories",
+      value: ds.tracking_created,
+    },
+    {
+      label: "Net-worth categories not imported",
+      value: ds.skipped,
+    },
+    {
+      label: "Low-confidence suggestions accepted",
+      value: ds.low_confidence_accepted,
+    },
+  ];
+});
 </script>
 
 <template>
@@ -74,9 +101,12 @@ const importedRecords = computed(() => [
     data-cy="import-details-modal"
     @close="emit('close')"
   >
-    <div v-if="validationSummary" class="import-details">
-      <div class="import-details__columns">
-        <section class="import-details__section">
+    <div class="import-details">
+      <div
+        v-if="importSummary || validationSummary || decisionsSummary"
+        class="import-details__columns"
+      >
+        <section v-if="importSummary" class="import-details__section">
           <h3 class="import-details__heading">Imported records</h3>
           <Surface variant="raised" padding="0" :border="true">
             <div class="import-details__record-list" data-cy="import-records">
@@ -95,9 +125,15 @@ const importedRecords = computed(() => [
           </Surface>
         </section>
 
-        <section class="import-details__section">
-          <h3 class="import-details__heading">Validation summary</h3>
+        <section
+          v-if="validationSummary || decisionsSummary"
+          class="import-details__section"
+        >
+          <h3 v-if="validationSummary" class="import-details__heading">
+            Validation summary
+          </h3>
           <Surface
+            v-if="validationSummary"
             variant="raised"
             padding="0"
             :border="true"
@@ -137,12 +173,30 @@ const importedRecords = computed(() => [
             </div>
           </Surface>
 
-          <template v-if="validationSummary.warnings > 0">
+          <template v-else-if="decisionsSummary">
+            <h3 class="import-details__heading">Review decisions</h3>
+            <Surface variant="raised" padding="0" :border="true">
+              <div class="import-details__record-list" data-cy="decisions-summary">
+                <div
+                  v-for="item in decisionsSummary"
+                  :key="item.label"
+                  class="import-details__record-row"
+                >
+                  <span class="import-details__record-label">
+                    <span>{{ item.label }}</span>
+                  </span>
+                  <span>{{ item.value }}</span>
+                </div>
+              </div>
+            </Surface>
+          </template>
+
+          <template v-if="validationSummary && validationSummary.warnings > 0">
             <h4 class="import-details__subheading">Warnings (non-blocking)</h4>
             <Surface variant="raised" padding="0" :border="true">
               <div class="import-details__warning-list" data-cy="warning-list">
                 <div
-                  v-for="(warning, index) in result?.validation_report.warnings"
+                  v-for="(warning, index) in result?.validation_report?.warnings"
                   :key="`${warning.code}-${index}`"
                   class="import-details__warning-row"
                 >
@@ -159,6 +213,26 @@ const importedRecords = computed(() => [
           </template>
         </section>
       </div>
+
+      <template v-if="validationSummary && decisionsSummary">
+        <section class="import-details__section">
+          <h3 class="import-details__heading">Review decisions</h3>
+          <Surface variant="raised" padding="0" :border="true">
+            <div class="import-details__record-list" data-cy="decisions-summary">
+              <div
+                v-for="item in decisionsSummary"
+                :key="item.label"
+                class="import-details__record-row"
+              >
+                <span class="import-details__record-label">
+                  <span>{{ item.label }}</span>
+                </span>
+                <span>{{ item.value }}</span>
+              </div>
+            </div>
+          </Surface>
+        </section>
+      </template>
     </div>
 
     <template #footer>

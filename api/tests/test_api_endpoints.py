@@ -419,3 +419,76 @@ def test_same_date_transactions_maintain_entry_order(monkeypatch, tmp_path) -> N
         if len(same_date_txs) > 1:
             orders = [t["entry_order"] for t in same_date_txs]
             assert orders == sorted(orders)
+
+
+def test_analyze_import_draft_returns_review_items(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("SESSION_SECRET", "test-secret")
+    monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
+    monkeypatch.setenv(
+        "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
+    )
+    provisioned_main_module(monkeypatch, tmp_path, "api-test.duckdb")
+
+    with TestClient(main_module.app) as client:
+        result = client.post(
+            "/api/import/google-sheet/analyze",
+            json={"sheet_url_or_id": "fixture://default"},
+        )
+        assert result.status_code == 200
+        body = result.json()
+        assert "draft_id" in body
+        assert body["budget_account_count"] > 0
+        assert body["net_worth_category_count"] > 0
+        assert len(body["review_items"]) > 0
+
+        item = body["review_items"][0]
+        assert "raw_name" in item
+        assert "latest_value_minor" in item
+        assert "suggested_treatment" in item
+        assert "confidence" in item
+        assert item["confidence"] in ("HIGH", "MEDIUM", "LOW", "NONE")
+
+
+def test_commit_import_draft_imports_data(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("SESSION_SECRET", "test-secret")
+    monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
+    monkeypatch.setenv(
+        "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
+    )
+    provisioned_main_module(monkeypatch, tmp_path, "api-test.duckdb")
+
+    with TestClient(main_module.app) as client:
+        analyze_result = client.post(
+            "/api/import/google-sheet/analyze",
+            json={"sheet_url_or_id": "fixture://default"},
+        )
+        draft_id = analyze_result.json()["draft_id"]
+        review_items = analyze_result.json()["review_items"]
+
+        decisions = []
+        for item in review_items:
+            decisions.append(
+                {
+                    "raw_name": item["raw_name"],
+                    "treatment": "IMPORT_TRACKING_ACCOUNT",
+                    "matched_account_id": None,
+                    "polarity": item["suggested_polarity"],
+                }
+            )
+
+        commit_result = client.post(
+            "/api/import/google-sheet/commit",
+            json={
+                "draft_id": draft_id,
+                "decisions": decisions,
+                "low_confidence_confirmed": False,
+            },
+        )
+        assert commit_result.status_code == 200
+        commit_body = commit_result.json()
+        assert commit_body["ok"] is True
+        assert commit_body["decisions_summary"]["tracking_created"] > 0
+
+        status = client.get("/api/app/status")
+        assert status.status_code == 200
+        assert status.json()["ready"] is True

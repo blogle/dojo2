@@ -21,6 +21,17 @@ CREATE TABLE IF NOT EXISTS import_batches (
     summary JSON
 );
 
+CREATE TABLE IF NOT EXISTS import_drafts (
+    draft_id UUID PRIMARY KEY,
+    created_at TIMESTAMPTZ NOT NULL,
+    source_kind TEXT NOT NULL,
+    spreadsheet_id TEXT NOT NULL,
+    spreadsheet_title TEXT,
+    payload JSON NOT NULL,
+    preview JSON NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending'
+);
+
 CREATE TABLE IF NOT EXISTS accounts (
     row_id UUID PRIMARY KEY,
     account_id UUID NOT NULL,
@@ -64,8 +75,8 @@ CREATE TABLE IF NOT EXISTS tracking_account_details (
 CREATE TABLE IF NOT EXISTS investment_account_details (
     row_id UUID PRIMARY KEY,
     account_id UUID NOT NULL,
-    target_allocation TEXT,
-    expense_ratio_minor BIGINT,
+    self_managed BOOLEAN NOT NULL,
+    tax_treatment TEXT NOT NULL DEFAULT 'TAXABLE_BROKERAGE',
     valid_from TIMESTAMPTZ NOT NULL,
     valid_to TIMESTAMPTZ NOT NULL DEFAULT TIMESTAMPTZ '9999-12-31 23:59:59+00',
     created_at TIMESTAMPTZ NOT NULL,

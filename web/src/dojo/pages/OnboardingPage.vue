@@ -14,6 +14,7 @@ import { useRouter } from "vue-router";
 import { useAppState } from "../state/app";
 
 import Button from "../components/actions/Button.vue";
+import SelectField from "../components/forms/SelectField.vue";
 import TextField from "../components/forms/TextField.vue";
 import Surface from "../components/layout/Surface.vue";
 import Inline from "../components/layout/Inline.vue";
@@ -22,11 +23,30 @@ import ProgressBar from "../components/display/ProgressBar.vue";
 import StatusStepList from "../components/feedback/StatusStepList.vue";
 import type { StatusStep } from "../components/feedback/StatusStepList.vue";
 import ImportDetailsModal from "./onboarding/ImportDetailsModal.vue";
+import type {
+  ImportReviewDecision,
+  ImportReviewItem,
+  NetWorthTreatment,
+  TrackingPolarity,
+} from "../types";
 
 const router = useRouter();
-const { state, importSheet, beginGoogleOnboarding, initialize } = useAppState();
+const {
+  state,
+  analyzeSheet,
+  commitSheetImport,
+  beginGoogleOnboarding,
+  initialize,
+} = useAppState();
 
-type Step = "choose" | "migrate-form" | "progress" | "complete";
+type Step =
+  | "choose"
+  | "migrate-form"
+  | "progress"
+  | "net-worth-review"
+  | "confirm-low-confidence"
+  | "committing"
+  | "complete";
 
 const step = ref<Step>("choose");
 const sheetId = ref("");
@@ -34,6 +54,56 @@ const errorMessage = ref("");
 const formError = ref("");
 
 const importResult = computed(() => state.importResult);
+const importPreview = computed(() => state.importPreview);
+
+const localDecisions = ref<
+  Record<
+    string,
+    {
+      treatment: NetWorthTreatment;
+      matched_account_id: string | null;
+      polarity: TrackingPolarity;
+    }
+  >
+>({});
+
+const treatmentOptions = [
+  {
+    value: "DUPLICATE_BUDGET_ACCOUNT",
+    label: "Duplicate of budget account",
+  },
+  { value: "IMPORT_TRACKING_ACCOUNT", label: "Import as tracking account" },
+  { value: "DO_NOT_IMPORT", label: "Do not import" },
+];
+
+const polarityOptions = [
+  { value: "ASSET", label: "Asset" },
+  { value: "LIABILITY", label: "Liability" },
+];
+
+function getDecision(item: ImportReviewItem) {
+  return (
+    localDecisions.value[item.raw_name] ?? {
+      treatment: item.suggested_treatment,
+      matched_account_id: item.suggested_matched_account_id,
+      polarity: item.suggested_polarity,
+    }
+  );
+}
+
+function getLowConfidenceCount(): number {
+  if (!importPreview.value) return 0;
+  let count = 0;
+  for (const item of importPreview.value.review_items) {
+    const decision = getDecision(item);
+    const isUnchanged =
+      decision.treatment === item.suggested_treatment &&
+      decision.matched_account_id === item.suggested_matched_account_id &&
+      decision.polarity === item.suggested_polarity;
+    if (isUnchanged && item.confidence === "LOW") count++;
+  }
+  return count;
+}
 
 async function handleStartEmpty() {
   await initialize();
@@ -48,12 +118,49 @@ async function handleSubmitSheet() {
 
   try {
     await beginGoogleOnboarding();
-    await importSheet(sheetId.value.trim());
-    step.value = "complete";
+    await analyzeSheet(sheetId.value.trim());
+    if (state.importPreview) {
+      step.value = "net-worth-review";
+    } else {
+      throw new Error("Analysis did not return review data. Please try again.");
+    }
   } catch (err) {
     errorMessage.value =
       err instanceof Error ? err.message : "Import failed. Please try again.";
     step.value = "migrate-form";
+  }
+}
+
+function handleContinueFromReview() {
+  const lowCount = getLowConfidenceCount();
+  if (lowCount > 0) {
+    step.value = "confirm-low-confidence";
+  } else {
+    handleCommitImport(false);
+  }
+}
+
+async function handleCommitImport(confirmed: boolean) {
+  step.value = "committing";
+  const decisions: ImportReviewDecision[] = [];
+  if (importPreview.value) {
+    for (const item of importPreview.value.review_items) {
+      const decision = getDecision(item);
+      decisions.push({
+        raw_name: item.raw_name,
+        treatment: decision.treatment,
+        matched_account_id: decision.matched_account_id,
+        polarity: decision.polarity,
+      });
+    }
+  }
+  try {
+    await commitSheetImport(decisions, confirmed);
+    step.value = "complete";
+  } catch (err) {
+    errorMessage.value =
+      err instanceof Error ? err.message : "Import failed. Please try again.";
+    step.value = "net-worth-review";
   }
 }
 
@@ -70,6 +177,10 @@ function handleBack() {
   formError.value = "";
 }
 
+function handleBackToReview() {
+  step.value = "net-worth-review";
+}
+
 function handleContinue() {
   router.push("/budgets");
 }
@@ -77,22 +188,22 @@ function handleContinue() {
 const showDetails = ref(false);
 
 const progressPercent = ref(68);
-const progressLabel = ref("Importing records (2,746 of 4,032)");
+const progressLabel = ref("Analyzing Aspire data...");
 
 const statusSteps = ref<StatusStep[]>([
   {
     title: "Reading Google Sheet",
-    description: "Connected and read 4,032 rows.",
-    status: "complete",
-  },
-  {
-    title: "Importing records",
-    description: "Importing budgets, actuals, and related data.",
+    description: "Connected and reading named ranges.",
     status: "in-progress",
   },
   {
-    title: "Validating records",
-    description: "Checking data integrity and preparing your workspace.",
+    title: "Analyzing net-worth categories",
+    description: "Matching budget accounts and tracking suggestions.",
+    status: "pending",
+  },
+  {
+    title: "Preparing review",
+    description: "Building review summary for your confirmation.",
     status: "pending",
   },
 ]);
@@ -333,10 +444,10 @@ const showInvalidSheetId = computed(
       <!-- Screen 3: Progress -->
       <template v-if="step === 'progress'">
         <p class="onboarding__eyebrow">MIGRATION IN PROGRESS</p>
-        <h1 class="onboarding__headline">Importing from Aspire</h1>
+        <h1 class="onboarding__headline">Analyzing from Aspire</h1>
         <p class="onboarding__copy">
-          Dojo is importing and validating your data. You can keep this window
-          open — we'll notify you when it's ready.
+          Dojo is reading and analyzing your Aspire data. You can keep this
+          window open — we'll notify you when it's ready for review.
         </p>
 
         <Divider />
@@ -349,6 +460,177 @@ const showInvalidSheetId = computed(
         />
 
         <StatusStepList :steps="statusSteps" />
+      </template>
+
+      <!-- Screen 5: Net Worth Review -->
+      <template v-if="step === 'net-worth-review' && importPreview">
+        <p class="onboarding__eyebrow">REVIEW NET-WORTH CATEGORIES</p>
+        <h1 class="onboarding__headline">Review Aspire net worth</h1>
+        <p class="onboarding__copy">
+          We found {{ importPreview.budget_account_count }} budget accounts and
+          {{ importPreview.net_worth_category_count }} net-worth categories.
+          Review how each category should be imported.
+        </p>
+
+        <Divider />
+
+        <div
+          class="onboarding__review-table"
+          data-cy="net-worth-review-table"
+        >
+          <div
+            v-for="item in importPreview.review_items"
+            :key="item.raw_name"
+            class="onboarding__review-row"
+            :class="{
+              'onboarding__review-row--low-confidence':
+                getDecision(item).treatment === item.suggested_treatment &&
+                getDecision(item).matched_account_id ===
+                  item.suggested_matched_account_id &&
+                getDecision(item).polarity === item.suggested_polarity &&
+                item.confidence === 'LOW',
+            }"
+          >
+            <div class="onboarding__review-header">
+              <span class="onboarding__review-name">{{ item.raw_name }}</span>
+              <span
+                v-if="item.confidence === 'LOW'"
+                class="onboarding__confidence-badge onboarding__confidence-badge--low"
+              >
+                Low confidence
+              </span>
+              <span
+                v-else-if="item.confidence === 'MEDIUM'"
+                class="onboarding__confidence-badge onboarding__confidence-badge--medium"
+              >
+                Review suggested
+              </span>
+            </div>
+            <div class="onboarding__review-details">
+              <span class="onboarding__review-value">
+                Latest value: ${{ (item.latest_value_minor / 100).toFixed(2) }}
+              </span>
+              <span class="onboarding__review-reason">{{ item.reason }}</span>
+            </div>
+            <div class="onboarding__review-controls">
+              <SelectField
+                :model-value="getDecision(item).treatment"
+                label="Treatment"
+                :name="`treatment-${item.raw_name}`"
+                :options="treatmentOptions"
+                @update:model-value="
+                  (val) =>
+                    (localDecisions[item.raw_name] = {
+                      ...getDecision(item),
+                      treatment: val as NetWorthTreatment,
+                    })
+                "
+              />
+              <SelectField
+                v-if="
+                  getDecision(item).treatment === 'DUPLICATE_BUDGET_ACCOUNT'
+                "
+                :model-value="getDecision(item).matched_account_id ?? ''"
+                label="Matched budget account"
+                :name="`account-${item.raw_name}`"
+                :options="
+                  item.candidate_account_ids.map((id, idx) => ({
+                    value: id,
+                    label: item.candidate_account_names[idx],
+                  }))
+                "
+                @update:model-value="
+                  (val: string) =>
+                    (localDecisions[item.raw_name] = {
+                      ...getDecision(item),
+                      matched_account_id: val || null,
+                    })
+                "
+              />
+              <SelectField
+                v-if="
+                  getDecision(item).treatment === 'IMPORT_TRACKING_ACCOUNT'
+                "
+                :model-value="getDecision(item).polarity"
+                label="Polarity"
+                :name="`polarity-${item.raw_name}`"
+                :options="polarityOptions"
+                @update:model-value="
+                  (val) =>
+                    (localDecisions[item.raw_name] = {
+                      ...getDecision(item),
+                      polarity: val as TrackingPolarity,
+                    })
+                "
+              />
+            </div>
+          </div>
+        </div>
+
+        <Divider />
+
+        <Inline
+          gap="var(--space-sm)"
+          align="center"
+          class="onboarding__form-actions"
+        >
+          <Button variant="secondary" @click="handleCancel">Cancel</Button>
+          <Button variant="primary" @click="handleContinueFromReview">
+            Continue
+          </Button>
+        </Inline>
+      </template>
+
+      <!-- Screen 6: Confirm Low Confidence -->
+      <template v-if="step === 'confirm-low-confidence'">
+        <p class="onboarding__eyebrow">CONFIRM LOW-CONFIDENCE MATCHES</p>
+        <h1 class="onboarding__headline">Continue with low-confidence matches?</h1>
+        <p class="onboarding__copy">
+          Some Aspire net-worth categories are matched with low confidence. If a
+          duplicate is wrong, dojo may exclude a real asset or liability from net
+          worth. If a tracking import is wrong, dojo may double count a budget
+          account.
+        </p>
+        <p class="onboarding__copy">
+          Review the highlighted rows before continuing.
+        </p>
+
+        <Divider />
+
+        <Inline
+          gap="var(--space-sm)"
+          align="center"
+          class="onboarding__form-actions"
+        >
+          <Button variant="secondary" @click="handleBackToReview">
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            @click="handleCommitImport(true)"
+          >
+            Confirm and continue
+          </Button>
+        </Inline>
+      </template>
+
+      <!-- Screen 7: Committing -->
+      <template v-if="step === 'committing'">
+        <p class="onboarding__eyebrow">IMPORTING DATA</p>
+        <h1 class="onboarding__headline">Importing from Aspire</h1>
+        <p class="onboarding__copy">
+          Dojo is importing and validating your data. You can keep this window
+          open — we'll notify you when it's ready.
+        </p>
+
+        <Divider />
+
+        <ProgressBar
+          :value="100"
+          :show-value="false"
+          label="Importing records..."
+          variant="positive"
+        />
       </template>
 
       <!-- Screen 4: Complete -->
@@ -647,5 +929,86 @@ const showInvalidSheetId = computed(
 .onboarding__complete-icon svg {
   width: 28px;
   height: 28px;
+}
+
+.onboarding__review-table {
+  display: grid;
+  gap: var(--space-md);
+  max-height: 400px;
+  overflow-y: auto;
+  padding: var(--space-md) 0;
+}
+
+.onboarding__review-row {
+  padding: var(--space-md);
+  border: 1px solid var(--color-outline);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  display: grid;
+  gap: var(--space-sm);
+}
+
+.onboarding__review-row--low-confidence {
+  border-color: var(--color-warning);
+  background: color-mix(in srgb, var(--color-warning) 5%, var(--color-surface));
+}
+
+.onboarding__review-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.onboarding__review-name {
+  font-family: var(--text-headline-sm-font-family);
+  font-size: var(--text-headline-sm-font-size);
+  font-weight: var(--text-headline-sm-font-weight);
+  line-height: var(--text-headline-sm-line-height);
+  color: var(--color-on-surface);
+}
+
+.onboarding__confidence-badge {
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-family: var(--text-label-xs-font-family);
+  font-size: var(--text-label-xs-font-size);
+  font-weight: var(--text-label-xs-font-weight);
+  line-height: var(--text-label-xs-line-height);
+}
+
+.onboarding__confidence-badge--low {
+  background: var(--color-warning-container);
+  color: var(--color-warning);
+}
+
+.onboarding__confidence-badge--medium {
+  background: var(--color-surface-muted);
+  color: var(--color-on-surface-muted);
+}
+
+.onboarding__review-details {
+  display: grid;
+  gap: var(--space-xs);
+}
+
+.onboarding__review-value {
+  font-family: var(--text-body-sm-font-family);
+  font-size: var(--text-body-sm-font-size);
+  font-weight: var(--text-body-sm-font-weight);
+  line-height: var(--text-body-sm-line-height);
+  color: var(--color-on-surface);
+}
+
+.onboarding__review-reason {
+  font-family: var(--text-body-xs-font-family);
+  font-size: var(--text-body-xs-font-size);
+  font-weight: var(--text-body-xs-font-weight);
+  line-height: var(--text-body-xs-line-height);
+  color: var(--color-on-surface-muted);
+}
+
+.onboarding__review-controls {
+  display: grid;
+  gap: var(--space-sm);
 }
 </style>

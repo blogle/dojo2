@@ -15,6 +15,7 @@ from dojo.api.models import (
     CategoryPayload,
     CategoryUpdatePayload,
     GoalPayload,
+    ImportCommitRequest,
     ImportRequest,
     InvestmentCashSnapshotPayload,
     InvestmentPositionPayload,
@@ -173,6 +174,69 @@ def import_status(request: Request) -> dict[str, Any]:
         "latest_run": get_service(request).get_import_status(),
         "app_status": get_service(request).get_app_status(),
     }
+
+
+@router.post("/import/google-sheet/analyze")
+def analyze_google_sheet(request: Request, payload: ImportRequest) -> dict[str, Any]:
+    settings = get_settings(request)
+    service = get_service(request)
+    raw = payload.sheet_url_or_id
+    normalized = raw.strip().casefold()
+    if normalized in {"fixture", "fixture://default", "default"} or (
+        settings.dev_fixture_mode and not settings.oauth_configured
+    ):
+        return service.analyze_import_draft(
+            source="fixture://default", source_kind="fixture"
+        )
+
+    session_id = get_or_create_oauth_session_id(request)
+    token = get_oauth_token_store(request).get(session_id)
+    if token is None:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Google Sheets access has not been granted for this browser session. "
+                "Complete the OAuth step and try again."
+            ),
+        )
+    access_token = token.get("access_token")
+    if not access_token:
+        raise HTTPException(
+            status_code=400,
+            detail="Google OAuth succeeded, but this session does not have a usable access token.",
+        )
+    try:
+        spreadsheet_id = extract_sheet_id(raw)
+        title, available_named_ranges, named_ranges = fetch_sheet_named_ranges(
+            spreadsheet_id=spreadsheet_id,
+            access_token=cast(str, access_token),
+            allowed_normalized_aliases=consumed_named_range_aliases(),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch Google Sheet: {exc}") from exc
+    return service.analyze_import_draft(
+        source=raw,
+        source_kind="google_sheets",
+        spreadsheet_title=title,
+        named_ranges=named_ranges,
+        available_named_ranges=available_named_ranges,
+        expected=None,
+    )
+
+
+@router.post("/import/google-sheet/commit")
+def commit_google_sheet_import(
+    request: Request, payload: ImportCommitRequest
+) -> dict[str, Any]:
+    service = get_service(request)
+    try:
+        return service.commit_import_draft(
+            draft_id=payload.draft_id,
+            decisions=[d.model_dump() for d in payload.decisions],
+            low_confidence_confirmed=payload.low_confidence_confirmed,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/bootstrap")

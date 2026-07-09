@@ -1,6 +1,8 @@
 import { computed, reactive } from "vue";
 
 import {
+  analyzeGoogleSheet,
+  commitGoogleSheetImport,
   createAccount,
   createAllocation,
   createCategory,
@@ -33,7 +35,9 @@ import type {
   Category,
   CategoryGroup,
   GoogleOnboardingStatus,
+  ImportPreview,
   ImportResult,
+  ImportReviewDecision,
   NetWorthResponse,
   Transaction,
   TransactionPayload,
@@ -55,6 +59,8 @@ const state = reactive({
   categories: [] as Category[],
   netWorth: null as NetWorthResponse | null,
   importResult: null as ImportResult | null,
+  importPreview: null as ImportPreview | null,
+  importDecisions: [] as ImportReviewDecision[],
   onboardingInfo: null as GoogleOnboardingStatus | null,
   editingTransactionId: null as string | null,
   transactionOffset: 0,
@@ -78,6 +84,8 @@ function resetState(): void {
   state.categories = [];
   state.netWorth = null;
   state.importResult = null;
+  state.importPreview = null;
+  state.importDecisions = [];
   state.onboardingInfo = null;
   state.editingTransactionId = null;
   state.transactionOffset = 0;
@@ -197,6 +205,29 @@ async function initialize(): Promise<void> {
 async function importSheet(sheetUrlOrId: string): Promise<void> {
   await withSaving(async () => {
     state.importResult = await importGoogleSheet(sheetUrlOrId);
+    await initialize();
+  });
+}
+
+async function analyzeSheet(sheetUrlOrId: string): Promise<void> {
+  await withSaving(async () => {
+    state.importPreview = await analyzeGoogleSheet(sheetUrlOrId);
+    state.importDecisions = [];
+  });
+}
+
+async function commitSheetImport(
+  decisions: ImportReviewDecision[],
+  lowConfidenceConfirmed: boolean,
+): Promise<void> {
+  await withSaving(async () => {
+    if (!state.importPreview) return;
+    state.importResult = await commitGoogleSheetImport({
+      draft_id: state.importPreview.draft_id,
+      decisions,
+      low_confidence_confirmed: lowConfidenceConfirmed,
+    });
+    state.importPreview = null;
     await initialize();
   });
 }
@@ -446,6 +477,8 @@ export function useAppState() {
     ready,
     resetState,
     initialize,
+    analyzeSheet,
+    commitSheetImport,
     importSheet,
     beginGoogleOnboarding,
     setMonth,

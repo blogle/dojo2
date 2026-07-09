@@ -88,4 +88,48 @@ describe("Onboarding import details modal", () => {
       cy.contains("2 transactions have missing payees.").should("be.visible");
     });
   });
+
+  it("renders imported counts for review-based imports without validation details", () => {
+    const reviewResult: ImportResult = {
+      ok: true,
+      import_summary: {
+        group_count: 9,
+        category_count: 34,
+        account_count: 12,
+        transaction_count: 2486,
+        allocation_count: 620,
+        valuation_count: 18,
+      },
+      decisions_summary: {
+        duplicates_excluded: 2,
+        tracking_created: 4,
+        skipped: 1,
+        low_confidence_accepted: 0,
+      },
+    };
+
+    cy.viewport(1600, 900);
+    mount(ImportDetailsModal, {
+      props: {
+        visible: true,
+        result: reviewResult,
+      },
+    });
+
+    cy.get("[data-cy=import-records]").within(() => {
+      cy.contains("Transactions").should("be.visible");
+      cy.contains("2,486").should("be.visible");
+      cy.contains("Accounts").should("be.visible");
+      cy.contains("12").should("be.visible");
+    });
+    cy.get("[data-cy=decisions-summary]").within(() => {
+      cy.contains("Net-worth categories matched to budget accounts").should(
+        "be.visible",
+      );
+      cy.contains("Tracking accounts created from net-worth categories").should(
+        "be.visible",
+      );
+      cy.contains("4").should("be.visible");
+    });
+  });
 });

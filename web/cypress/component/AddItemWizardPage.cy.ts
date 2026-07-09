@@ -86,10 +86,6 @@ describe("AddItemWizardPage", () => {
       "contain.text",
       "Budget account",
     );
-    cy.get("[data-cy=add-item-wizard]").should(
-      "contain.text",
-      "Need to bring in Aspire data? Use Onboarding.",
-    );
   });
 
   it("keeps add route distinct from account detail route", () => {
@@ -132,6 +128,45 @@ describe("AddItemWizardPage", () => {
         status: "IN_REPAYMENT",
       });
       expect(body.original_amount_minor).to.eq(25000000);
+    });
+    cy.wrap(null).then(() => {
+      expect(router.currentRoute.value.path).to.eq(
+        "/assets-liabilities/new-account",
+      );
+    });
+  });
+
+  it("creates an investment account with self_managed and tax_treatment", () => {
+    const router = mountPage("/assets-liabilities/add?type=investment-account");
+    cy.get("[data-cy=entity-type-investment-account]").should(
+      "have.class",
+      "add-item-modal__type-card--selected",
+    );
+    cy.get("[data-cy=add-item-continue]").click();
+    cy.get('input[name="name"]').type("Schwab Brokerage");
+    cy.get('select[name="self-managed"]').select("true");
+    cy.get('select[name="tax-treatment"]').select("ROTH_IRA");
+    cy.get("[data-cy=add-item-continue]").click();
+
+    cy.get("@fetch").should((fetchStub) => {
+      const calls = (
+        fetchStub as unknown as {
+          getCalls: () => Array<{ args: [string, RequestInit?] }>;
+        }
+      ).getCalls();
+      const postCall = calls.find((call) => {
+        const path = new URL(call.args[0], "http://localhost").pathname;
+        return path === "/api/accounts" && call.args[1]?.method === "POST";
+      });
+      expect(postCall, "POST /api/accounts").not.to.eq(undefined);
+      if (!postCall) throw new Error("POST /api/accounts was not called");
+      const body = JSON.parse(postCall.args[1]?.body as string);
+      expect(body).to.include({
+        name: "Schwab Brokerage",
+        account_class: "INVESTMENT",
+        self_managed: true,
+        tax_treatment: "ROTH_IRA",
+      });
     });
     cy.wrap(null).then(() => {
       expect(router.currentRoute.value.path).to.eq(

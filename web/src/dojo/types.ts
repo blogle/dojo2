@@ -125,7 +125,7 @@ export type NetWorthResponse = {
 
 export type ImportResult = {
   ok: boolean;
-  validation_report: {
+  validation_report?: {
     passed: boolean;
     checks: Array<{
       label: string;
@@ -161,6 +161,52 @@ export type ImportResult = {
   import_batch?: Record<string, unknown>;
   app_status?: AppStatus;
   import_status?: Record<string, unknown> | null;
+  import_summary?: Record<string, unknown>;
+  decisions_summary?: {
+    duplicates_excluded: number;
+    tracking_created: number;
+    skipped: number;
+    low_confidence_accepted: number;
+  };
+};
+
+export type ReviewConfidence = "HIGH" | "MEDIUM" | "LOW" | "NONE";
+
+export type NetWorthTreatment =
+  | "DUPLICATE_BUDGET_ACCOUNT"
+  | "IMPORT_TRACKING_ACCOUNT"
+  | "DO_NOT_IMPORT";
+
+export type TrackingPolarity = "ASSET" | "LIABILITY";
+
+export type ImportReviewItem = {
+  raw_name: string;
+  latest_value_minor: number;
+  latest_date: string;
+  suggested_treatment: NetWorthTreatment;
+  suggested_matched_account_id: string | null;
+  suggested_matched_account_name: string | null;
+  suggested_polarity: TrackingPolarity;
+  suggested_polarity_reason: string;
+  confidence: ReviewConfidence;
+  score: number;
+  reason: string;
+  candidate_account_ids: string[];
+  candidate_account_names: string[];
+};
+
+export type ImportReviewDecision = {
+  raw_name: string;
+  treatment: NetWorthTreatment;
+  matched_account_id: string | null;
+  polarity: TrackingPolarity | null;
+};
+
+export type ImportPreview = {
+  draft_id: string;
+  budget_account_count: number;
+  net_worth_category_count: number;
+  review_items: ImportReviewItem[];
 };
 
 export type GoogleOnboardingStatus = {

@@ -8,6 +8,7 @@ import type {
   Category,
   CategoryGroup,
   GoogleOnboardingStatus,
+  ImportPreview,
   ImportResult,
   NetWorthResponse,
   Transaction,
@@ -143,6 +144,31 @@ export async function importGoogleSheet(
   return request<ImportResult>("/api/import/google-sheet", {
     method: "POST",
     body: JSON.stringify({ sheet_url_or_id: sheetUrlOrId }),
+  });
+}
+
+export async function analyzeGoogleSheet(
+  sheetUrlOrId: string,
+): Promise<ImportPreview> {
+  return request<ImportPreview>("/api/import/google-sheet/analyze", {
+    method: "POST",
+    body: JSON.stringify({ sheet_url_or_id: sheetUrlOrId }),
+  });
+}
+
+export async function commitGoogleSheetImport(payload: {
+  draft_id: string;
+  decisions: Array<{
+    raw_name: string;
+    treatment: string;
+    matched_account_id: string | null;
+    polarity: string | null;
+  }>;
+  low_confidence_confirmed: boolean;
+}): Promise<ImportResult> {
+  return request<ImportResult>("/api/import/google-sheet/commit", {
+    method: "POST",
+    body: JSON.stringify(payload),
   });
 }
 

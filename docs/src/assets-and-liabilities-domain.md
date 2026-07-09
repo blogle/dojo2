@@ -6,7 +6,7 @@ Budget accounts are inside the budget. They appear in the normal transaction led
 
 Tracking accounts are simple snapshot accounts outside the budget. Aspire net-worth categories import as tracking accounts unless they duplicate a budget account. Tracking accounts use their latest snapshot value and have an explicit asset or liability polarity.
 
-Investment accounts are richer non-budget assets. Their value comes from holdings plus cash. Holdings store ticker, quantity, and average basis. Prices are stored separately so brokerage statement prices can prove reconciled values and future market prices can support current estimates.
+Investment accounts are richer non-budget assets. Their value comes from holdings plus cash. Holdings store ticker, quantity, and average basis. Prices are stored separately so brokerage statement prices can prove reconciled values and future market prices can support current estimates. Investment accounts carry self-managed flag and tax treatment metadata for portfolio and withdrawal planning.
 
 Loans are richer liabilities. A loan has details such as original amount and rate when known, plus principal-balance snapshots. Mortgage or loan budget categories plan cash obligations, but ordinary category transactions do not change loan balances by themselves.
 

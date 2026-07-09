@@ -675,6 +675,369 @@ class DojoService:
             ),
         )
 
+    @staticmethod
+    def _normalized_similarity(a: str, b: str) -> float:
+        """Simple normalized Levenshtein-style similarity for fuzzy matching."""
+        a = a.lower().strip()
+        b = b.lower().strip()
+        if a == b:
+            return 1.0
+        len_a, len_b = len(a), len(b)
+        if len_a == 0 or len_b == 0:
+            return 0.0
+        matrix = list(range(len_b + 1))
+        for i in range(1, len_a + 1):
+            prev = matrix[0]
+            matrix[0] = i
+            for j in range(1, len_b + 1):
+                cost = 0 if a[i - 1] == b[j - 1] else 1
+                prev, matrix[j] = matrix[j], min(
+                    matrix[j] + 1, matrix[j - 1] + 1, prev + cost
+                )
+        max_len = max(len_a, len_b)
+        return 1.0 - (matrix[len_b] / max_len)
+
+    @staticmethod
+    def _confidence_for_score(score: float) -> str:
+        if score >= 0.92:
+            return "HIGH"
+        if score >= 0.82:
+            return "MEDIUM"
+        if score >= 0.70:
+            return "LOW"
+        return "NONE"
+
+    def analyze_import_draft(
+        self,
+        *,
+        source: str,
+        source_kind: str,
+        spreadsheet_title: str | None = None,
+        named_ranges: dict[str, list[list[str]]] | None = None,
+        available_named_ranges: list[str] | None = None,
+        expected: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if source_kind == "fixture":
+            bundle = fixture_bundle()
+        else:
+            if named_ranges is None or spreadsheet_title is None:
+                raise ValueError("Live import requires named range data")
+            bundle = parse_named_range_workbook(
+                spreadsheet_id=extract_sheet_id(source),
+                spreadsheet_title=spreadsheet_title,
+                named_ranges=named_ranges,
+                source_kind=source_kind,
+                expected=expected,
+                available_named_ranges=available_named_ranges,
+            )
+
+        account_names_by_id: dict[str, str] = {}
+        account_ids_by_name: dict[str, str] = {}
+        for account in bundle.accounts:
+            account_names_by_id[account.account_id] = account.name
+            account_ids_by_name[account.name] = account.account_id
+
+        latest_by_raw: dict[str, tuple[date, int]] = {}
+        for valuation in bundle.valuations:
+            existing = latest_by_raw.get(valuation.raw_name)
+            if existing is None or valuation.effective_date >= existing[0]:
+                latest_by_raw[valuation.raw_name] = (
+                    valuation.effective_date,
+                    valuation.amount_minor,
+                )
+
+        review_items: list[dict[str, Any]] = []
+        seen_raws: set[str] = set()
+        for valuation in bundle.valuations:
+            if valuation.raw_name in seen_raws:
+                continue
+            seen_raws.add(valuation.raw_name)
+
+            best_account_id: str | None = None
+            best_account_name: str | None = None
+            best_score = 0.0
+            for name, account_id in account_ids_by_name.items():
+                score = self._normalized_similarity(valuation.raw_name, name)
+                if score > best_score:
+                    best_score = score
+                    best_account_id = account_id
+                    best_account_name = name
+
+            confidence = self._confidence_for_score(best_score)
+            polarity = "LIABILITY" if valuation.is_debt else "ASSET"
+            polarity_reason = (
+                "Polarity set from Aspire debt config"
+                if valuation.is_debt
+                else "Polarity set from Aspire asset config"
+            )
+
+            if best_account_id and confidence in ("HIGH", "MEDIUM"):
+                suggested_treatment = "DUPLICATE_BUDGET_ACCOUNT"
+                reason = f"Matched budget account {best_account_name}"
+            elif confidence == "LOW":
+                suggested_treatment = "IMPORT_TRACKING_ACCOUNT"
+                reason = f"Fuzzy match {best_score:.0%} confidence; review recommended"
+            else:
+                suggested_treatment = "IMPORT_TRACKING_ACCOUNT"
+                reason = "No budget account match found"
+                best_account_id = None
+
+            latest_date, latest_amount = latest_by_raw.get(
+                valuation.raw_name, (date.min, 0)
+            )
+
+            review_items.append(
+                {
+                    "raw_name": valuation.raw_name,
+                    "latest_value_minor": latest_amount,
+                    "latest_date": str(latest_date),
+                    "suggested_treatment": suggested_treatment,
+                    "suggested_matched_account_id": best_account_id,
+                    "suggested_matched_account_name": best_account_name,
+                    "suggested_polarity": polarity,
+                    "suggested_polarity_reason": polarity_reason,
+                    "confidence": confidence,
+                    "score": best_score,
+                    "reason": reason,
+                    "candidate_account_ids": [
+                        account_ids_by_name[name]
+                        for name in sorted(account_ids_by_name.keys())
+                    ],
+                    "candidate_account_names": sorted(account_ids_by_name.keys()),
+                }
+            )
+
+        draft_id = str(uuid4())
+        now = self.clock.now()
+        draft_payload = {
+            "source": source,
+            "source_kind": source_kind,
+            "spreadsheet_title": spreadsheet_title,
+            "named_ranges": named_ranges,
+            "available_named_ranges": available_named_ranges,
+            "expected": expected,
+        }
+
+        with self.db.transaction() as connection:
+            connection.execute(
+                """
+                INSERT INTO import_drafts
+                    (draft_id, created_at, source_kind, spreadsheet_id,
+                     spreadsheet_title, payload, preview, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')
+                """,
+                (
+                    draft_id,
+                    now,
+                    source_kind,
+                    extract_sheet_id(source),
+                    spreadsheet_title,
+                    json_dumps(draft_payload),
+                    json_dumps(
+                        {
+                            "budget_account_count": len(
+                                [
+                                    a
+                                    for a in bundle.accounts
+                                    if a.account_class == ACCOUNT_CLASS_BUDGET
+                                ]
+                            ),
+                            "net_worth_category_count": len(
+                                {v.raw_name for v in bundle.valuations}
+                            ),
+                            "review_items": review_items,
+                        }
+                    ),
+                ),
+            )
+
+        return {
+            "draft_id": draft_id,
+            "budget_account_count": len(
+                [
+                    a
+                    for a in bundle.accounts
+                    if a.account_class == ACCOUNT_CLASS_BUDGET
+                ]
+            ),
+            "net_worth_category_count": len(
+                {v.raw_name for v in bundle.valuations}
+            ),
+            "review_items": review_items,
+        }
+
+    def commit_import_draft(
+        self,
+        *,
+        draft_id: str,
+        decisions: list[dict[str, Any]],
+        low_confidence_confirmed: bool,
+    ) -> dict[str, Any]:
+        draft = self.db.fetch_one(
+            "SELECT * FROM import_drafts WHERE draft_id = ?", (draft_id,)
+        )
+        if draft is None or draft["status"] != "pending":
+            raise ValueError("Draft not found or already used")
+
+        import json as json_mod
+        draft_payload = json_mod.loads(draft["payload"])
+        preview = json_mod.loads(draft["preview"])
+        review_items = preview["review_items"]
+
+        item_by_name = {item["raw_name"]: item for item in review_items}
+        decision_by_name = {d["raw_name"]: d for d in decisions}
+
+        low_count = 0
+        for item in review_items:
+            decision = decision_by_name.get(item["raw_name"])
+            if decision is None:
+                continue
+            is_unchanged = (
+                decision.get("treatment", item["suggested_treatment"])
+                == item["suggested_treatment"]
+                and decision.get(
+                    "matched_account_id", item["suggested_matched_account_id"]
+                )
+                == item["suggested_matched_account_id"]
+                and decision.get("polarity", item["suggested_polarity"])
+                == item["suggested_polarity"]
+            )
+            if is_unchanged and item["confidence"] == "LOW":
+                low_count += 1
+
+        if low_count > 0 and not low_confidence_confirmed:
+            return {
+                "ok": False,
+                "error": "Low-confidence decisions require confirmation",
+                "low_confidence_count": low_count,
+            }
+
+        source = draft_payload["source"]
+        source_kind = draft_payload["source_kind"]
+        spreadsheet_title = draft_payload.get("spreadsheet_title")
+        named_ranges = draft_payload.get("named_ranges")
+        available_named_ranges = draft_payload.get("available_named_ranges")
+        expected = draft_payload.get("expected")
+
+        if source_kind == "fixture":
+            bundle = fixture_bundle()
+        else:
+            if named_ranges is None or spreadsheet_title is None:
+                raise ValueError("Draft missing required named range data")
+            bundle = parse_named_range_workbook(
+                spreadsheet_id=extract_sheet_id(source),
+                spreadsheet_title=spreadsheet_title,
+                named_ranges=named_ranges,
+                source_kind=source_kind,
+                expected=expected,
+                available_named_ranges=available_named_ranges,
+            )
+
+        account_ids_by_name: dict[str, str] = {
+            account.name: account.account_id for account in bundle.accounts
+        }
+        account_names_by_id = {account_id: name for name, account_id in account_ids_by_name.items()}
+
+        decisions_summary = {
+            "duplicates_excluded": 0,
+            "tracking_created": 0,
+            "skipped": 0,
+            "low_confidence_accepted": low_count,
+        }
+        duplicate_categories: set[str] = set()
+        tracking_categories: set[str] = set()
+        skipped_categories: set[str] = set()
+        committed_valuations = []
+
+        for valuation in bundle.valuations:
+            decision = decision_by_name.get(valuation.raw_name)
+            treatment = (
+                decision.get("treatment")
+                if decision
+                else item_by_name.get(valuation.raw_name, {}).get(
+                    "suggested_treatment"
+                )
+            )
+            if treatment is None:
+                continue
+
+            if treatment == "DO_NOT_IMPORT":
+                skipped_categories.add(valuation.raw_name)
+                continue
+
+            if treatment == "DUPLICATE_BUDGET_ACCOUNT":
+                matched_account_id = (
+                    decision.get("matched_account_id")
+                    if decision
+                    else item_by_name.get(valuation.raw_name, {}).get(
+                        "suggested_matched_account_id"
+                    )
+                )
+                matched_account_name = (
+                    account_names_by_id.get(matched_account_id)
+                    if isinstance(matched_account_id, str)
+                    else None
+                )
+                if matched_account_name:
+                    valuation.account_name = matched_account_name
+                    duplicate_categories.add(valuation.raw_name)
+                    committed_valuations.append(valuation)
+                    continue
+
+            if treatment == "IMPORT_TRACKING_ACCOUNT":
+                suggested_polarity = item_by_name.get(valuation.raw_name, {}).get(
+                    "suggested_polarity", "ASSET"
+                )
+                polarity = decision.get("polarity", suggested_polarity) if decision else suggested_polarity
+                tracking_categories.add(valuation.raw_name)
+
+                valuation.account_name = None
+                valuation.is_debt = polarity == "LIABILITY"
+                committed_valuations.append(valuation)
+
+        bundle.valuations = committed_valuations
+        decisions_summary["duplicates_excluded"] = len(duplicate_categories)
+        decisions_summary["tracking_created"] = len(tracking_categories)
+        decisions_summary["skipped"] = len(skipped_categories)
+        import_summary = {
+            "account_count": len(bundle.accounts) + len(tracking_categories),
+            "category_count": len(bundle.categories),
+            "group_count": len(bundle.groups),
+            "transaction_count": len(bundle.transactions),
+            "allocation_count": len(bundle.allocations),
+            "valuation_count": len(bundle.valuations),
+        }
+
+        imported_at = self.clock.now()
+        with self.db.transaction() as connection:
+            self._clear_domain_tables(connection)
+            self._insert_bundle(connection, bundle, imported_at)
+            connection.execute(
+                load_sql("queries/insert_import_batch"),
+                (
+                    str(uuid4()),
+                    bundle.spreadsheet_id,
+                    bundle.spreadsheet_title,
+                    imported_at,
+                    imported_at,
+                    json_dumps(import_summary | {"decisions_summary": decisions_summary}),
+                ),
+            )
+
+        self.db.execute(
+            "UPDATE import_drafts SET status = 'committed' WHERE draft_id = ?",
+            (draft_id,),
+        )
+
+        return {
+            "ok": True,
+            "import_summary": import_summary,
+            "decisions_summary": decisions_summary,
+            "import_batch": self.db.fetch_one(load_sql("queries/latest_import_batch")),
+            "app_status": self.get_app_status(),
+            "import_status": self.get_import_status(),
+        }
+
     def _validate_bundle(self, bundle: ParsedImportBundle) -> dict[str, Any]:
         return build_validation_report(self, bundle)
 
@@ -1648,8 +2011,10 @@ class DojoService:
                     "investment_account_details",
                     {
                         "account_id": account_id,
-                        "target_allocation": payload.get("target_allocation"),
-                        "expense_ratio_minor": payload.get("expense_ratio_minor"),
+                        "self_managed": payload.get("self_managed", False),
+                        "tax_treatment": payload.get(
+                            "tax_treatment", "TAXABLE_BROKERAGE"
+                        ),
                         "valid_from": now,
                         "valid_to": MAX_TS,
                         "created_at": now,
@@ -1786,11 +2151,11 @@ class DojoService:
                         {
                             "row_id": str(uuid4()),
                             "account_id": account_id,
-                            "target_allocation": payload.get(
-                                "target_allocation", inv_current.get("target_allocation")
+                            "self_managed": payload.get(
+                                "self_managed", inv_current.get("self_managed")
                             ),
-                            "expense_ratio_minor": payload.get(
-                                "expense_ratio_minor", inv_current.get("expense_ratio_minor")
+                            "tax_treatment": payload.get(
+                                "tax_treatment", inv_current.get("tax_treatment")
                             ),
                             "created_at": inv_current["created_at"],
                             "created_by_user_id": inv_current["created_by_user_id"],
