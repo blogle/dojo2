@@ -474,10 +474,7 @@ const showInvalidSheetId = computed(
 
         <Divider />
 
-        <div
-          class="onboarding__review-table"
-          data-cy="net-worth-review-table"
-        >
+        <div class="onboarding__review-table" data-cy="net-worth-review-table">
           <div
             v-for="item in importPreview.review_items"
             :key="item.raw_name"
@@ -548,9 +545,7 @@ const showInvalidSheetId = computed(
                 "
               />
               <SelectField
-                v-if="
-                  getDecision(item).treatment === 'IMPORT_TRACKING_ACCOUNT'
-                "
+                v-if="getDecision(item).treatment === 'IMPORT_TRACKING_ACCOUNT'"
                 :model-value="getDecision(item).polarity"
                 label="Polarity"
                 :name="`polarity-${item.raw_name}`"
@@ -584,12 +579,14 @@ const showInvalidSheetId = computed(
       <!-- Screen 6: Confirm Low Confidence -->
       <template v-if="step === 'confirm-low-confidence'">
         <p class="onboarding__eyebrow">CONFIRM LOW-CONFIDENCE MATCHES</p>
-        <h1 class="onboarding__headline">Continue with low-confidence matches?</h1>
+        <h1 class="onboarding__headline">
+          Continue with low-confidence matches?
+        </h1>
         <p class="onboarding__copy">
           Some Aspire net-worth categories are matched with low confidence. If a
-          duplicate is wrong, dojo may exclude a real asset or liability from net
-          worth. If a tracking import is wrong, dojo may double count a budget
-          account.
+          duplicate is wrong, dojo may exclude a real asset or liability from
+          net worth. If a tracking import is wrong, dojo may double count a
+          budget account.
         </p>
         <p class="onboarding__copy">
           Review the highlighted rows before continuing.
@@ -605,10 +602,7 @@ const showInvalidSheetId = computed(
           <Button variant="secondary" @click="handleBackToReview">
             Cancel
           </Button>
-          <Button
-            variant="primary"
-            @click="handleCommitImport(true)"
-          >
+          <Button variant="primary" @click="handleCommitImport(true)">
             Confirm and continue
           </Button>
         </Inline>

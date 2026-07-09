@@ -11,7 +11,7 @@ After this work, dojo will have a complete Assets & Liabilities frontend surface
 - [x] (2026-07-07) Created ExecPlan for frontend implementation.
 - [x] (2026-07-07) Work Item A: Overview page with `/assets-liabilities` route, MetricStrip, grouped stacked entity cards, Cypress component coverage, and visual validation against mock 01.
 - [x] (2026-07-07) Work Item B: Add item wizard with explicit `/assets-liabilities/add` route, entity type selection, type-specific account forms, and Cypress coverage.
-- [ ] Work Item C: EntityDetailLayout shared component + budget account detail page. Partial implementation exists as `AccountDetailPage.vue` with `/assets-liabilities/:id` routing and visual validation for budget, investment, and loan detail structures; remaining work should decide whether to extract a shared `EntityDetailLayout` component.
+- [x] (2026-07-09) Work Item C: Budget account detail page aligned to mock 03 with split header actions, dense metric strip, scoped transaction table with memo/action affordances, balance chart preview, summary/notes panel, full sidebar action cards, focused Cypress coverage, and visual validation. `EntityDetailLayout` was not extracted or cataloged because the current shell still contains account-class-specific decisions and would not yet be a reusable fixtureable catalog contract.
 - [ ] Work Item D: Tracking account detail page + cutover modal.
 - [ ] Work Item E: Investment account detail page + contribution flow.
 - [ ] Work Item F: Loan detail page + payment flow.
@@ -25,6 +25,9 @@ After this work, dojo will have a complete Assets & Liabilities frontend surface
 
 - Observation: Browser validation found the first add-wizard modal initially used too much vertical space and created an inner scrollbar on a desktop viewport.
   Evidence: The first screenshot at `/home/ogle/src/dojo2/tmp/add-item-wizard-step1.png` showed the boundary note partly below the modal body scroll. Tightening card height and modal spacing produced `/home/ogle/src/dojo2/tmp/add-item-wizard-step1-tightened.png`, which fits the full first step like mock 02.
+
+- Observation: The existing transaction API does not support account-id filtering, so the detail page can only filter the currently fetched transaction page in the browser. This makes full transaction counts and pending/cleared counts incomplete for accounts whose activity is outside the first fetched page.
+  Evidence: Browser validation of `/assets-liabilities/ed588f91-4e40-5da5-bcc2-086de7f8cb59` showed 10 scoped rows from a transaction page whose unscoped total was 10523. The page now labels this as scoped current-page data instead of claiming a full account ledger.
 
 ## Decision Log
 
@@ -43,6 +46,10 @@ After this work, dojo will have a complete Assets & Liabilities frontend surface
 - Decision: Add `/assets-liabilities/add` before `/assets-liabilities/:id` and let the overview split button open that route from its primary half.
   Rationale: Route order prevents `add` from being interpreted as an account id, and the primary Add item action now matches mock 02 while dropdown selections remain direct type shortcuts.
   Date/Author: 2026-07-07 / opencode
+
+- Decision: Do not extract or catalog `EntityDetailLayout` during Work Item C.
+  Rationale: The current `AccountDetailPage.vue` chrome is reused internally across budget, investment, loan, tracking, and tangible account branches, but its slots and sidebar content are still shaped by account-class-specific decisions. Cataloging it now would create a premature design-system contract. The budget-account detail alignment can be completed with smaller page-local edits and focused route coverage.
+  Date/Author: 2026-07-09 / opencode
 
 ## Outcomes & Retrospective
 
@@ -75,6 +82,10 @@ A later committed pass added `/assets-liabilities/:id` and `AccountDetailPage.vu
 ### Work Item B Completion (2026-07-07)
 
 Work Item B is complete. `/assets-liabilities/add` now renders a modal wizard over the Assets & Liabilities overview instead of falling through to the dynamic detail route. The first step aligns with mock 02: title, three-step progress rail, five entity-type row cards, the budget-boundary explainer, and the Aspire onboarding note. The second step collects minimal common and type-specific fields, then submits to the existing `POST /api/accounts` endpoint and routes to the created account detail page. Cypress coverage proves route safety, type selection, and the create-account payload; `DropdownButton` coverage proves the primary split-button click now emits an event for the Add item route.
+
+### Work Item C Completion (2026-07-09)
+
+Work Item C is complete for the budget-account detail scope. The existing `/assets-liabilities/:id` page now aligns more closely with mock 03: back navigation, clean account title/badges, direct Reconcile action, secondary More actions split button, kebab affordance, five metric cards, a dense budget-account ledger table with Memo and row action affordances, balance-over-time preview, Summary & notes panel, and sidebar cards for account details, reconciliation, history, and configuration. A new Cypress component spec covers the budget account route contract and verifies that only transactions from the target account are rendered from the fetched page. Browser validation captured desktop and narrow screenshots at `/home/ogle/src/dojo2/tmp/account-detail-workitem-c-desktop.png` and `/home/ogle/src/dojo2/tmp/account-detail-workitem-c-narrow.png`.
 
 ## Context and Orientation
 

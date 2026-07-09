@@ -32,7 +32,8 @@ function summaryNumber(key: string): string {
 }
 
 const importSummary = computed(
-  () => props.result?.validation_report?.summary ?? props.result?.import_summary,
+  () =>
+    props.result?.validation_report?.summary ?? props.result?.import_summary,
 );
 
 const validationSummary = computed(() => {
@@ -176,7 +177,10 @@ const decisionsSummary = computed(() => {
           <template v-else-if="decisionsSummary">
             <h3 class="import-details__heading">Review decisions</h3>
             <Surface variant="raised" padding="0" :border="true">
-              <div class="import-details__record-list" data-cy="decisions-summary">
+              <div
+                class="import-details__record-list"
+                data-cy="decisions-summary"
+              >
                 <div
                   v-for="item in decisionsSummary"
                   :key="item.label"
@@ -196,7 +200,8 @@ const decisionsSummary = computed(() => {
             <Surface variant="raised" padding="0" :border="true">
               <div class="import-details__warning-list" data-cy="warning-list">
                 <div
-                  v-for="(warning, index) in result?.validation_report?.warnings"
+                  v-for="(warning, index) in result?.validation_report
+                    ?.warnings"
                   :key="`${warning.code}-${index}`"
                   class="import-details__warning-row"
                 >
@@ -218,7 +223,10 @@ const decisionsSummary = computed(() => {
         <section class="import-details__section">
           <h3 class="import-details__heading">Review decisions</h3>
           <Surface variant="raised" padding="0" :border="true">
-            <div class="import-details__record-list" data-cy="decisions-summary">
+            <div
+              class="import-details__record-list"
+              data-cy="decisions-summary"
+            >
               <div
                 v-for="item in decisionsSummary"
                 :key="item.label"

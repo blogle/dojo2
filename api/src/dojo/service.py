@@ -691,9 +691,7 @@ class DojoService:
             matrix[0] = i
             for j in range(1, len_b + 1):
                 cost = 0 if a[i - 1] == b[j - 1] else 1
-                prev, matrix[j] = matrix[j], min(
-                    matrix[j] + 1, matrix[j - 1] + 1, prev + cost
-                )
+                prev, matrix[j] = matrix[j], min(matrix[j] + 1, matrix[j - 1] + 1, prev + cost)
         max_len = max(len_a, len_b)
         return 1.0 - (matrix[len_b] / max_len)
 
@@ -782,9 +780,7 @@ class DojoService:
                 reason = "No budget account match found"
                 best_account_id = None
 
-            latest_date, latest_amount = latest_by_raw.get(
-                valuation.raw_name, (date.min, 0)
-            )
+            latest_date, latest_amount = latest_by_raw.get(valuation.raw_name, (date.min, 0))
 
             review_items.append(
                 {
@@ -800,8 +796,7 @@ class DojoService:
                     "score": best_score,
                     "reason": reason,
                     "candidate_account_ids": [
-                        account_ids_by_name[name]
-                        for name in sorted(account_ids_by_name.keys())
+                        account_ids_by_name[name] for name in sorted(account_ids_by_name.keys())
                     ],
                     "candidate_account_names": sorted(account_ids_by_name.keys()),
                 }
@@ -820,12 +815,7 @@ class DojoService:
 
         with self.db.transaction() as connection:
             connection.execute(
-                """
-                INSERT INTO import_drafts
-                    (draft_id, created_at, source_kind, spreadsheet_id,
-                     spreadsheet_title, payload, preview, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')
-                """,
+                load_sql("queries/insert_import_draft"),
                 (
                     draft_id,
                     now,
@@ -854,15 +844,9 @@ class DojoService:
         return {
             "draft_id": draft_id,
             "budget_account_count": len(
-                [
-                    a
-                    for a in bundle.accounts
-                    if a.account_class == ACCOUNT_CLASS_BUDGET
-                ]
+                [a for a in bundle.accounts if a.account_class == ACCOUNT_CLASS_BUDGET]
             ),
-            "net_worth_category_count": len(
-                {v.raw_name for v in bundle.valuations}
-            ),
+            "net_worth_category_count": len({v.raw_name for v in bundle.valuations}),
             "review_items": review_items,
         }
 
@@ -873,13 +857,12 @@ class DojoService:
         decisions: list[dict[str, Any]],
         low_confidence_confirmed: bool,
     ) -> dict[str, Any]:
-        draft = self.db.fetch_one(
-            "SELECT * FROM import_drafts WHERE draft_id = ?", (draft_id,)
-        )
+        draft = self.db.fetch_one(load_sql("queries/import_draft_by_id"), (draft_id,))
         if draft is None or draft["status"] != "pending":
             raise ValueError("Draft not found or already used")
 
         import json as json_mod
+
         draft_payload = json_mod.loads(draft["payload"])
         preview = json_mod.loads(draft["preview"])
         review_items = preview["review_items"]
@@ -895,9 +878,7 @@ class DojoService:
             is_unchanged = (
                 decision.get("treatment", item["suggested_treatment"])
                 == item["suggested_treatment"]
-                and decision.get(
-                    "matched_account_id", item["suggested_matched_account_id"]
-                )
+                and decision.get("matched_account_id", item["suggested_matched_account_id"])
                 == item["suggested_matched_account_id"]
                 and decision.get("polarity", item["suggested_polarity"])
                 == item["suggested_polarity"]
@@ -954,9 +935,7 @@ class DojoService:
             treatment = (
                 decision.get("treatment")
                 if decision
-                else item_by_name.get(valuation.raw_name, {}).get(
-                    "suggested_treatment"
-                )
+                else item_by_name.get(valuation.raw_name, {}).get("suggested_treatment")
             )
             if treatment is None:
                 continue
@@ -988,7 +967,9 @@ class DojoService:
                 suggested_polarity = item_by_name.get(valuation.raw_name, {}).get(
                     "suggested_polarity", "ASSET"
                 )
-                polarity = decision.get("polarity", suggested_polarity) if decision else suggested_polarity
+                polarity = (
+                    decision.get("polarity", suggested_polarity) if decision else suggested_polarity
+                )
                 tracking_categories.add(valuation.raw_name)
 
                 valuation.account_name = None
@@ -1025,7 +1006,7 @@ class DojoService:
             )
 
         self.db.execute(
-            "UPDATE import_drafts SET status = 'committed' WHERE draft_id = ?",
+            load_sql("queries/mark_import_draft_committed"),
             (draft_id,),
         )
 
@@ -2012,9 +1993,7 @@ class DojoService:
                     {
                         "account_id": account_id,
                         "self_managed": payload.get("self_managed", False),
-                        "tax_treatment": payload.get(
-                            "tax_treatment", "TAXABLE_BROKERAGE"
-                        ),
+                        "tax_treatment": payload.get("tax_treatment", "TAXABLE_BROKERAGE"),
                         "valid_from": now,
                         "valid_to": MAX_TS,
                         "created_at": now,

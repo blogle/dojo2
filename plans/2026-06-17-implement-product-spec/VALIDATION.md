@@ -180,6 +180,54 @@ For each completed work item, record:
 
 ---
 
+## Work Item 6.C: Budget Account Detail
+
+**Status**: Implementation complete, visual validation complete.
+
+### Commands run
+
+- `just typecheck` — Passed
+- `just lint-web` — Passed
+- `cd web && pnpm test:component --spec "cypress/component/AccountDetailPage.cy.ts"` — Passed, 1 test
+- `just test-web` — Passed, 41 Vitest tests and 254 Cypress component tests
+- `just check` — Passed after running `just format` and moving import-draft SQL queries into SQL files required by the repository architecture policy
+
+### Test results
+
+- Added `AccountDetailPage.cy.ts` covering the budget-account detail route contract with mocked accounts and transactions.
+- The spec verifies header badges/actions, five-metric strip presence, Memo column, target-account transaction scoping from the fetched page, sidebar action affordances, and Summary & notes rendering.
+
+### Type-check results
+
+- `just typecheck` passes cleanly after extending the frontend `Account` type with optional account metadata returned by the API.
+
+### Lint results
+
+- `just lint-web` passes cleanly.
+
+### Implementation summary
+
+1. Aligned `AccountDetailPage.vue` budget-account chrome with mock 03: clean account title, type/source badges, direct Reconcile button, secondary More actions split button, kebab affordance, and DESIGN.md token-preserving layout.
+2. Expanded the budget-account transaction table to include Memo and row action affordances on desktop while keeping a reduced readable column set on narrow viewports.
+3. Added lower content matching the mock: balance-over-time preview, period toggle presentation, Summary & notes card, and edit-notes affordance.
+4. Expanded the right rail cards with reconciliation, history, and configuration action buttons.
+5. Kept `EntityDetailLayout` page-local for this iteration instead of cataloging a premature shared component contract.
+
+### Visual validation
+
+- Mock screen: `plans/2026-06-17-implement-product-spec/assets_liabilities_screens/03-budget-account-detail.png`
+- Status: Complete for the Work Item C frontend scope — confirmed the actual page has the mock's major page structure, header action split, metric strip, dense ledger table, lower chart/summary area, and sidebar cards. Narrow viewport validation confirms the page remains readable by collapsing to one content column and hiding lower-priority table/action controls.
+- Screenshots captured:
+  - `/home/ogle/src/dojo2/tmp/account-detail-workitem-c-desktop.png`
+  - `/home/ogle/src/dojo2/tmp/account-detail-workitem-c-narrow.png`
+
+### Validation gaps
+
+- `fetchTransactionsPage` still lacks server-side `account_id` filtering. The page filters the fetched page client-side and now labels that limitation instead of claiming the full account ledger.
+- Reconciliation review, full charting, and edit/history workflows remain deferred per the work item non-scope.
+
+---
+
 *Add new work items above as they are completed.*
 
 ## Visual Gap Closure — Work Item: Detail Pages

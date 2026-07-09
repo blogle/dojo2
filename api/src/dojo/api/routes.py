@@ -185,9 +185,7 @@ def analyze_google_sheet(request: Request, payload: ImportRequest) -> dict[str, 
     if normalized in {"fixture", "fixture://default", "default"} or (
         settings.dev_fixture_mode and not settings.oauth_configured
     ):
-        return service.analyze_import_draft(
-            source="fixture://default", source_kind="fixture"
-        )
+        return service.analyze_import_draft(source="fixture://default", source_kind="fixture")
 
     session_id = get_or_create_oauth_session_id(request)
     token = get_oauth_token_store(request).get(session_id)
@@ -225,9 +223,7 @@ def analyze_google_sheet(request: Request, payload: ImportRequest) -> dict[str, 
 
 
 @router.post("/import/google-sheet/commit")
-def commit_google_sheet_import(
-    request: Request, payload: ImportCommitRequest
-) -> dict[str, Any]:
+def commit_google_sheet_import(request: Request, payload: ImportCommitRequest) -> dict[str, Any]:
     service = get_service(request)
     try:
         return service.commit_import_draft(

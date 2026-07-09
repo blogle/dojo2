@@ -38,6 +38,8 @@ export type Account = {
   account_id: string;
   name: string;
   account_class: string;
+  institution?: string | null;
+  account_number_last4?: string | null;
   is_hidden: boolean;
   is_active: boolean;
   budget_account_type?: string | null;

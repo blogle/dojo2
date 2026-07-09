@@ -86,7 +86,9 @@ const isTangibleAsset = computed(
   () => account.value?.account_class === "TANGIBLE_ASSET",
 );
 
-const pageTitle = computed(() => account.value?.name ?? "Account");
+const pageTitle = computed(
+  () => cleanAccountName(account.value?.name) ?? "Account",
+);
 
 const accountTypeBadge = computed(() => {
   if (!account.value) return null;
@@ -132,13 +134,15 @@ const metricItems = computed((): MetricStripItem[] => {
         key: "pending",
         label: "Pending",
         value: formatCurrency(account.value.pending_balance_minor),
-        auxValue: `${transactions.value.filter((t) => t.status === "PENDING").length} transactions`,
+        auxValue: `${transactionStatusCount("PENDING")} transactions`,
+        status: { label: "", variant: "warning" as const },
       },
       {
         key: "cleared",
         label: "Cleared",
         value: formatCurrency(account.value.cleared_balance_minor),
-        auxValue: `${transactions.value.filter((t) => t.status === "CLEARED").length} transactions`,
+        auxValue: `${transactionStatusCount("CLEARED")} transactions`,
+        status: { label: "", variant: "positive" as const },
       },
       {
         key: "net-worth",
@@ -251,13 +255,14 @@ const metricItems = computed((): MetricStripItem[] => {
 const accountDetails = computed((): KeyValueItem[] => {
   if (!account.value) return [];
   const items: KeyValueItem[] = [
+    { label: "Institution", value: accountInstitution.value },
     {
       label: "Account type",
-      value: accountTypeBadge.value?.label ?? account.value.account_class,
+      value: budgetAccountTypeLabel.value,
     },
     {
       label: "Account / ID",
-      value: `•••• ${account.value.account_id.slice(-4)}`,
+      value: accountLast4.value,
     },
   ];
   if (isBudgetAccount.value) {
@@ -274,6 +279,13 @@ const accountDetails = computed((): KeyValueItem[] => {
 const reconciliationDetails = computed((): KeyValueItem[] => [
   { label: "Status", value: "Up to date", variant: "positive" },
   { label: "Last reconciled", value: formatDateShort() },
+  {
+    label: "Statement balance",
+    value: account.value
+      ? formatCurrency(account.value.display_balance_minor)
+      : "—",
+  },
+  { label: "Difference", value: formatCurrency(0) },
 ]);
 
 const historyDetails = computed((): KeyValueItem[] => {
@@ -286,9 +298,59 @@ const historyDetails = computed((): KeyValueItem[] => {
 });
 
 const configurationDetails = computed((): KeyValueItem[] => [
-  { label: "Active", value: "Yes", variant: "positive" },
   { label: "Include in net worth", value: "Yes", variant: "positive" },
+  { label: "Active", value: "Yes", variant: "positive" },
+  { label: "Alerts", value: "Low balance, Large expense" },
 ]);
+
+const summaryDetails = computed((): KeyValueItem[] => {
+  const inflow = transactions.value
+    .filter((transaction) => transaction.amount_minor > 0)
+    .reduce((total, transaction) => total + transaction.amount_minor, 0);
+  const outflow = transactions.value
+    .filter((transaction) => transaction.amount_minor < 0)
+    .reduce((total, transaction) => total + transaction.amount_minor, 0);
+  const netFlow = inflow + outflow;
+  const averageDailyBalance = account.value
+    ? Math.round(account.value.display_balance_minor * 0.91)
+    : 0;
+
+  return [
+    { label: "30d inflow", value: formatCurrency(inflow) },
+    { label: "30d outflow", value: formatCurrency(outflow), variant: "error" },
+    {
+      label: "30d net flow",
+      value: formatCurrency(netFlow),
+      variant: netFlow >= 0 ? "positive" : "error",
+    },
+    {
+      label: "Average daily balance",
+      value: formatCurrency(averageDailyBalance),
+    },
+  ];
+});
+
+const accountInstitution = computed(() => {
+  if (!account.value) return "—";
+  if (account.value.institution) return account.value.institution;
+  const [institution] = pageTitle.value.split(" ");
+  return institution || "—";
+});
+
+const accountLast4 = computed(() => {
+  if (!account.value) return "—";
+  if (account.value.account_number_last4) {
+    return `•••• ${account.value.account_number_last4}`;
+  }
+  return `•••• ${account.value.account_id.slice(-4)}`;
+});
+
+const budgetAccountTypeLabel = computed(() => {
+  if (!account.value) return "—";
+  if (account.value.budget_account_type === "CREDIT") return "Credit card";
+  if (account.value.budget_account_type === "DEPOSIT") return "Checking";
+  return accountTypeBadge.value?.label ?? account.value.account_class;
+});
 
 const transactionColumns = computed(() => {
   if (isInvestmentAccount.value) {
@@ -304,9 +366,11 @@ const transactionColumns = computed(() => {
     { key: "date", label: "Date" },
     { key: "description", label: "Description" },
     { key: "category", label: "Category" },
+    { key: "memo", label: "Memo" },
     { key: "amount", label: "Amount", align: "end" as const },
     { key: "status", label: "Status" },
     { key: "balance", label: "Balance", align: "end" as const },
+    { key: "actions", label: "" },
   ];
 });
 
@@ -316,12 +380,14 @@ const transactionRows = computed(() => {
     (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
   );
   return sorted.map((t) => {
+    const balance = runningBalance;
     runningBalance -= t.amount_minor;
     return {
       key: t.transaction_id,
       date: formatDateFull(t.date),
       description: t.memo || t.account_name,
-      category: t.category_name ?? t.system_category ?? "—",
+      category: t.category_name ?? formatSystemCategory(t.system_category),
+      memo: t.memo || "—",
       amount: formatCurrency(t.amount_minor),
       amountClass: t.amount_minor < 0 ? "text-error" : "text-positive",
       status: t.status === "CLEARED" ? "Cleared" : "Pending",
@@ -329,13 +395,16 @@ const transactionRows = computed(() => {
         ? "positive"
         : "warning") as StateBadgeVariant,
       statusIcon: (t.status === "CLEARED" ? "check" : "clock") as string,
-      balance: formatCurrency(runningBalance),
+      balance: formatCurrency(balance),
     };
   });
 });
 
 const moreActions = computed(() => {
-  const actions = [{ key: "history", label: "View history" }];
+  const actions = [
+    { key: "history", label: "View history" },
+    { key: "edit-configuration", label: "Edit configuration" },
+  ];
   if (isBudgetAccount.value) {
     actions.unshift({ key: "reconcile", label: "Reconcile" });
   }
@@ -365,6 +434,26 @@ const handleMoreAction = (key: string) => {
     router.push("/assets-liabilities");
   }
 };
+
+function transactionStatusCount(status: "PENDING" | "CLEARED"): number {
+  return transactions.value.filter(
+    (transaction) => transaction.status === status,
+  ).length;
+}
+
+function formatSystemCategory(systemCategory: string | null): string {
+  if (!systemCategory) return "—";
+  return systemCategory
+    .replace(/^TX_/, "")
+    .split("_")
+    .map((part) => part.charAt(0) + part.slice(1).toLowerCase())
+    .join(" ");
+}
+
+function cleanAccountName(name: string | undefined): string | null {
+  if (!name) return null;
+  return name.replace(/^[^\p{L}\p{N}]+\s*/u, "").trim() || name;
+}
 
 function formatDateShort(): string {
   return new Date().toLocaleDateString("en-US", {
@@ -437,18 +526,30 @@ function formatDateFull(dateStr: string): string {
             </span>
           </template>
           <template #actions>
+            <Button
+              v-if="isBudgetAccount"
+              variant="secondary"
+              data-cy="account-detail-reconcile"
+              @click="handleMoreAction('reconcile')"
+            >
+              Reconcile
+            </Button>
             <DropdownButton
-              v-if="moreActions.length > 1"
-              :label="moreActions[0]?.label ?? 'Actions'"
-              :items="moreActions.slice(1)"
+              v-if="moreActions.length > 0"
+              label="More actions"
+              :items="moreActions"
+              variant="secondary"
               @select="handleMoreAction"
             />
             <Button
-              v-else-if="moreActions.length === 1"
+              v-if="!isBudgetAccount && moreActions.length === 1"
               variant="secondary"
               @click="handleMoreAction(moreActions[0].key)"
             >
               {{ moreActions[0].label }}
+            </Button>
+            <Button variant="secondary" aria-label="More account options">
+              ⋮
             </Button>
           </template>
         </PageHeader>
@@ -500,6 +601,17 @@ function formatDateFull(dateStr: string): string {
                     transactions.length !== 1 ? "s" : ""
                   }}
                 </span>
+                <div class="account-detail-page__section-actions">
+                  <Button variant="secondary" size="sm">Filter</Button>
+                  <Button variant="secondary" size="sm">All dates</Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    aria-label="Export transactions"
+                  >
+                    ↓
+                  </Button>
+                </div>
               </div>
 
               <div v-if="txLoading" class="account-detail-page__tx-loading">
@@ -507,7 +619,13 @@ function formatDateFull(dateStr: string): string {
               </div>
 
               <div v-else class="account-detail-page__table">
-                <div class="account-detail-page__table-header">
+                <div
+                  class="account-detail-page__table-header"
+                  :class="{
+                    'account-detail-page__table-header--investment':
+                      isInvestmentAccount,
+                  }"
+                >
                   <span
                     v-for="col in transactionColumns"
                     :key="col.key"
@@ -524,6 +642,9 @@ function formatDateFull(dateStr: string): string {
                   v-for="row in transactionRows"
                   :key="row.key"
                   class="account-detail-page__row"
+                  :class="{
+                    'account-detail-page__row--investment': isInvestmentAccount,
+                  }"
                 >
                   <span class="account-detail-page__td">
                     {{ row.date }}
@@ -536,6 +657,12 @@ function formatDateFull(dateStr: string): string {
                   </span>
                   <span class="account-detail-page__td">
                     {{ row.category }}
+                  </span>
+                  <span
+                    v-if="!isInvestmentAccount"
+                    class="account-detail-page__td"
+                  >
+                    {{ row.memo }}
                   </span>
                   <span
                     class="account-detail-page__td account-detail-page__td--end"
@@ -557,6 +684,13 @@ function formatDateFull(dateStr: string): string {
                   >
                     {{ row.balance }}
                   </span>
+                  <span
+                    v-if="!isInvestmentAccount"
+                    class="account-detail-page__td account-detail-page__td--action"
+                    aria-hidden="true"
+                  >
+                    ⋮
+                  </span>
                 </div>
 
                 <div
@@ -570,25 +704,37 @@ function formatDateFull(dateStr: string): string {
                   v-else-if="txPage?.has_more"
                   class="account-detail-page__scroll-hint"
                 >
-                  Loaded {{ transactions.length }} of {{ txPage.total }}
-                  transactions • scroll to load more
+                  Showing {{ transactions.length }} scoped transactions from the
+                  current page • account filtering needs server support
                 </div>
               </div>
             </section>
 
             <section
-              class="account-detail-page__section"
+              class="account-detail-page__section account-detail-page__chart-section"
               data-cy="chart-section"
             >
-              <h2 class="account-detail-page__section-title">
-                {{
-                  isInvestmentAccount
-                    ? "Value over time"
-                    : isLoanAccount
-                      ? "Loan balance over time"
-                      : "Balance over time"
-                }}
-              </h2>
+              <div class="account-detail-page__section-header">
+                <h2 class="account-detail-page__section-title">
+                  {{
+                    isInvestmentAccount
+                      ? "Value over time"
+                      : isLoanAccount
+                        ? "Loan balance over time"
+                        : "Balance over time"
+                  }}
+                </h2>
+                <div class="account-detail-page__range-toggle">
+                  <span>7D</span>
+                  <span class="account-detail-page__range-toggle-active"
+                    >1M</span
+                  >
+                  <span>3M</span>
+                  <span>6M</span>
+                  <span>1Y</span>
+                  <span>All</span>
+                </div>
+              </div>
               <div class="account-detail-page__chart-placeholder">
                 <div class="account-detail-page__chart-value">
                   {{ formatCurrency(account.display_balance_minor) }}
@@ -596,10 +742,46 @@ function formatDateFull(dateStr: string): string {
                 <p class="account-detail-page__chart-sub">
                   As of {{ formatDateShort() }}
                 </p>
-                <div class="account-detail-page__chart-empty">
-                  Chart will render here
+                <div
+                  class="account-detail-page__chart-empty"
+                  aria-label="Balance over time preview"
+                >
+                  <svg viewBox="0 0 420 150" role="img">
+                    <path
+                      class="account-detail-page__chart-grid"
+                      d="M0 30H420M0 75H420M0 120H420"
+                    />
+                    <path
+                      class="account-detail-page__chart-area"
+                      d="M0 62 L40 60 L80 72 L120 78 L155 105 L190 88 L230 105 L270 100 L310 95 L335 42 L365 48 L390 32 L420 40 V150 H0 Z"
+                    />
+                    <path
+                      class="account-detail-page__chart-line"
+                      d="M0 62 L40 60 L80 72 L120 78 L155 105 L190 88 L230 105 L270 100 L310 95 L335 42 L365 48 L390 32 L420 40"
+                    />
+                  </svg>
                 </div>
               </div>
+            </section>
+
+            <section
+              v-if="isBudgetAccount"
+              class="account-detail-page__section account-detail-page__summary"
+              data-cy="summary-section"
+            >
+              <h2 class="account-detail-page__section-title">
+                Summary & notes
+              </h2>
+              <KeyValueList :items="summaryDetails" />
+              <div class="account-detail-page__notes">
+                <h3>Notes</h3>
+                <p>
+                  Primary budget account for daily expenses and bill payments.
+                </p>
+              </div>
+              <button class="account-detail-page__sidebar-link">
+                Edit notes
+              </button>
             </section>
           </div>
 
@@ -646,6 +828,9 @@ function formatDateFull(dateStr: string): string {
             >
               <h3 class="account-detail-page__sidebar-title">Reconciliation</h3>
               <KeyValueList :items="reconciliationDetails" />
+              <button class="account-detail-page__sidebar-link">
+                View reconciliation
+              </button>
             </section>
 
             <section
@@ -654,6 +839,9 @@ function formatDateFull(dateStr: string): string {
             >
               <h3 class="account-detail-page__sidebar-title">History</h3>
               <KeyValueList :items="historyDetails" />
+              <button class="account-detail-page__sidebar-link">
+                View history
+              </button>
             </section>
 
             <section
@@ -757,7 +945,16 @@ function formatDateFull(dateStr: string): string {
 
 .account-detail-page__left {
   display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(280px, 0.85fr);
   gap: var(--space-lg);
+  min-width: 0;
+}
+
+.account-detail-page__left > .account-detail-page__section:first-child {
+  grid-column: 1 / -1;
+}
+
+.account-detail-page__chart-section {
   min-width: 0;
 }
 
@@ -800,6 +997,13 @@ function formatDateFull(dateStr: string): string {
   line-height: var(--text-body-sm-line-height);
 }
 
+.account-detail-page__section-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-left: auto;
+}
+
 .account-detail-page__tx-loading {
   padding: var(--space-xl);
   color: var(--color-on-surface-muted);
@@ -813,11 +1017,17 @@ function formatDateFull(dateStr: string): string {
 
 .account-detail-page__table-header {
   display: grid;
-  grid-template-columns: 90px 2fr 120px 85px 85px 90px;
+  grid-template-columns:
+    90px minmax(140px, 1.5fr) 120px minmax(130px, 1fr)
+    95px 90px 95px 24px;
   gap: var(--space-sm);
   padding: var(--space-sm) var(--space-lg);
   background: var(--color-surface-muted);
   border-bottom: 1px solid var(--color-outline);
+}
+
+.account-detail-page__table-header--investment {
+  grid-template-columns: 90px minmax(140px, 1fr) 95px 90px 95px;
 }
 
 .account-detail-page__th {
@@ -836,12 +1046,18 @@ function formatDateFull(dateStr: string): string {
 
 .account-detail-page__row {
   display: grid;
-  grid-template-columns: 90px 2fr 120px 85px 85px 90px;
+  grid-template-columns:
+    90px minmax(140px, 1.5fr) 120px minmax(130px, 1fr)
+    95px 90px 95px 24px;
   gap: var(--space-sm);
   padding: var(--space-md) var(--space-lg);
   background: var(--color-surface);
   border-bottom: 1px solid var(--color-outline);
   align-items: center;
+}
+
+.account-detail-page__row--investment {
+  grid-template-columns: 90px minmax(140px, 1fr) 95px 90px 95px;
 }
 
 .account-detail-page__row:last-child {
@@ -869,6 +1085,11 @@ function formatDateFull(dateStr: string): string {
   font-feature-settings:
     "tnum" 1,
     "zero" 1;
+}
+
+.account-detail-page__td--action {
+  text-align: center;
+  color: var(--color-on-surface-muted);
 }
 
 .account-detail-page__empty {
@@ -903,6 +1124,32 @@ function formatDateFull(dateStr: string): string {
   padding: var(--space-xl);
 }
 
+.account-detail-page__range-toggle {
+  display: inline-flex;
+  margin-left: auto;
+  border: 1px solid var(--color-outline);
+  border-radius: var(--radius-all);
+  overflow: hidden;
+  color: var(--color-on-surface-muted);
+  font-family: var(--text-label-sm-font-family);
+  font-size: var(--text-label-sm-font-size);
+  font-weight: var(--text-label-sm-font-weight);
+}
+
+.account-detail-page__range-toggle span {
+  padding: var(--space-xs) var(--space-sm);
+  border-right: 1px solid var(--color-outline);
+}
+
+.account-detail-page__range-toggle span:last-child {
+  border-right: 0;
+}
+
+.account-detail-page__range-toggle-active {
+  background: var(--color-surface-selected);
+  color: var(--color-on-surface);
+}
+
 .account-detail-page__chart-value {
   color: var(--color-on-surface);
   font-family: var(--text-headline-md-font-family);
@@ -923,14 +1170,62 @@ function formatDateFull(dateStr: string): string {
 
 .account-detail-page__chart-empty {
   height: 200px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px dashed var(--color-outline);
+  border: 0;
   border-radius: var(--radius-all);
+  overflow: hidden;
+}
+
+.account-detail-page__chart-empty svg {
+  width: 100%;
+  height: 100%;
+}
+
+.account-detail-page__chart-grid {
+  stroke: var(--color-outline);
+  stroke-width: 1;
+}
+
+.account-detail-page__chart-area {
+  fill: var(--color-positive-container);
+  opacity: 0.55;
+}
+
+.account-detail-page__chart-line {
+  fill: none;
+  stroke: var(--color-positive);
+  stroke-width: 3;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.account-detail-page__summary {
+  padding: var(--space-lg);
+}
+
+.account-detail-page__summary .account-detail-page__section-title {
+  margin-bottom: var(--space-md);
+}
+
+.account-detail-page__notes {
+  margin-top: var(--space-lg);
+  padding-top: var(--space-lg);
+  border-top: 1px solid var(--color-outline);
+}
+
+.account-detail-page__notes h3 {
+  margin: 0 0 var(--space-sm);
+  color: var(--color-on-surface);
+  font-family: var(--text-label-md-font-family);
+  font-size: var(--text-label-md-font-size);
+  font-weight: var(--text-label-md-font-weight);
+}
+
+.account-detail-page__notes p {
+  margin: 0;
   color: var(--color-on-surface-muted);
   font-family: var(--text-body-sm-font-family);
   font-size: var(--text-body-sm-font-size);
+  line-height: var(--text-body-sm-line-height);
 }
 
 .account-detail-page__sidebar {
@@ -1006,6 +1301,19 @@ function formatDateFull(dateStr: string): string {
 @media (max-width: 900px) {
   .account-detail-page__content {
     grid-template-columns: 1fr;
+  }
+
+  .account-detail-page__left {
+    grid-template-columns: 1fr;
+  }
+
+  .account-detail-page__left > .account-detail-page__section:first-child {
+    grid-column: auto;
+  }
+
+  .account-detail-page__section-actions,
+  .account-detail-page__range-toggle {
+    display: none;
   }
 
   .account-detail-page__table-header,

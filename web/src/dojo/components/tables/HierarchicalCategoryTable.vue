@@ -229,7 +229,9 @@ const setupDraggable = async () => {
           }
         } else {
           let srcParent: string | undefined;
-          for (const [parentKey, children] of Object.entries(childOrder.value)) {
+          for (const [parentKey, children] of Object.entries(
+            childOrder.value,
+          )) {
             if (children.includes(src)) {
               srcParent = parentKey;
               break;
