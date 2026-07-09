@@ -211,6 +211,106 @@ def test_transactions_endpoint_filters_by_account_with_status_counts(monkeypatch
         assert {item["account_id"] for item in payload["items"]} == {checking["account_id"]}
 
 
+def test_account_transaction_summary_is_aggregated_server_side(
+    monkeypatch, tmp_path
+) -> None:
+    import datetime
+    from collections import defaultdict
+
+    monkeypatch.setenv("SESSION_SECRET", "test-secret")
+    monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
+    monkeypatch.setenv(
+        "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
+    )
+    provisioned_main_module(monkeypatch, tmp_path, "api-test.duckdb")
+
+    with TestClient(main_module.app) as client:
+        imported = client.post(
+            "/api/import/google-sheet", json={"sheet_url_or_id": "fixture://default"}
+        )
+        assert imported.status_code == 200
+        accounts = client.get("/api/accounts", params={"show_hidden": "true"})
+        checking = next(
+            account for account in accounts.json()["items"] if account["name"] == "Checking"
+        )
+
+        days = 365
+        response = client.get(
+            f"/api/accounts/{checking['account_id']}/transactions/summary",
+            params={"days": days},
+        )
+        assert response.status_code == 200
+        summary = response.json()
+
+        assert summary["inflow_minor"] == 500_000
+        assert summary["outflow_minor"] == -26_000
+        assert summary["net_flow_minor"] == 474_000
+        assert summary["transaction_count"] == 7
+
+        # Reference: average daily balance over [today - days, today] using the
+        # same anchored-daily-spine formula the SQL applies, so the server
+        # output is verified against an independent computation.
+        tx_page = client.get(
+            "/api/transactions",
+            params={"show_hidden": "true", "limit": 10_000, "account_id": checking["account_id"]},
+        )
+        amounts_by_day: dict[str, int] = defaultdict(int)
+        for item in tx_page.json()["items"]:
+            amounts_by_day[item["date"]] += item["amount_minor"]
+        total_all = sum(amounts_by_day.values())
+        display = checking["display_balance_minor"]
+        today = datetime.datetime.now(datetime.timezone.utc).date()
+        start = today - datetime.timedelta(days=days)
+        balances: list[int] = []
+        cum = 0
+        day = start
+        while day <= today:
+            cum += amounts_by_day.get(day.isoformat(), 0)
+            balances.append(display - total_all + cum)
+            day += datetime.timedelta(days=1)
+        expected_average = round(sum(balances) / len(balances))
+        assert summary["average_daily_balance_minor"] == expected_average
+
+
+def test_account_balance_trend_is_sampled_server_side(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("SESSION_SECRET", "test-secret")
+    monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
+    monkeypatch.setenv(
+        "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
+    )
+    provisioned_main_module(monkeypatch, tmp_path, "api-test.duckdb")
+
+    with TestClient(main_module.app) as client:
+        imported = client.post(
+            "/api/import/google-sheet", json={"sheet_url_or_id": "fixture://default"}
+        )
+        assert imported.status_code == 200
+        accounts = client.get("/api/accounts", params={"show_hidden": "true"})
+        checking = next(
+            account for account in accounts.json()["items"] if account["name"] == "Checking"
+        )
+
+        response = client.get(
+            f"/api/accounts/{checking['account_id']}/balance-trend",
+            params={"period": "all"},
+        )
+        assert response.status_code == 200
+        points = response.json()["points"]
+
+        assert len(points) == 2
+        assert points[0]["date"] == "2026-01-01"
+        assert points[0]["balance_minor"] == 381_000
+        assert points[1]["date"] == "2026-02-01"
+        assert points[1]["balance_minor"] == checking["display_balance_minor"]
+
+        short = client.get(
+            f"/api/accounts/{checking['account_id']}/balance-trend",
+            params={"period": "1m"},
+        )
+        assert short.status_code == 200
+        assert short.json()["points"] == []
+
+
 def test_transactions_endpoint_rejects_unsupported_sort_fields(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("SESSION_SECRET", "test-secret")
     monkeypatch.setenv("DEV_FIXTURE_MODE", "true")

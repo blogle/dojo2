@@ -369,6 +369,32 @@ def update_account(
     return get_service(request).update_account(account_id, payload.model_dump(exclude_none=True))
 
 
+@router.get("/accounts/{account_id}/transactions/summary")
+def account_transaction_summary(
+    request: Request,
+    account_id: str,
+    *,
+    days: int = Query(default=30, ge=1, le=365),
+    show_hidden: bool = False,
+) -> dict[str, Any]:
+    return get_service(request).account_transaction_summary(
+        account_id=account_id, days=days, show_hidden=show_hidden
+    )
+
+
+@router.get("/accounts/{account_id}/balance-trend")
+def account_balance_trend(
+    request: Request,
+    account_id: str,
+    *,
+    period: str = Query(default="1m", pattern=r"^(7d|1m|3m|6m|1y|all)$"),
+    show_hidden: bool = False,
+) -> dict[str, Any]:
+    return get_service(request).account_balance_trend(
+        account_id=account_id, period=period, show_hidden=show_hidden
+    )
+
+
 @router.get("/assets-liabilities")
 def assets_liabilities(request: Request) -> dict[str, Any]:
     return get_service(request).get_assets_liabilities()

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from time import perf_counter
 from typing import Any, cast
 from uuid import NAMESPACE_URL, uuid4, uuid5
@@ -53,6 +53,10 @@ class ImportValidationError(Exception):
     def __init__(self, report: dict[str, Any]) -> None:
         super().__init__("Import validation failed")
         self.report = report
+
+
+_TREND_DAYS = {"7d": 7, "1m": 31, "3m": 93, "6m": 186, "1y": 366, "all": 36500}
+_TREND_BUCKET = {"7d": "day", "1m": "day", "3m": "day", "6m": "week", "1y": "week", "all": "month"}
 
 
 class DojoService:
@@ -1393,6 +1397,58 @@ class DojoService:
             "has_more": (offset + limit) < total_count,
             "status_counts": status_counts,
         }
+
+    def account_transaction_summary(
+        self, *, account_id: str, days: int = 30, show_hidden: bool = False
+    ) -> dict[str, Any]:
+        today = self.clock.today()
+        start_date = today - timedelta(days=days)
+        anchor = self._account_display_balance(account_id)
+        row = self.db.fetch_one(
+            load_sql("queries/account_transaction_summary"),
+            (start_date, today, account_id, anchor),
+        )
+        if row is None:
+            return {
+                "inflow_minor": 0,
+                "outflow_minor": 0,
+                "net_flow_minor": 0,
+                "transaction_count": 0,
+                "average_daily_balance_minor": anchor,
+            }
+        average = row["average_daily_balance_minor"]
+        return {
+            "inflow_minor": int(row["inflow_minor"]),
+            "outflow_minor": int(row["outflow_minor"]),
+            "net_flow_minor": int(row["net_flow_minor"]),
+            "transaction_count": int(row["transaction_count"]),
+            "average_daily_balance_minor": int(average) if average is not None else anchor,
+        }
+
+    def account_balance_trend(
+        self, *, account_id: str, period: str, show_hidden: bool = False
+    ) -> dict[str, Any]:
+        bucket = _TREND_BUCKET[period]
+        days = _TREND_DAYS[period]
+        today = self.clock.today()
+        date_from = today - timedelta(days=days)
+        anchor = self._account_display_balance(account_id)
+        rows = self.db.fetch_all(
+            render_sql("queries/account_balance_series", bucket=bucket),
+            (anchor, account_id, date_from, today),
+        )
+        return {
+            "points": [
+                {"date": str(row["date"]), "balance_minor": int(row["balance_minor"])}
+                for row in rows
+            ]
+        }
+
+    def _account_display_balance(self, account_id: str) -> int:
+        for account in self.list_accounts(show_hidden=True):
+            if account["account_id"] == account_id:
+                return int(account["display_balance_minor"])
+        return 0
 
     def list_allocations(self, *, show_hidden: bool) -> list[dict[str, Any]]:
         categories = self.list_categories(month=self.default_budget_month(), show_hidden=True)

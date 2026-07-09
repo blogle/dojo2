@@ -108,6 +108,35 @@ function stubFetch() {
       );
     }
 
+    if (path === `/api/accounts/${budgetAccount.account_id}/transactions/summary`) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            inflow_minor: 100000,
+            outflow_minor: -50000,
+            net_flow_minor: 50000,
+            transaction_count: 3,
+            average_daily_balance_minor: 600000,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    }
+
+    if (path === `/api/accounts/${budgetAccount.account_id}/balance-trend`) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            points: [
+              { date: "2026-06-01", balance_minor: 650000 },
+              { date: "2026-06-30", balance_minor: 684218 },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    }
+
     if (path === `/api/accounts/${budgetAccount.account_id}`) {
       return Promise.resolve(
         new Response(JSON.stringify({ account_id: budgetAccount.account_id }), {

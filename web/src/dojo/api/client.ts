@@ -124,6 +124,39 @@ export async function fetchAccounts(showHidden: boolean): Promise<Account[]> {
   return response.items;
 }
 
+export type AccountTransactionSummary = {
+  inflow_minor: number;
+  outflow_minor: number;
+  net_flow_minor: number;
+  transaction_count: number;
+  average_daily_balance_minor: number;
+};
+
+export async function fetchAccountTransactionSummary(
+  accountId: string,
+  days = 30,
+): Promise<AccountTransactionSummary> {
+  const params = new URLSearchParams({ days: String(days) });
+  return request<AccountTransactionSummary>(
+    `/api/accounts/${accountId}/transactions/summary?${params.toString()}`,
+  );
+}
+
+export type BalanceTrendPointApi = {
+  date: string;
+  balance_minor: number;
+};
+
+export async function fetchAccountBalanceTrend(
+  accountId: string,
+  period: string,
+): Promise<{ points: BalanceTrendPointApi[] }> {
+  const params = new URLSearchParams({ period });
+  return request<{ points: BalanceTrendPointApi[] }>(
+    `/api/accounts/${accountId}/balance-trend?${params.toString()}`,
+  );
+}
+
 export async function fetchAllocations(
   showHidden: boolean,
 ): Promise<Allocation[]> {

@@ -11,6 +11,8 @@ import { useRoute, useRouter } from "vue-router";
 import {
   deleteTransaction,
   fetchAccounts,
+  fetchAccountBalanceTrend,
+  fetchAccountTransactionSummary,
   fetchCategories,
   fetchTransactionsPage,
   type TransactionFilters,
@@ -140,6 +142,22 @@ const transactionTotal = computed(() => txPages.value?.pages[0]?.total ?? 0);
 const transactionStatusCounts = computed(
   () => txPages.value?.pages[0]?.status_counts ?? { PENDING: 0, CLEARED: 0 },
 );
+
+const { data: summaryData } = useQuery({
+  queryKey: computed(() => ["account-transaction-summary", accountId.value]),
+  queryFn: () => fetchAccountTransactionSummary(accountId.value),
+  enabled: computed(() => !!accountId.value),
+});
+
+const { data: trendData } = useQuery({
+  queryKey: computed(() => [
+    "account-balance-trend",
+    accountId.value,
+    chartPeriod.value,
+  ]),
+  queryFn: () => fetchAccountBalanceTrend(accountId.value, chartPeriod.value),
+  enabled: computed(() => !!accountId.value),
+});
 
 const isBudgetAccount = computed(
   () => account.value?.account_class === "BUDGET",
@@ -358,16 +376,11 @@ const reconciliationDetails = computed((): KeyValueItem[] => [
 ]);
 
 const summaryDetails = computed((): KeyValueItem[] => {
-  const inflow = transactions.value
-    .filter((transaction) => transaction.amount_minor > 0)
-    .reduce((total, transaction) => total + transaction.amount_minor, 0);
-  const outflow = transactions.value
-    .filter((transaction) => transaction.amount_minor < 0)
-    .reduce((total, transaction) => total + transaction.amount_minor, 0);
-  const netFlow = inflow + outflow;
-  const averageDailyBalance = account.value
-    ? Math.round(account.value.display_balance_minor * 0.91)
-    : 0;
+  const summary = summaryData.value;
+  const inflow = summary?.inflow_minor ?? 0;
+  const outflow = summary?.outflow_minor ?? 0;
+  const netFlow = summary?.net_flow_minor ?? 0;
+  const averageDailyBalance = summary?.average_daily_balance_minor ?? 0;
 
   return [
     { label: "30d inflow", value: formatCurrency(inflow) },
@@ -419,17 +432,12 @@ const runningBalances = computed(() => {
   return balances;
 });
 
-const balanceChartPoints = computed(() => {
-  const sorted = [...transactions.value].sort(
-    (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
-  );
-  return sorted
-    .map((transaction) => ({
-      date: transaction.date,
-      valueMinor: runningBalances.value[transaction.transaction_id] ?? 0,
-    }))
-    .reverse();
-});
+const balanceChartPoints = computed(() =>
+  (trendData.value?.points ?? []).map((point) => ({
+    date: point.date,
+    valueMinor: point.balance_minor,
+  })),
+);
 
 const moreActions = computed(() => {
   const actions: { key: string; label: string }[] = [];
@@ -498,6 +506,8 @@ watch(
 function invalidateAccountDetailQueries() {
   queryClient.invalidateQueries({ queryKey: ["transactions"] });
   queryClient.invalidateQueries({ queryKey: ["accounts"] });
+  queryClient.invalidateQueries({ queryKey: ["account-transaction-summary"] });
+  queryClient.invalidateQueries({ queryKey: ["account-balance-trend"] });
   queryClient.invalidateQueries({ queryKey: ["assets-liabilities"] });
   queryClient.invalidateQueries({ queryKey: ["budget"] });
   queryClient.invalidateQueries({ queryKey: ["allocations"] });
