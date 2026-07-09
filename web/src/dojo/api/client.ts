@@ -311,6 +311,42 @@ export async function updateAccount(
   });
 }
 
+export type TrackingSnapshot = {
+  valuation_id: string;
+  account_id: string;
+  effective_date: string;
+  amount_minor: number;
+  notes: string;
+  metadata?: string | null;
+};
+
+export async function fetchTrackingSnapshots(
+  accountId: string,
+): Promise<TrackingSnapshot[]> {
+  const response = await request<{ items: TrackingSnapshot[] }>(
+    `/api/accounts/${accountId}/tracking-snapshots`,
+  );
+  return response.items;
+}
+
+export async function createTrackingSnapshot(
+  accountId: string,
+  payload: {
+    effective_date: string;
+    amount_minor: number;
+    source?: string;
+    notes?: string;
+  },
+): Promise<TrackingSnapshot> {
+  return request<TrackingSnapshot>(
+    `/api/accounts/${accountId}/tracking-snapshots`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
 export async function createCategoryGroup(
   payload: Record<string, unknown>,
 ): Promise<void> {

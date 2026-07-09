@@ -48,6 +48,11 @@ export type Account = {
   pending_balance_minor: number;
   cleared_balance_minor: number;
   display_balance_minor: number;
+  tracking_polarity?: string | null;
+  tracking_source?: string | null;
+  latest_valuation_minor?: number | null;
+  latest_valuation_date?: string | null;
+  metadata?: string | null;
 };
 
 export type Category = {
@@ -232,10 +237,6 @@ export type TransactionPayload = {
 export type AssetsLiabilitiesItem = Account & {
   value_minor: number;
   source_of_truth: string;
-  metadata?: string;
-  institution?: string | null;
-  account_number_last4?: string | null;
-  latest_valuation_date?: string | null;
 };
 
 export type AssetsLiabilitiesGroup = {

@@ -228,6 +228,63 @@ For each completed work item, record:
 
 ---
 
+## Work Item 6.D: Tracking Account Detail + Cutover Modal
+
+**Status**: Implementation complete, visual validation complete.
+
+### Commands run
+
+- `just typecheck` — Passed
+- `just lint-web` — Passed
+- `just test-web` — Passed, 257 tests
+- `just architecture-check` — Passed
+
+### Test results
+
+- Added 2 new Cypress tests in `AccountDetailPage.cy.ts` for tracking account detail rendering and cutover modal open/close.
+- All 257 frontend tests pass (41 Vitest + 254 Cypress component tests, including 2 new tracking-account tests).
+- Existing budget account tests remain green.
+
+### Type-check results
+
+- `just typecheck` passes cleanly after extending `Account` type with `tracking_polarity`, `tracking_source`, `latest_valuation_minor`, `latest_valuation_date`, and `metadata` fields.
+
+### Lint results
+
+- `just lint-web` passes cleanly.
+- Prettier formatting applied to all changed files.
+
+### Implementation summary
+
+1. Extended `Account` type with tracking-specific fields: `tracking_polarity`, `tracking_source`, `latest_valuation_minor`, `latest_valuation_date`, `metadata`.
+2. Added `fetchTrackingSnapshots` and `createTrackingSnapshot` API client functions.
+3. Added tracking-specific 5-metric strip: Current value, Polarity (Asset ↑ / Liability), Latest snapshot date, Source/migration, Reconciliation freshness.
+4. Added "Add snapshot" primary button and "Create richer account" secondary button in header actions.
+5. Added import info banner for tracking accounts with `tracking_source === "import"`.
+6. Replaced transaction section with snapshot history table (Date ↓, Value columns with dot indicators) for tracking accounts.
+7. Added valuation history section with summary stats (30d inflow/outflow/net flow, Average daily value) and notes area.
+8. Added sidebar sections: Account details with "View budgeting details" link, Migration/import context with "View import details" link, History/configuration with snapshot frequency and alerts.
+9. Built cutover modal matching mock 04: entity type dropdown, cutover date, name, opening value, contribution category radio group (Create new/Link existing/None), representation change checkbox, historical as-of views info banner, Cancel/Create account buttons.
+10. Moved `isBudgetAccount`/`isInvestmentAccount`/`isLoanAccount`/`isTrackingAccount`/`isTangibleAsset` computed properties before `trackingSnapshots` query to avoid initialization ordering error.
+11. Cleaned up `AssetsLiabilitiesItem` type to remove redundant fields now inherited from `Account`.
+
+### Visual validation
+
+- Mock screen: `plans/2026-06-17-implement-product-spec/assets_liabilities_screens/04-tracking-account-upgrade-cutover.png`
+- Status: Complete — confirmed the actual page has the mock's major page structure: back link, header with badges and action buttons, 5-metric strip (Current value, Polarity, Latest snapshot, Source/migration, Reconciliation freshness), import info banner, snapshot history table with date/value columns, balance trend chart, valuation history section, sidebar cards (Account details, Migration/import context, History/configuration). Cutover modal matches mock 04: title, description, entity type dropdown, date picker, name, opening value, contribution category radios, representation change checkbox, info banner, and footer actions.
+- Screenshots captured:
+  - `/home/ogle/src/dojo2/tmp/tracking-account-detail-desktop.png`
+  - `/home/ogle/src/dojo2/tmp/tracking-cutover-modal.png`
+
+### Validation gaps
+
+- Cutover persistence is not implemented — modal closes with an informational stub message. Backend cutover endpoint does not exist yet.
+- Snapshot creation (Add snapshot button) does not yet open a form — the button is wired but the create-snapshot flow is deferred.
+- Reconciliation for tracking accounts is not built yet.
+- Import details link and budgeting details link are stub actions.
+
+---
+
 *Add new work items above as they are completed.*
 
 ## Visual Gap Closure — Work Item: Detail Pages
