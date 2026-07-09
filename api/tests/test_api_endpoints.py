@@ -174,6 +174,43 @@ def test_transactions_endpoint_returns_bounded_sorted_pages(monkeypatch, tmp_pat
         assert payload["items"][0]["date"] >= payload["items"][-1]["date"]
 
 
+def test_transactions_endpoint_filters_by_account_with_status_counts(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("SESSION_SECRET", "test-secret")
+    monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
+    monkeypatch.setenv(
+        "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
+    )
+    provisioned_main_module(monkeypatch, tmp_path, "api-test.duckdb")
+
+    with TestClient(main_module.app) as client:
+        imported = client.post(
+            "/api/import/google-sheet", json={"sheet_url_or_id": "fixture://default"}
+        )
+        assert imported.status_code == 200
+        accounts = client.get("/api/accounts", params={"show_hidden": "true"})
+        checking = next(
+            account for account in accounts.json()["items"] if account["name"] == "Checking"
+        )
+
+        page = client.get(
+            "/api/transactions",
+            params={
+                "show_hidden": "true",
+                "limit": 5,
+                "account_id": checking["account_id"],
+                "sort_by": "date",
+                "sort_dir": "desc",
+            },
+        )
+        assert page.status_code == 200
+        payload = page.json()
+
+        assert payload["total"] == 7
+        assert payload["status_counts"] == {"PENDING": 1, "CLEARED": 6}
+        assert payload["has_more"] is True
+        assert {item["account_id"] for item in payload["items"]} == {checking["account_id"]}
+
+
 def test_transactions_endpoint_rejects_unsupported_sort_fields(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("SESSION_SECRET", "test-secret")
     monkeypatch.setenv("DEV_FIXTURE_MODE", "true")

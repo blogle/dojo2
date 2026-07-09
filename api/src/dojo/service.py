@@ -1272,6 +1272,13 @@ class DojoService:
         show_hidden: bool,
         sort_by: str = "entry_order",
         sort_dir: str = "asc",
+        account_id: str | None = None,
+        category_id: str | None = None,
+        status: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        amount_min_minor: int | None = None,
+        amount_max_minor: int | None = None,
     ) -> dict[str, Any]:
         sort_expressions = {
             "date": {"asc": "date ASC", "desc": "date DESC"},
@@ -1299,43 +1306,67 @@ class DojoService:
             hidden_account_ids = {aid for aid, a in accounts.items() if a["is_hidden"]}
             hidden_category_ids = {cid for cid, c in categories.items() if c["is_hidden"]}
 
-        account_placeholders = ",".join("?" for _ in hidden_account_ids)
-        category_placeholders = ",".join("?" for _ in hidden_category_ids)
-        total_query_name = "queries/list_transactions_count_all"
-        page_query_name = "queries/list_transactions_page_all"
-        total_params: tuple[str, ...] = ()
-        if hidden_account_ids and hidden_category_ids:
-            total_query_name = "queries/list_transactions_count_hidden_accounts_and_categories"
-            page_query_name = "queries/list_transactions_page_hidden_accounts_and_categories"
-            total_params = tuple(
-                [*(str(h) for h in hidden_account_ids), *(str(h) for h in hidden_category_ids)]
+        filter_clauses = ["1 = 1"]
+        filter_params: list[Any] = []
+        if hidden_account_ids:
+            account_placeholders = ",".join("?" for _ in hidden_account_ids)
+            filter_clauses.append(f"account_id NOT IN ({account_placeholders})")
+            filter_params.extend(str(account_id) for account_id in hidden_account_ids)
+        if hidden_category_ids:
+            category_placeholders = ",".join("?" for _ in hidden_category_ids)
+            filter_clauses.append(
+                f"(category_id IS NULL OR category_id NOT IN ({category_placeholders}))"
             )
-        elif hidden_account_ids:
-            total_query_name = "queries/list_transactions_count_hidden_accounts"
-            page_query_name = "queries/list_transactions_page_hidden_accounts"
-            total_params = tuple(str(h) for h in hidden_account_ids)
-        elif hidden_category_ids:
-            total_query_name = "queries/list_transactions_count_hidden_categories"
-            page_query_name = "queries/list_transactions_page_hidden_categories"
-            total_params = tuple(str(h) for h in hidden_category_ids)
+            filter_params.extend(str(category_id) for category_id in hidden_category_ids)
+        if account_id:
+            filter_clauses.append("account_id = ?")
+            filter_params.append(account_id)
+        if category_id:
+            filter_clauses.append("category_id = ?")
+            filter_params.append(category_id)
+        if status:
+            filter_clauses.append("status = ?")
+            filter_params.append(status)
+        if date_from:
+            filter_clauses.append("date >= ?")
+            filter_params.append(date_from)
+        if date_to:
+            filter_clauses.append("date <= ?")
+            filter_params.append(date_to)
+        if amount_min_minor is not None:
+            filter_clauses.append("ABS(amount_minor) >= ?")
+            filter_params.append(amount_min_minor)
+        if amount_max_minor is not None:
+            filter_clauses.append("ABS(amount_minor) <= ?")
+            filter_params.append(amount_max_minor)
+
+        filter_clause = " AND ".join(filter_clauses)
         total = self.db.fetch_one(
             render_sql(
-                total_query_name,
-                account_placeholders=account_placeholders,
-                category_placeholders=category_placeholders,
+                "queries/list_transactions_count_filtered",
+                filter_clause=filter_clause,
             ),
-            total_params,
+            tuple(filter_params),
         )
         total_count = total["cnt"] if total else 0
+        status_rows = self.db.fetch_all(
+            render_sql(
+                "queries/list_transactions_status_counts_filtered",
+                filter_clause=filter_clause,
+            ),
+            tuple(filter_params),
+        )
+        status_counts = {"PENDING": 0, "CLEARED": 0}
+        for status_row in status_rows:
+            status_counts[str(status_row["status"])] = int(status_row["cnt"])
 
-        query_params: list[Any] = list(total_params)
+        query_params: list[Any] = list(filter_params)
         query_params.append(limit)
         query_params.append(offset)
         rows = self.db.fetch_all(
             render_sql(
-                page_query_name,
-                account_placeholders=account_placeholders,
-                category_placeholders=category_placeholders,
+                "queries/list_transactions_page_filtered",
+                filter_clause=filter_clause,
                 sort_expression=sort_expression,
             ),
             tuple(query_params),
@@ -1360,6 +1391,7 @@ class DojoService:
             "offset": offset,
             "limit": limit,
             "has_more": (offset + limit) < total_count,
+            "status_counts": status_counts,
         }
 
     def list_allocations(self, *, show_hidden: bool) -> list[dict[str, Any]]:

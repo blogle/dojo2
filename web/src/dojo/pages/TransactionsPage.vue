@@ -6,6 +6,7 @@ import type { Transaction, TransactionPayload } from "../types";
 import { formatCurrency, formatMonth } from "../utils/currency";
 import {
   fetchTransactionsPage,
+  type TransactionFilters,
   fetchAccounts,
   fetchCategories,
   createTransaction,
@@ -42,6 +43,11 @@ type UndoEntry =
 const undoStack = ref<UndoEntry[]>([]);
 const showUndoToast = ref(false);
 const lastRemovedSnapshot = ref<Transaction | null>(null);
+const accountFilter = ref("all");
+const dateFilter = ref("all");
+const categoryFilter = ref("all");
+const amountFilter = ref("all");
+const statusFilter = ref("all");
 
 const currentMonth = computed(() => {
   const now = new Date();
@@ -49,8 +55,15 @@ const currentMonth = computed(() => {
 });
 
 const { data: txPage } = useQuery({
-  queryKey: QUERY_KEYS.transactions,
-  queryFn: () => fetchTransactionsPage(false, 0, PAGE_SIZE),
+  queryKey: computed(() => [
+    ...QUERY_KEYS.transactions,
+    accountFilter.value,
+    dateFilter.value,
+    categoryFilter.value,
+    amountFilter.value,
+    statusFilter.value,
+  ]),
+  queryFn: () => fetchTransactionsPage(false, 0, PAGE_SIZE, transactionFilters.value),
 });
 
 const transactions = computed(() => txPage.value?.items ?? []);
@@ -115,6 +128,15 @@ const outflow = computed(() =>
 );
 
 const net = computed(() => inflow.value - outflow.value);
+
+const transactionFilters = computed<TransactionFilters>(() => ({
+  ...(accountFilter.value !== "all" ? { accountId: accountFilter.value } : {}),
+  ...(categoryFilter.value !== "all" ? { categoryId: categoryFilter.value } : {}),
+  ...(statusFilter.value === "cleared" ? { status: "CLEARED" as const } : {}),
+  ...(statusFilter.value === "pending" ? { status: "PENDING" as const } : {}),
+  ...datePresetToFilter(dateFilter.value),
+  ...amountPresetToFilter(amountFilter.value),
+}));
 
 const navItems = computed(() => [
   {
@@ -240,6 +262,37 @@ function handleGlobalKeydown(event: KeyboardEvent) {
   }
 }
 
+function datePresetToFilter(value: string): Pick<TransactionFilters, "dateFrom" | "dateTo"> {
+  const today = new Date();
+  const toIso = (date: Date) => date.toISOString().slice(0, 10);
+  if (value === "today") return { dateFrom: toIso(today), dateTo: toIso(today) };
+  if (value === "this-week") {
+    const start = new Date(today);
+    start.setDate(today.getDate() - today.getDay());
+    return { dateFrom: toIso(start), dateTo: toIso(today) };
+  }
+  if (value === "this-month") {
+    const start = new Date(today.getFullYear(), today.getMonth(), 1);
+    return { dateFrom: toIso(start), dateTo: toIso(today) };
+  }
+  if (value === "last-month") {
+    const start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+    const end = new Date(today.getFullYear(), today.getMonth(), 0);
+    return { dateFrom: toIso(start), dateTo: toIso(end) };
+  }
+  return {};
+}
+
+function amountPresetToFilter(
+  value: string,
+): Pick<TransactionFilters, "amountMinMinor" | "amountMaxMinor"> {
+  if (value === "0-50") return { amountMinMinor: 0, amountMaxMinor: 5_000 };
+  if (value === "50-100") return { amountMinMinor: 5_000, amountMaxMinor: 10_000 };
+  if (value === "100-500") return { amountMinMinor: 10_000, amountMaxMinor: 50_000 };
+  if (value === "500+") return { amountMinMinor: 50_000 };
+  return {};
+}
+
 onMounted(() => {
   document.addEventListener("keydown", handleGlobalKeydown);
 });
@@ -279,12 +332,23 @@ onUnmounted(() => {
       <TransactionFilterBar
         :accounts="accounts ?? []"
         :categories="categories"
+        :account-filter="accountFilter"
+        :date-filter="dateFilter"
+        :category-filter="categoryFilter"
+        :amount-filter="amountFilter"
+        :status-filter="statusFilter"
+        @update:account-filter="accountFilter = $event"
+        @update:date-filter="dateFilter = $event"
+        @update:category-filter="categoryFilter = $event"
+        @update:amount-filter="amountFilter = $event"
+        @update:status-filter="statusFilter = $event"
       />
 
       <TransactionLedger
         :transactions="transactions"
         :accounts="accounts ?? []"
         :categories="categories"
+        :total-count="txPage?.total"
         @commit="handleCommitEdit"
         @remove="handleRemove"
       />

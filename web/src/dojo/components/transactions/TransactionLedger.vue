@@ -15,15 +15,34 @@ import TextField from "../forms/TextField.vue";
 import DatePicker from "../forms/DatePicker.vue";
 import StateBadge from "../display/StateBadge.vue";
 
-const props = defineProps<{
-  transactions: Transaction[];
-  accounts: Account[];
-  categories: Category[];
-}>();
+const props = withDefaults(
+  defineProps<{
+    transactions: Transaction[];
+    accounts: Account[];
+    categories: Category[];
+    totalCount?: number;
+    hasMore?: boolean;
+    loadingMore?: boolean;
+    showAccountColumn?: boolean;
+    showRunningBalance?: boolean;
+    runningBalances?: Record<string, number>;
+    lockedAccountId?: string;
+  }>(),
+  {
+    totalCount: undefined,
+    hasMore: false,
+    loadingMore: false,
+    showAccountColumn: true,
+    showRunningBalance: false,
+    runningBalances: () => ({}),
+    lockedAccountId: undefined,
+  },
+);
 
 const emit = defineEmits<{
   commit: [id: string, payload: TransactionPayload];
   remove: [tx: Transaction];
+  loadMore: [];
 }>();
 
 const editingId = ref<string | null>(null);
@@ -63,7 +82,7 @@ const virtualTransactionRows = computed<
 function startEdit(tx: Transaction) {
   editingId.value = tx.transaction_id;
   editDate.value = tx.date;
-  editAccountId.value = tx.account_id;
+  editAccountId.value = props.lockedAccountId ?? tx.account_id;
   editCategoryId.value = tx.category_id ?? "";
   const absAmount = Math.abs(tx.amount_minor) / 100;
   editAmount.value = absAmount > 0 ? absAmount.toFixed(2) : "";
@@ -79,7 +98,7 @@ function buildPayload(tx: Transaction): TransactionPayload | null {
     editDirection.value === "outflow" ? -amountMinor : amountMinor;
   return {
     date: editDate.value,
-    account_id: editAccountId.value,
+    account_id: props.lockedAccountId ?? editAccountId.value,
     amount_minor: finalAmount,
     category_id: editCategoryId.value || null,
     system_category: tx.system_category,
@@ -171,6 +190,16 @@ function setRowRef(txId: string, el: HTMLTableRowElement | null) {
   else rowRefs.value.delete(txId);
 }
 
+function handleScroll() {
+  if (!props.hasMore || props.loadingMore) return;
+  const el = scrollElement.value;
+  if (!el) return;
+  const remaining = el.scrollHeight - el.scrollTop - el.clientHeight;
+  if (remaining < 240) {
+    emit("loadMore");
+  }
+}
+
 function formatDirection(amount: number): string {
   return amount >= 0 ? "Inflow" : "Outflow";
 }
@@ -209,6 +238,13 @@ const categoryOptions = computed(() => [
     .map((c) => ({ value: c.category_id, label: c.name })),
 ]);
 
+const loadedCountLabel = computed(() => {
+  if (props.totalCount === undefined) {
+    return `Loaded ${props.transactions.length} transactions`;
+  }
+  return `Loaded ${props.transactions.length} of ${props.totalCount} transactions`;
+});
+
 const directionOptions = [
   { value: "outflow", label: "Outflow" },
   { value: "inflow", label: "Inflow" },
@@ -217,20 +253,29 @@ const directionOptions = [
 
 <template>
   <div class="ledger" data-cy="transaction-ledger">
-    <div ref="scrollElement" class="ledger__scroll">
+    <div ref="scrollElement" class="ledger__scroll" @scroll="handleScroll">
       <table class="ledger__table">
         <thead class="ledger__head-group">
-          <tr class="ledger__header-row">
+          <tr
+            class="ledger__header-row"
+            :class="{
+              'ledger__header-row--no-account': !showAccountColumn,
+              'ledger__header-row--with-balance': showRunningBalance,
+            }"
+          >
             <th class="ledger__head ledger__head--check">
               <span class="ledger__check-spacer" />
             </th>
             <th class="ledger__head">Date</th>
-            <th class="ledger__head">Account</th>
+            <th v-if="showAccountColumn" class="ledger__head">Account</th>
             <th class="ledger__head">Category</th>
             <th class="ledger__head">Memo</th>
             <th class="ledger__head">Direction</th>
             <th class="ledger__head ledger__head--end">Amount</th>
             <th class="ledger__head">Status</th>
+            <th v-if="showRunningBalance" class="ledger__head ledger__head--end">
+              Balance
+            </th>
           </tr>
         </thead>
         <tbody class="ledger__body" :style="{ height: `${totalRowsHeight}px` }">
@@ -245,6 +290,8 @@ const directionOptions = [
               class="ledger__row"
               :class="{
                 'ledger__row--editing': editingId === tx.transaction_id,
+                'ledger__row--no-account': !showAccountColumn,
+                'ledger__row--with-balance': showRunningBalance,
               }"
               :style="{
                 transform: `translateY(${virtualRow.start}px)`,
@@ -275,7 +322,7 @@ const directionOptions = [
                 <td class="ledger__cell">
                   <DatePicker v-model="editDate" />
                 </td>
-                <td class="ledger__cell">
+                <td v-if="showAccountColumn" class="ledger__cell">
                   <SelectField
                     v-model="editAccountId"
                     :options="accountOptions"
@@ -309,11 +356,19 @@ const directionOptions = [
                     {{ editStatus === "CLEARED" ? "Cleared" : "Pending" }}
                   </button>
                 </td>
+                <td
+                  v-if="showRunningBalance"
+                  class="ledger__cell ledger__cell--end ledger__cell--amount"
+                >
+                  {{ formatCurrency(runningBalances?.[tx.transaction_id] ?? 0) }}
+                </td>
               </template>
 
               <template v-else>
                 <td class="ledger__cell">{{ formatDate(tx.date) }}</td>
-                <td class="ledger__cell">{{ tx.account_name }}</td>
+                <td v-if="showAccountColumn" class="ledger__cell">
+                  {{ tx.account_name }}
+                </td>
                 <td class="ledger__cell">
                   <span v-if="tx.category_name" class="ledger__category">
                     <span class="ledger__category-icon">🏷</span>
@@ -351,6 +406,12 @@ const directionOptions = [
                     {{ tx.status === "CLEARED" ? "Cleared" : "Pending" }}
                   </StateBadge>
                 </td>
+                <td
+                  v-if="showRunningBalance"
+                  class="ledger__cell ledger__cell--end ledger__cell--amount"
+                >
+                  {{ formatCurrency(runningBalances?.[tx.transaction_id] ?? 0) }}
+                </td>
               </template>
             </tr>
           </template>
@@ -363,7 +424,8 @@ const directionOptions = [
         No transactions found.
       </span>
       <span v-else class="ledger__count">
-        Loaded {{ transactions.length }} transactions
+        {{ loadedCountLabel }}
+        <span v-if="loadingMore"> • Loading more...</span>
       </span>
     </div>
   </div>
@@ -406,6 +468,21 @@ const directionOptions = [
     minmax(90px, 1.1fr) minmax(60px, 0.6fr) minmax(70px, 0.6fr)
     minmax(60px, 0.5fr);
   width: 100%;
+}
+
+.ledger__header-row--no-account,
+.ledger__row--no-account {
+  grid-template-columns:
+    28px minmax(78px, 0.6fr) minmax(110px, 0.9fr) minmax(150px, 1.2fr)
+    minmax(70px, 0.6fr) minmax(80px, 0.7fr) minmax(76px, 0.6fr);
+}
+
+.ledger__header-row--no-account.ledger__header-row--with-balance,
+.ledger__row--no-account.ledger__row--with-balance {
+  grid-template-columns:
+    28px minmax(78px, 0.6fr) minmax(110px, 0.9fr) minmax(150px, 1.2fr)
+    minmax(70px, 0.6fr) minmax(80px, 0.7fr) minmax(76px, 0.6fr)
+    minmax(90px, 0.7fr);
 }
 
 .ledger__body {

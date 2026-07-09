@@ -71,20 +71,48 @@ export type TransactionPage = {
   offset: number;
   limit: number;
   has_more: boolean;
+  status_counts: {
+    PENDING: number;
+    CLEARED: number;
+  };
+};
+
+export type TransactionFilters = {
+  accountId?: string;
+  categoryId?: string;
+  status?: "PENDING" | "CLEARED";
+  dateFrom?: string;
+  dateTo?: string;
+  amountMinMinor?: number;
+  amountMaxMinor?: number;
+  sortBy?: "date" | "amount_minor" | "status" | "created_at" | "entry_order";
+  sortDir?: "asc" | "desc";
 };
 
 export async function fetchTransactionsPage(
   showHidden: boolean,
   offset: number,
   limit: number,
+  filters: TransactionFilters = {},
 ): Promise<TransactionPage> {
   const params = new URLSearchParams({
     show_hidden: String(showHidden),
     offset: String(offset),
     limit: String(limit),
-    sort_by: "created_at",
-    sort_dir: "desc",
+    sort_by: filters.sortBy ?? "created_at",
+    sort_dir: filters.sortDir ?? "desc",
   });
+  if (filters.accountId) params.set("account_id", filters.accountId);
+  if (filters.categoryId) params.set("category_id", filters.categoryId);
+  if (filters.status) params.set("status", filters.status);
+  if (filters.dateFrom) params.set("date_from", filters.dateFrom);
+  if (filters.dateTo) params.set("date_to", filters.dateTo);
+  if (filters.amountMinMinor !== undefined) {
+    params.set("amount_min_minor", String(filters.amountMinMinor));
+  }
+  if (filters.amountMaxMinor !== undefined) {
+    params.set("amount_max_minor", String(filters.amountMaxMinor));
+  }
   return request<TransactionPage>(`/api/transactions?${params.toString()}`);
 }
 

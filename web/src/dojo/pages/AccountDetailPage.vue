@@ -1,24 +1,44 @@
 <script setup lang="ts">
-import { useQuery } from "@tanstack/vue-query";
-import { computed } from "vue";
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/vue-query";
+import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
-import { fetchAccounts, fetchTransactionsPage } from "@/dojo/api/client";
+import {
+  deleteTransaction,
+  fetchAccounts,
+  fetchCategories,
+  fetchTransactionsPage,
+  type TransactionFilters,
+  updateAccount,
+  updateTransaction,
+} from "@/dojo/api/client";
 import Button from "@/dojo/components/actions/Button.vue";
 import DropdownButton from "@/dojo/components/actions/DropdownButton.vue";
+import BalanceTrendChart from "@/dojo/components/data/BalanceTrendChart.vue";
 import MetricStrip from "@/dojo/components/data/MetricStrip.vue";
 import type { MetricStripItem } from "@/dojo/components/data/MetricStrip.vue";
 import PageHeader from "@/dojo/components/data/PageHeader.vue";
 import KeyValueList from "@/dojo/components/display/KeyValueList.vue";
 import type { KeyValueItem } from "@/dojo/components/display/KeyValueList.vue";
 import StateBadge from "@/dojo/components/display/StateBadge.vue";
-import type { StateBadgeVariant } from "@/dojo/components/display/StateBadge.vue";
+import TextField from "@/dojo/components/forms/TextField.vue";
 import NavigationRail from "@/dojo/components/navigation/NavigationRail.vue";
+import FormModal from "@/dojo/components/overlays/FormModal.vue";
+import TransactionFilterBar from "@/dojo/components/transactions/TransactionFilterBar.vue";
+import TransactionLedger from "@/dojo/components/transactions/TransactionLedger.vue";
+import type { Transaction, TransactionPayload } from "@/dojo/types";
 import { formatCurrency } from "@/dojo/utils/currency";
 
 const route = useRoute();
 const router = useRouter();
+const queryClient = useQueryClient();
 const accountId = computed(() => route.params.id as string);
+const TRANSACTION_PAGE_SIZE = 100;
 
 const navItems = computed(() => [
   {
@@ -61,15 +81,64 @@ const account = computed(() =>
   accounts.value?.find((a) => a.account_id === accountId.value),
 );
 
-const { data: txPage, isLoading: txLoading } = useQuery({
-  queryKey: ["transactions", accountId.value],
-  queryFn: () => fetchTransactionsPage(false, 0, 50),
+const currentMonth = computed(() => new Date().toISOString().slice(0, 7));
+const categoryFilter = ref("all");
+const dateFilter = ref("all");
+const amountFilter = ref("all");
+const statusFilter = ref("all");
+const chartPeriod = ref("1m");
+const showConfigurationModal = ref(false);
+const configurationName = ref("");
+const configurationInstitution = ref("");
+const configurationLast4 = ref("");
+const actionMessage = ref("");
+
+const { data: categoriesResponse } = useQuery({
+  queryKey: computed(() => ["categories", currentMonth.value]),
+  queryFn: () => fetchCategories(currentMonth.value, false),
+});
+
+const categories = computed(() => categoriesResponse.value?.items ?? []);
+
+const transactionFilters = computed<TransactionFilters>(() => ({
+  accountId: accountId.value,
+  sortBy: "date",
+  sortDir: "desc",
+  ...(categoryFilter.value !== "all" ? { categoryId: categoryFilter.value } : {}),
+  ...(statusFilter.value === "cleared" ? { status: "CLEARED" as const } : {}),
+  ...(statusFilter.value === "pending" ? { status: "PENDING" as const } : {}),
+  ...datePresetToFilter(dateFilter.value),
+  ...amountPresetToFilter(amountFilter.value),
+}));
+
+const {
+  data: txPages,
+  isLoading: txLoading,
+  fetchNextPage,
+  hasNextPage,
+  isFetchingNextPage,
+} = useInfiniteQuery({
+  queryKey: computed(() => [
+    "transactions",
+    "account-detail",
+    accountId.value,
+    categoryFilter.value,
+    dateFilter.value,
+    amountFilter.value,
+    statusFilter.value,
+  ]),
+  queryFn: ({ pageParam = 0 }) =>
+    fetchTransactionsPage(false, pageParam, TRANSACTION_PAGE_SIZE, transactionFilters.value),
+  initialPageParam: 0,
+  getNextPageParam: (lastPage) =>
+    lastPage.has_more ? lastPage.offset + lastPage.limit : undefined,
   enabled: computed(() => !!accountId.value),
 });
 
-const transactions = computed(
-  () =>
-    txPage.value?.items.filter((t) => t.account_id === accountId.value) ?? [],
+const transactions = computed(() => txPages.value?.pages.flatMap((page) => page.items) ?? []);
+const transactionTotal = computed(() => txPages.value?.pages[0]?.total ?? 0);
+const transactionStatusCounts = computed(
+  () => txPages.value?.pages[0]?.status_counts ?? { PENDING: 0, CLEARED: 0 },
 );
 
 const isBudgetAccount = computed(
@@ -134,14 +203,14 @@ const metricItems = computed((): MetricStripItem[] => {
         key: "pending",
         label: "Pending",
         value: formatCurrency(account.value.pending_balance_minor),
-        auxValue: `${transactionStatusCount("PENDING")} transactions`,
+        auxValue: `${transactionStatusCounts.value.PENDING} transactions`,
         status: { label: "", variant: "warning" as const },
       },
       {
         key: "cleared",
         label: "Cleared",
         value: formatCurrency(account.value.cleared_balance_minor),
-        auxValue: `${transactionStatusCount("CLEARED")} transactions`,
+        auxValue: `${transactionStatusCounts.value.CLEARED} transactions`,
         status: { label: "", variant: "positive" as const },
       },
       {
@@ -288,21 +357,6 @@ const reconciliationDetails = computed((): KeyValueItem[] => [
   { label: "Difference", value: formatCurrency(0) },
 ]);
 
-const historyDetails = computed((): KeyValueItem[] => {
-  if (!account.value) return [];
-  return [
-    { label: "Date opened", value: "Jan 10, 2020" },
-    { label: "Imported since", value: "Jan 10, 2020" },
-    { label: "Total transactions", value: String(transactions.value.length) },
-  ];
-});
-
-const configurationDetails = computed((): KeyValueItem[] => [
-  { label: "Include in net worth", value: "Yes", variant: "positive" },
-  { label: "Active", value: "Yes", variant: "positive" },
-  { label: "Alerts", value: "Low balance, Large expense" },
-]);
-
 const summaryDetails = computed((): KeyValueItem[] => {
   const inflow = transactions.value
     .filter((transaction) => transaction.amount_minor > 0)
@@ -352,62 +406,33 @@ const budgetAccountTypeLabel = computed(() => {
   return accountTypeBadge.value?.label ?? account.value.account_class;
 });
 
-const transactionColumns = computed(() => {
-  if (isInvestmentAccount.value) {
-    return [
-      { key: "date", label: "Date" },
-      { key: "category", label: "Category / Memo" },
-      { key: "amount", label: "Amount", align: "end" as const },
-      { key: "status", label: "Status" },
-      { key: "balance", label: "Balance", align: "end" as const },
-    ];
-  }
-  return [
-    { key: "date", label: "Date" },
-    { key: "description", label: "Description" },
-    { key: "category", label: "Category" },
-    { key: "memo", label: "Memo" },
-    { key: "amount", label: "Amount", align: "end" as const },
-    { key: "status", label: "Status" },
-    { key: "balance", label: "Balance", align: "end" as const },
-    { key: "actions", label: "" },
-  ];
-});
-
-const transactionRows = computed(() => {
+const runningBalances = computed(() => {
   let runningBalance = account.value?.display_balance_minor ?? 0;
   const sorted = [...transactions.value].sort(
     (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
   );
-  return sorted.map((t) => {
-    const balance = runningBalance;
+  const balances: Record<string, number> = {};
+  for (const t of sorted) {
+    balances[t.transaction_id] = runningBalance;
     runningBalance -= t.amount_minor;
-    return {
-      key: t.transaction_id,
-      date: formatDateFull(t.date),
-      description: t.memo || t.account_name,
-      category: t.category_name ?? formatSystemCategory(t.system_category),
-      memo: t.memo || "—",
-      amount: formatCurrency(t.amount_minor),
-      amountClass: t.amount_minor < 0 ? "text-error" : "text-positive",
-      status: t.status === "CLEARED" ? "Cleared" : "Pending",
-      statusVariant: (t.status === "CLEARED"
-        ? "positive"
-        : "warning") as StateBadgeVariant,
-      statusIcon: (t.status === "CLEARED" ? "check" : "clock") as string,
-      balance: formatCurrency(balance),
-    };
-  });
+  }
+  return balances;
+});
+
+const balanceChartPoints = computed(() => {
+  const sorted = [...transactions.value].sort(
+    (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
+  );
+  return sorted
+    .map((transaction) => ({
+      date: transaction.date,
+      valueMinor: runningBalances.value[transaction.transaction_id] ?? 0,
+    }))
+    .reverse();
 });
 
 const moreActions = computed(() => {
-  const actions = [
-    { key: "history", label: "View history" },
-    { key: "edit-configuration", label: "Edit configuration" },
-  ];
-  if (isBudgetAccount.value) {
-    actions.unshift({ key: "reconcile", label: "Reconcile" });
-  }
+  const actions: { key: string; label: string }[] = [];
   if (isInvestmentAccount.value) {
     actions.unshift(
       { key: "contribute", label: "Contribute" },
@@ -431,23 +456,128 @@ const handleBack = () => {
 
 const handleMoreAction = (key: string) => {
   if (key === "reconcile") {
-    router.push("/assets-liabilities");
+    showReconciliationStub();
+  }
+  if (key === "edit-configuration") {
+    openConfigurationModal();
   }
 };
 
-function transactionStatusCount(status: "PENDING" | "CLEARED"): number {
-  return transactions.value.filter(
-    (transaction) => transaction.status === status,
-  ).length;
+const updateTransactionMutation = useMutation({
+  mutationFn: ({ id, payload }: { id: string; payload: TransactionPayload }) =>
+    updateTransaction(id, payload),
+  onSuccess: () => invalidateAccountDetailQueries(),
+});
+
+const deleteTransactionMutation = useMutation({
+  mutationFn: deleteTransaction,
+  onSuccess: () => invalidateAccountDetailQueries(),
+});
+
+const updateAccountMutation = useMutation({
+  mutationFn: ({ id, payload }: { id: string; payload: Record<string, unknown> }) =>
+    updateAccount(id, payload),
+  onSuccess: () => {
+    showConfigurationModal.value = false;
+    invalidateAccountDetailQueries();
+  },
+});
+const configurationSaving = computed(() => updateAccountMutation.isPending.value);
+
+watch(
+  account,
+  (value) => {
+    if (!value || showConfigurationModal.value) return;
+    configurationName.value = cleanAccountName(value.name) ?? value.name;
+    configurationInstitution.value = value.institution ?? "";
+    configurationLast4.value = value.account_number_last4 ?? "";
+  },
+  { immediate: true },
+);
+
+function invalidateAccountDetailQueries() {
+  queryClient.invalidateQueries({ queryKey: ["transactions"] });
+  queryClient.invalidateQueries({ queryKey: ["accounts"] });
+  queryClient.invalidateQueries({ queryKey: ["assets-liabilities"] });
+  queryClient.invalidateQueries({ queryKey: ["budget"] });
+  queryClient.invalidateQueries({ queryKey: ["allocations"] });
+  queryClient.invalidateQueries({ queryKey: ["net-worth"] });
 }
 
-function formatSystemCategory(systemCategory: string | null): string {
-  if (!systemCategory) return "—";
-  return systemCategory
-    .replace(/^TX_/, "")
-    .split("_")
-    .map((part) => part.charAt(0) + part.slice(1).toLowerCase())
-    .join(" ");
+function handleCommitEdit(id: string, payload: TransactionPayload) {
+  updateTransactionMutation.mutate({ id, payload });
+}
+
+function handleRemoveTransaction(transaction: Transaction) {
+  deleteTransactionMutation.mutate(transaction.transaction_id);
+}
+
+function loadMoreTransactions() {
+  if (!hasNextPage.value || isFetchingNextPage.value) return;
+  fetchNextPage();
+}
+
+function openConfigurationModal() {
+  if (!account.value) return;
+  configurationName.value = cleanAccountName(account.value.name) ?? account.value.name;
+  configurationInstitution.value = account.value.institution ?? "";
+  configurationLast4.value = account.value.account_number_last4 ?? "";
+  showConfigurationModal.value = true;
+}
+
+function saveConfiguration() {
+  if (!account.value) return;
+  updateAccountMutation.mutate({
+    id: account.value.account_id,
+    payload: {
+      name: configurationName.value,
+      institution: configurationInstitution.value || null,
+      account_number_last4: configurationLast4.value || null,
+    },
+  });
+}
+
+function retireAccount() {
+  if (!account.value) return;
+  updateAccountMutation.mutate({
+    id: account.value.account_id,
+    payload: { is_active: false, is_hidden: true },
+  });
+}
+
+function showReconciliationStub() {
+  actionMessage.value = "Reconciliation review is not built yet.";
+}
+
+function datePresetToFilter(value: string): Pick<TransactionFilters, "dateFrom" | "dateTo"> {
+  const today = new Date();
+  const toIso = (date: Date) => date.toISOString().slice(0, 10);
+  if (value === "today") return { dateFrom: toIso(today), dateTo: toIso(today) };
+  if (value === "this-week") {
+    const start = new Date(today);
+    start.setDate(today.getDate() - today.getDay());
+    return { dateFrom: toIso(start), dateTo: toIso(today) };
+  }
+  if (value === "this-month") {
+    const start = new Date(today.getFullYear(), today.getMonth(), 1);
+    return { dateFrom: toIso(start), dateTo: toIso(today) };
+  }
+  if (value === "last-month") {
+    const start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+    const end = new Date(today.getFullYear(), today.getMonth(), 0);
+    return { dateFrom: toIso(start), dateTo: toIso(end) };
+  }
+  return {};
+}
+
+function amountPresetToFilter(
+  value: string,
+): Pick<TransactionFilters, "amountMinMinor" | "amountMaxMinor"> {
+  if (value === "0-50") return { amountMinMinor: 0, amountMaxMinor: 5_000 };
+  if (value === "50-100") return { amountMinMinor: 5_000, amountMaxMinor: 10_000 };
+  if (value === "100-500") return { amountMinMinor: 10_000, amountMaxMinor: 50_000 };
+  if (value === "500+") return { amountMinMinor: 50_000 };
+  return {};
 }
 
 function cleanAccountName(name: string | undefined): string | null {
@@ -463,14 +593,6 @@ function formatDateShort(): string {
   });
 }
 
-function formatDateFull(dateStr: string): string {
-  const date = new Date(dateStr + "T00:00:00");
-  return date.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
-}
 </script>
 
 <template>
@@ -534,6 +656,13 @@ function formatDateFull(dateStr: string): string {
             >
               Reconcile
             </Button>
+            <Button
+              variant="secondary"
+              data-cy="account-detail-edit-configuration"
+              @click="openConfigurationModal"
+            >
+              Edit configuration
+            </Button>
             <DropdownButton
               v-if="moreActions.length > 0"
               label="More actions"
@@ -548,11 +677,20 @@ function formatDateFull(dateStr: string): string {
             >
               {{ moreActions[0].label }}
             </Button>
-            <Button variant="secondary" aria-label="More account options">
+            <Button
+              variant="secondary"
+              aria-label="More account options"
+              @click="actionMessage = 'No additional account actions are available yet.'"
+            >
               ⋮
             </Button>
           </template>
         </PageHeader>
+
+        <div v-if="actionMessage" class="account-detail-page__notice">
+          <span>{{ actionMessage }}</span>
+          <button type="button" @click="actionMessage = ''">Dismiss</button>
+        </div>
 
         <MetricStrip
           :items="metricItems"
@@ -597,172 +735,53 @@ function formatDateFull(dateStr: string): string {
                   }}
                 </h2>
                 <span class="account-detail-page__section-count">
-                  {{ transactions.length }} transaction{{
-                    transactions.length !== 1 ? "s" : ""
-                  }}
+                  {{ transactionTotal }} transaction{{ transactionTotal !== 1 ? "s" : "" }}
                 </span>
-                <div class="account-detail-page__section-actions">
-                  <Button variant="secondary" size="sm">Filter</Button>
-                  <Button variant="secondary" size="sm">All dates</Button>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    aria-label="Export transactions"
-                  >
-                    ↓
-                  </Button>
-                </div>
               </div>
 
               <div v-if="txLoading" class="account-detail-page__tx-loading">
                 Loading transactions...
               </div>
 
-              <div v-else class="account-detail-page__table">
-                <div
-                  class="account-detail-page__table-header"
-                  :class="{
-                    'account-detail-page__table-header--investment':
-                      isInvestmentAccount,
-                  }"
-                >
-                  <span
-                    v-for="col in transactionColumns"
-                    :key="col.key"
-                    class="account-detail-page__th"
-                    :class="{
-                      'account-detail-page__th--end': col.align === 'end',
-                    }"
-                  >
-                    {{ col.label }}
-                  </span>
-                </div>
+              <div v-else class="account-detail-page__ledger-shell">
+                <TransactionFilterBar
+                  :accounts="accounts ?? []"
+                  :categories="categories"
+                  :account-filter="accountId"
+                  :locked-account-id="accountId"
+                  :date-filter="dateFilter"
+                  :category-filter="categoryFilter"
+                  :amount-filter="amountFilter"
+                  :status-filter="statusFilter"
+                  @update:date-filter="dateFilter = $event"
+                  @update:category-filter="categoryFilter = $event"
+                  @update:amount-filter="amountFilter = $event"
+                  @update:status-filter="statusFilter = $event"
+                />
 
-                <div
-                  v-for="row in transactionRows"
-                  :key="row.key"
-                  class="account-detail-page__row"
-                  :class="{
-                    'account-detail-page__row--investment': isInvestmentAccount,
-                  }"
-                >
-                  <span class="account-detail-page__td">
-                    {{ row.date }}
-                  </span>
-                  <span
-                    v-if="!isInvestmentAccount"
-                    class="account-detail-page__td"
-                  >
-                    {{ row.description }}
-                  </span>
-                  <span class="account-detail-page__td">
-                    {{ row.category }}
-                  </span>
-                  <span
-                    v-if="!isInvestmentAccount"
-                    class="account-detail-page__td"
-                  >
-                    {{ row.memo }}
-                  </span>
-                  <span
-                    class="account-detail-page__td account-detail-page__td--end"
-                    :class="row.amountClass"
-                  >
-                    {{ row.amount }}
-                  </span>
-                  <span class="account-detail-page__td">
-                    <StateBadge
-                      :variant="row.statusVariant"
-                      size="sm"
-                      :icon="row.statusIcon"
-                    >
-                      {{ row.status }}
-                    </StateBadge>
-                  </span>
-                  <span
-                    class="account-detail-page__td account-detail-page__td--end"
-                  >
-                    {{ row.balance }}
-                  </span>
-                  <span
-                    v-if="!isInvestmentAccount"
-                    class="account-detail-page__td account-detail-page__td--action"
-                    aria-hidden="true"
-                  >
-                    ⋮
-                  </span>
-                </div>
-
-                <div
-                  v-if="transactionRows.length === 0"
-                  class="account-detail-page__empty"
-                >
-                  No transactions found.
-                </div>
-
-                <div
-                  v-else-if="txPage?.has_more"
-                  class="account-detail-page__scroll-hint"
-                >
-                  Showing {{ transactions.length }} scoped transactions from the
-                  current page • account filtering needs server support
-                </div>
+                <TransactionLedger
+                  :transactions="transactions"
+                  :accounts="accounts ?? []"
+                  :categories="categories"
+                  :total-count="transactionTotal"
+                  :has-more="hasNextPage"
+                  :loading-more="isFetchingNextPage"
+                  :show-account-column="false"
+                  :show-running-balance="true"
+                  :running-balances="runningBalances"
+                  :locked-account-id="accountId"
+                  @load-more="loadMoreTransactions"
+                  @commit="handleCommitEdit"
+                  @remove="handleRemoveTransaction"
+                />
               </div>
             </section>
 
-            <section
-              class="account-detail-page__section account-detail-page__chart-section"
-              data-cy="chart-section"
-            >
-              <div class="account-detail-page__section-header">
-                <h2 class="account-detail-page__section-title">
-                  {{
-                    isInvestmentAccount
-                      ? "Value over time"
-                      : isLoanAccount
-                        ? "Loan balance over time"
-                        : "Balance over time"
-                  }}
-                </h2>
-                <div class="account-detail-page__range-toggle">
-                  <span>7D</span>
-                  <span class="account-detail-page__range-toggle-active"
-                    >1M</span
-                  >
-                  <span>3M</span>
-                  <span>6M</span>
-                  <span>1Y</span>
-                  <span>All</span>
-                </div>
-              </div>
-              <div class="account-detail-page__chart-placeholder">
-                <div class="account-detail-page__chart-value">
-                  {{ formatCurrency(account.display_balance_minor) }}
-                </div>
-                <p class="account-detail-page__chart-sub">
-                  As of {{ formatDateShort() }}
-                </p>
-                <div
-                  class="account-detail-page__chart-empty"
-                  aria-label="Balance over time preview"
-                >
-                  <svg viewBox="0 0 420 150" role="img">
-                    <path
-                      class="account-detail-page__chart-grid"
-                      d="M0 30H420M0 75H420M0 120H420"
-                    />
-                    <path
-                      class="account-detail-page__chart-area"
-                      d="M0 62 L40 60 L80 72 L120 78 L155 105 L190 88 L230 105 L270 100 L310 95 L335 42 L365 48 L390 32 L420 40 V150 H0 Z"
-                    />
-                    <path
-                      class="account-detail-page__chart-line"
-                      d="M0 62 L40 60 L80 72 L120 78 L155 105 L190 88 L230 105 L270 100 L310 95 L335 42 L365 48 L390 32 L420 40"
-                    />
-                  </svg>
-                </div>
-              </div>
-            </section>
+            <BalanceTrendChart
+              v-model:period="chartPeriod"
+              class="account-detail-page__chart-section"
+              :points="balanceChartPoints"
+            />
 
             <section
               v-if="isBudgetAccount"
@@ -817,9 +836,6 @@ function formatDateFull(dateStr: string): string {
                 </svg>
               </div>
               <KeyValueList :items="accountDetails" />
-              <button class="account-detail-page__sidebar-link">
-                View budgeting details
-              </button>
             </section>
 
             <section
@@ -828,34 +844,42 @@ function formatDateFull(dateStr: string): string {
             >
               <h3 class="account-detail-page__sidebar-title">Reconciliation</h3>
               <KeyValueList :items="reconciliationDetails" />
-              <button class="account-detail-page__sidebar-link">
+              <button class="account-detail-page__sidebar-link" @click="showReconciliationStub">
                 View reconciliation
-              </button>
-            </section>
-
-            <section
-              class="account-detail-page__sidebar-section"
-              data-cy="history-section"
-            >
-              <h3 class="account-detail-page__sidebar-title">History</h3>
-              <KeyValueList :items="historyDetails" />
-              <button class="account-detail-page__sidebar-link">
-                View history
-              </button>
-            </section>
-
-            <section
-              class="account-detail-page__sidebar-section"
-              data-cy="configuration-section"
-            >
-              <h3 class="account-detail-page__sidebar-title">Configuration</h3>
-              <KeyValueList :items="configurationDetails" />
-              <button class="account-detail-page__sidebar-link">
-                Edit configuration
               </button>
             </section>
           </aside>
         </div>
+
+        <FormModal
+          :visible="showConfigurationModal"
+          title="Edit account configuration"
+          submit-text="Save"
+          danger-text="Retire account"
+          :loading="configurationSaving"
+          @submit="saveConfiguration"
+          @danger="retireAccount"
+          @cancel="showConfigurationModal = false"
+          @close="showConfigurationModal = false"
+        >
+          <div class="account-detail-page__config-form">
+            <TextField v-model="configurationName" label="Name" name="name" />
+            <TextField
+              v-model="configurationInstitution"
+              label="Institution"
+              name="institution"
+            />
+            <TextField
+              v-model="configurationLast4"
+              label="Account number last4"
+              name="account-number-last4"
+            />
+            <p class="account-detail-page__config-note">
+              Account type and net-worth inclusion are not configurable here. Active
+              financial entities contribute to net worth according to their type.
+            </p>
+          </div>
+        </FormModal>
       </template>
 
       <div v-else class="account-detail-page__not-found">
@@ -937,6 +961,29 @@ function formatDateFull(dateStr: string): string {
   border-radius: var(--radius-all);
 }
 
+.account-detail-page__notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  padding: var(--space-md) var(--space-lg);
+  border: 1px solid var(--color-info);
+  border-radius: var(--radius-all);
+  background: var(--color-info-container);
+  color: var(--color-info);
+  font-family: var(--text-body-sm-font-family);
+  font-size: var(--text-body-sm-font-size);
+}
+
+.account-detail-page__notice button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
 .account-detail-page__content {
   display: grid;
   grid-template-columns: 1fr 280px;
@@ -1009,6 +1056,20 @@ function formatDateFull(dateStr: string): string {
   color: var(--color-on-surface-muted);
   font-family: var(--text-body-md-font-family);
   font-size: var(--text-body-md-font-size);
+}
+
+.account-detail-page__ledger-shell {
+  display: grid;
+  gap: var(--space-md);
+  padding: var(--space-lg);
+}
+
+.account-detail-page__ledger-shell :deep(.filter-bar) {
+  border-radius: var(--radius-all);
+}
+
+.account-detail-page__ledger-shell :deep(.ledger__scroll) {
+  height: clamp(360px, 52vh, 720px);
 }
 
 .account-detail-page__table {
@@ -1296,6 +1357,19 @@ function formatDateFull(dateStr: string): string {
   color: var(--color-on-surface-muted);
   font-family: var(--text-body-md-font-family);
   font-size: var(--text-body-md-font-size);
+}
+
+.account-detail-page__config-form {
+  display: grid;
+  gap: var(--space-lg);
+}
+
+.account-detail-page__config-note {
+  margin: 0;
+  color: var(--color-on-surface-muted);
+  font-family: var(--text-body-sm-font-family);
+  font-size: var(--text-body-sm-font-size);
+  line-height: var(--text-body-sm-line-height);
 }
 
 @media (max-width: 900px) {

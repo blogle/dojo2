@@ -168,6 +168,7 @@ function stubFetch() {
         offset: 0,
         limit: 20,
         has_more: false,
+        status_counts: { PENDING: 0, CLEARED: 1 },
       };
     } else if (path.startsWith("/api/allocations")) {
       body = { items: mockAllocations };

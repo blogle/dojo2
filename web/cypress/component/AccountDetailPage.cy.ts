@@ -76,20 +76,44 @@ function stubFetch() {
     }
 
     if (path === "/api/transactions") {
+      const requestUrl = new URL(url, "http://localhost");
+      const accountId = requestUrl.searchParams.get("account_id");
+      const scopedTransactions = transactions.filter(
+        (transaction) => !accountId || transaction.account_id === accountId,
+      );
       return Promise.resolve(
         new Response(
           JSON.stringify({
-            items: transactions,
-            total: 3,
+            items: scopedTransactions,
+            total: scopedTransactions.length,
             offset: 0,
-            limit: 50,
+            limit: 100,
             has_more: false,
+            status_counts: { PENDING: 4, CLEARED: 42 },
           }),
           {
             status: 200,
             headers: { "Content-Type": "application/json" },
           },
         ),
+      );
+    }
+
+    if (path === "/api/categories") {
+      return Promise.resolve(
+        new Response(JSON.stringify({ items: [], groups: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    }
+
+    if (path === `/api/accounts/${budgetAccount.account_id}`) {
+      return Promise.resolve(
+        new Response(JSON.stringify({ account_id: budgetAccount.account_id }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
       );
     }
 
@@ -136,10 +160,13 @@ describe("AccountDetailPage", () => {
       "Budget account",
     );
     cy.get("[data-cy=account-detail-reconcile]").should("be.visible");
+    cy.get("[data-cy=account-detail-edit-configuration]").should("be.visible");
     cy.get("[data-cy=metric-strip-root]").should(
       "contain.text",
       "Current balance",
     );
+    cy.get("[data-cy=metric-strip-root]").should("contain.text", "4 transactions");
+    cy.get("[data-cy=metric-strip-root]").should("contain.text", "42 transactions");
     cy.get("[data-cy=transactions-section]").should(
       "contain.text",
       "Transactions",
@@ -153,22 +180,40 @@ describe("AccountDetailPage", () => {
       "not.contain.text",
       "Other account",
     );
-    cy.get("[data-cy=account-details-section]").should(
-      "contain.text",
-      "View budgeting details",
-    );
+    cy.get("[data-cy=transaction-filter-bar]").should("be.visible");
+    cy.get("[data-cy=transaction-ledger]").should("be.visible");
+    cy.get("[data-cy=account-details-section]").should("not.contain.text", "View budgeting details");
     cy.get("[data-cy=reconciliation-section]").should(
       "contain.text",
       "View reconciliation",
     );
-    cy.get("[data-cy=history-section]").should("contain.text", "View history");
-    cy.get("[data-cy=configuration-section]").should(
-      "contain.text",
-      "Edit configuration",
-    );
+    cy.get("[data-cy=history-section]").should("not.exist");
+    cy.get("[data-cy=configuration-section]").should("not.exist");
     cy.get("[data-cy=summary-section]").should(
       "contain.text",
       "Summary & notes",
     );
+    cy.get("[data-cy=balance-trend-chart]").should("be.visible");
+  });
+
+  it("opens edit configuration and submits account metadata", () => {
+    mountPage();
+
+    cy.get("[data-cy=account-detail-edit-configuration]").click();
+    cy.get("[data-cy=form-modal-root]").should("contain.text", "Edit account configuration");
+    cy.get('input[name="institution"]').type("Chase");
+    cy.get("[data-cy=form-modal-root]").contains("Save").click();
+
+    cy.window().then((win) => {
+      const calls = (win.fetch as unknown as { getCalls: () => Array<{ args: [string, RequestInit?] }> }).getCalls();
+      const updateCall = calls.find((call) => {
+        const requestUrl = new URL(call.args[0], "http://localhost");
+        return requestUrl.pathname === `/api/accounts/${budgetAccount.account_id}`;
+      });
+      expect(updateCall).not.to.eq(undefined);
+      const body = JSON.parse(updateCall?.args[1]?.body as string);
+      expect(body).to.include({ institution: "Chase" });
+      expect(body).not.to.have.property("include_in_net_worth");
+    });
   });
 });

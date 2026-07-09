@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed } from "vue";
 
 import type { Account, Category } from "../../types";
 import SelectField from "../forms/SelectField.vue";
@@ -7,6 +7,12 @@ import SelectField from "../forms/SelectField.vue";
 const props = defineProps<{
   accounts: Account[];
   categories: Category[];
+  accountFilter: string;
+  dateFilter: string;
+  categoryFilter: string;
+  amountFilter: string;
+  statusFilter: string;
+  lockedAccountId?: string;
 }>();
 
 const emit = defineEmits<{
@@ -17,16 +23,14 @@ const emit = defineEmits<{
   "update:statusFilter": [value: string];
 }>();
 
-const accountFilter = ref("all");
-const dateFilter = ref("all");
-const categoryFilter = ref("all");
-const amountFilter = ref("all");
-const statusFilter = ref("all");
-
 const accountOptions = computed(() => [
   { value: "all", label: "All accounts" },
   ...props.accounts.map((a) => ({ value: a.account_id, label: a.name })),
 ]);
+
+const lockedAccountName = computed(
+  () => props.accounts.find((a) => a.account_id === props.lockedAccountId)?.name,
+);
 
 const dateOptions = [
   { value: "all", label: "All dates" },
@@ -59,27 +63,22 @@ const statusOptions = [
 ];
 
 function updateAccountFilter(value: string) {
-  accountFilter.value = value;
   emit("update:accountFilter", value);
 }
 
 function updateDateFilter(value: string) {
-  dateFilter.value = value;
   emit("update:dateFilter", value);
 }
 
 function updateCategoryFilter(value: string) {
-  categoryFilter.value = value;
   emit("update:categoryFilter", value);
 }
 
 function updateAmountFilter(value: string) {
-  amountFilter.value = value;
   emit("update:amountFilter", value);
 }
 
 function updateStatusFilter(value: string) {
-  statusFilter.value = value;
   emit("update:statusFilter", value);
 }
 </script>
@@ -87,32 +86,37 @@ function updateStatusFilter(value: string) {
 <template>
   <div class="filter-bar" data-cy="transaction-filter-bar">
     <div class="filter-bar__row">
+      <div v-if="lockedAccountId" class="filter-bar__locked-account">
+        <span class="filter-bar__locked-label">Account</span>
+        <span class="filter-bar__locked-value">{{ lockedAccountName }}</span>
+      </div>
       <SelectField
-        :model-value="accountFilter"
+        v-else
+        :model-value="props.accountFilter"
         label="Account"
         :options="accountOptions"
         @update:model-value="updateAccountFilter"
       />
       <SelectField
-        :model-value="dateFilter"
+        :model-value="props.dateFilter"
         label="Date"
         :options="dateOptions"
         @update:model-value="updateDateFilter"
       />
       <SelectField
-        :model-value="categoryFilter"
+        :model-value="props.categoryFilter"
         label="Category"
         :options="categoryOptions"
         @update:model-value="updateCategoryFilter"
       />
       <SelectField
-        :model-value="amountFilter"
+        :model-value="props.amountFilter"
         label="Amount"
         :options="amountOptions"
         @update:model-value="updateAmountFilter"
       />
       <SelectField
-        :model-value="statusFilter"
+        :model-value="props.statusFilter"
         label="Status"
         :options="statusOptions"
         @update:model-value="updateStatusFilter"
@@ -134,6 +138,31 @@ function updateStatusFilter(value: string) {
   grid-template-columns: repeat(5, 1fr);
   gap: var(--space-md);
   align-items: end;
+}
+
+.filter-bar__locked-account {
+  display: grid;
+  gap: var(--space-xs);
+}
+
+.filter-bar__locked-label {
+  color: var(--color-on-surface-muted);
+  font-family: var(--text-label-sm-font-family);
+  font-size: var(--text-label-sm-font-size);
+  font-weight: var(--text-label-sm-font-weight);
+}
+
+.filter-bar__locked-value {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 var(--space-md);
+  border: 1px solid var(--color-outline);
+  border-radius: var(--radius-all);
+  background: var(--color-surface-muted);
+  color: var(--color-on-surface);
+  font-family: var(--text-body-md-font-family);
+  font-size: var(--text-body-md-font-size);
 }
 
 @media (max-width: 1200px) {

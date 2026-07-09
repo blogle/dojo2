@@ -285,9 +285,27 @@ def transactions(
         default="entry_order", pattern=r"^(date|amount_minor|status|created_at|entry_order)$"
     ),
     sort_dir: str = Query(default="asc", pattern=r"^(asc|desc)$"),
+    account_id: str | None = None,
+    category_id: str | None = None,
+    status: str | None = Query(default=None, pattern=r"^(PENDING|CLEARED)$"),
+    date_from: str | None = None,
+    date_to: str | None = None,
+    amount_min_minor: int | None = Query(default=None, ge=0),
+    amount_max_minor: int | None = Query(default=None, ge=0),
 ) -> dict[str, Any]:
     return get_service(request).list_transactions(
-        limit=limit, offset=offset, show_hidden=show_hidden, sort_by=sort_by, sort_dir=sort_dir
+        limit=limit,
+        offset=offset,
+        show_hidden=show_hidden,
+        sort_by=sort_by,
+        sort_dir=sort_dir,
+        account_id=account_id,
+        category_id=category_id,
+        status=status,
+        date_from=date_from,
+        date_to=date_to,
+        amount_min_minor=amount_min_minor,
+        amount_max_minor=amount_max_minor,
     )
 
 

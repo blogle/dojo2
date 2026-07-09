@@ -105,6 +105,7 @@ function stubFetch() {
             offset: 0,
             limit: 10000,
             has_more: false,
+            status_counts: { PENDING: 0, CLEARED: 1 },
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),
