@@ -1403,6 +1403,27 @@ class DojoService:
     ) -> dict[str, Any]:
         today = self.clock.today()
         start_date = today - timedelta(days=days)
+        if self._account_class(account_id) == ACCOUNT_CLASS_TRACKING:
+            row = self.db.fetch_one(
+                load_sql("queries/tracking_summary"),
+                (start_date, today, account_id),
+            )
+            if row is None:
+                anchor = self._account_display_balance(account_id)
+                return {
+                    "inflow_minor": 0,
+                    "outflow_minor": 0,
+                    "net_flow_minor": 0,
+                    "transaction_count": 0,
+                    "average_daily_balance_minor": anchor,
+                }
+            return {
+                "inflow_minor": int(row["inflow_minor"]),
+                "outflow_minor": int(row["outflow_minor"]),
+                "net_flow_minor": int(row["net_flow_minor"]),
+                "transaction_count": int(row["snapshot_count"]),
+                "average_daily_balance_minor": int(row["average_daily_balance_minor"]),
+            }
         anchor = self._account_display_balance(account_id)
         row = self.db.fetch_one(
             load_sql("queries/account_transaction_summary"),
@@ -1432,6 +1453,17 @@ class DojoService:
         days = _TREND_DAYS[period]
         today = self.clock.today()
         date_from = today - timedelta(days=days)
+        if self._account_class(account_id) == ACCOUNT_CLASS_TRACKING:
+            rows = self.db.fetch_all(
+                load_sql("queries/tracking_balance_series"),
+                (account_id, date_from, today, account_id, date_from, date_from, today),
+            )
+            return {
+                "points": [
+                    {"date": str(row["date"]), "balance_minor": int(row["balance_minor"])}
+                    for row in rows
+                ]
+            }
         anchor = self._account_display_balance(account_id)
         rows = self.db.fetch_all(
             render_sql("queries/account_balance_series", bucket=bucket),
@@ -1449,6 +1481,12 @@ class DojoService:
             if account["account_id"] == account_id:
                 return int(account["display_balance_minor"])
         return 0
+
+    def _account_class(self, account_id: str) -> str:
+        for account in self.list_accounts(show_hidden=True):
+            if account["account_id"] == account_id:
+                return str(account.get("account_class", ""))
+        return ""
 
     def list_allocations(self, *, show_hidden: bool) -> list[dict[str, Any]]:
         categories = self.list_categories(month=self.default_budget_month(), show_hidden=True)

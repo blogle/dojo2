@@ -1893,6 +1893,8 @@ function formatDateShort(date?: Date): string {
 
 .account-detail-page__snapshot-table {
   display: grid;
+  max-height: clamp(360px, 52vh, 720px);
+  overflow-y: auto;
 }
 
 .account-detail-page__snapshot-header {
