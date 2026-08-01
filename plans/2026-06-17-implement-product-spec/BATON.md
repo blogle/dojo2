@@ -4,9 +4,9 @@
 
 Path: `./plans/2026-06-17-implement-product-spec/PLAN.md`
 
-Current phase: Phase 6 — Assets & Liabilities Frontend Flows
+Current phase: Phase 6.5 — Assets & Liabilities Completion
 
-Current work-item status: **Complete — Work Item D (Tracking Account Detail + Cutover Modal)**
+Current work-item status: **In progress — canonical values and complete rich-entity flows**
 
 ## Product and repository context
 
@@ -96,9 +96,9 @@ Relevant contributor guidance:
 ## Current repository state
 
 - **Branch**: `master`
-- **Working tree**: Clean after commit `feat(assets-liabilities): align tracking account detail with mock 04`.
-- **Last completed task**: Work Item D — Tracking account detail + cutover modal.
-- **Known failing checks**: Pre-existing `tests/test_api_endpoints.py` formatting issue (not introduced by this work). `just typecheck`, `just lint-web`, `just test-web` (257 tests), `just architecture-check` all pass.
+- **Working tree**: Documentation update in progress; local untracked `tmp/` contains visual-review artifacts and must not be committed.
+- **Last completed implementation task**: Tracking account detail visual shell plus snapshot-based tracking trend and summary dispatch.
+- **Known failing checks**: None confirmed for the current HEAD. The completion plan requires fresh milestone-specific checks and a final `just check`.
 - **Required services**: DuckDB (provisioned by `just api`), Google OAuth (optional)
 - **Feature flags**: None
 - **Aspire data**: Deterministic fixture available at `fixture://default`
@@ -136,27 +136,24 @@ Frontend capabilities still planned:
 
 ## Next work item
 
-**Phase 7: Dashboard (Backend + Frontend)**
+**Phase 6.5: canonical type-aware as-of values**
 
-The Assets & Liabilities frontend flows (Phase 6) are now complete. All work items A through D have been implemented and validated. The next phase is Phase 7 (Dashboard), which requires new backend APIs and frontend sections. See `PLAN.md` Phase 7 for details.
+Dashboard work is blocked until Assets & Liabilities is financially correct and its proposed flows are complete. The authoritative living plan is `docs/plans/complete-assets-liabilities.md`.
 
-### Remaining Phase 6 follow-up (not blocking)
+The first milestone replaces fragmented ledger/legacy-valuation fallbacks with one type-aware effective-date read model used by accounts, Assets & Liabilities, net worth, detail metrics, and trends. It also removes fabricated change, date, attention, and reconciliation states.
 
-- Snapshot creation form for tracking accounts (currently stub button)
-- Cutover persistence (backend endpoint + form submission)
-- Investment contribution/withdrawal flows
-- Loan payment recording flow
+Subsequent milestones complete tracking snapshot correction, tangible valuation, investment statement reconciliation and transfers, loan attribution and aggregate statement reconciliation, and one-to-many tracking cutover.
 
 ### Definition of done
 
-1. Phase 6 is complete.
-2. `just check` passes (modulo pre-existing format issue in `tests/test_api_endpoints.py`).
-3. All 257 frontend tests pass.
-4. Visual validation recorded in `VALIDATION.md`.
+1. Type-specific values agree across account detail, Assets & Liabilities, and net worth for any effective date.
+2. Every visible action in mocks 01–07 either works or is removed; no fabricated financial state remains.
+3. Tracking, tangible, investment, loan, and one-to-many cutover acceptance scenarios pass.
+4. `just check` passes and visual validation is recorded in `VALIDATION.md`.
 
 ## Human decisions required
 
-None.
+None for the planned scope. Product decisions made on 2026-07-31 are recorded in `SPEC.md`, `DECISIONS.md`, and `docs/plans/complete-assets-liabilities.md`.
 
 ## Known risks and observations
 

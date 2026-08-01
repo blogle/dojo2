@@ -23,6 +23,7 @@ This repository is pre-alpha for local data compatibility. The implementation ma
 - [ ] Phase 6: Account detail read completeness (join investment/loan details).
 - [ ] Phase 7: Account update completeness and validation.
 - [ ] Phase 8: Cleanup and full verification.
+- [ ] (2026-07-31) Completion pass: connect rich records to one type-aware as-of value model, then implement tracking/tangible/investment/loan/cutover vertical slices. See `docs/plans/complete-assets-liabilities.md`.
 
 ## Surprises & Discoveries
 
@@ -111,6 +112,8 @@ This repository is pre-alpha for local data compatibility. The implementation ma
 ## Outcomes & Retrospective
 
 The first implementation pass has started. Schema tables for `tracking_account_details`, `investment_account_details`, `loan_details`, `loan_balance_snapshots`, `tangible_asset_valuations`, and `account_budget_links` have been added. Property tests for credit card, investment, and loan link behaviors have been added. The `/api/assets-liabilities` endpoint exists with basic grouping. However, the credit card link migration is incomplete (still using `budget_account_settings.linked_payment_category_id`), the derived activity engine has incorrect loan behavior, liability math is wrong for credit cards, and snapshot/valuation CRUD APIs are missing.
+
+By 2026-07-31, most originally listed schema and append/list API scaffolding exists, but the outcome above is stale. The remaining blocker is a fragmented read model: investment positions/cash/prices, loan snapshots, and tangible valuations are not consistently used by accounts, Assets & Liabilities, or net worth. Append endpoints also need account-class validation, effective-date handling, and same-date correction semantics. The completion pass is therefore organized around observable vertical slices rather than checking off the obsolete scaffold phases.
 
 ## Context and Orientation
 

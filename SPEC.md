@@ -827,6 +827,8 @@ Tracking accounts should remain simple. They should not be treated as transfer e
 
 Tracking accounts carry explicit asset/liability polarity. Aspire imports derive this from Aspire net-worth asset and debt metadata when available. If the source does not identify polarity, dojo infers it from the latest non-zero snapshot amount and flags the choice during onboarding so the user can correct it.
 
+Tracking snapshot entry uses unsigned user-facing amounts. The account's polarity determines whether the value contributes to net worth as an asset or liability. A new snapshot for a date that already has a snapshot corrects that date through the versioned record model rather than creating two competing effective values. Future-dated snapshots may be recorded, but they do not become current before their effective date.
+
 ### Investment Accounts
 
 An investment account is a richer non-budget asset entity outside the budget boundary.
@@ -842,6 +844,10 @@ An investment account:
 * carries self-managed flag and tax treatment metadata for portfolio and withdrawal planning
 
 Investment account value is derived from versioned holdings plus versioned cash. A holding records a ticker, quantity, and average basis. Prices are recorded separately from holdings so brokerage statement prices and future market-data prices can coexist without rewriting position history. Brokerage statement prices are authoritative for reconciliation-date values; market-data prices may be used for current estimate views when they do not override statement evidence.
+
+Investment accounts are reconciled through dated statement snapshots of holdings, prices, and cash. dojo does not require a separate trade, dividend, interest, or sale-proceeds entry workflow. A user who records statement snapshots after each brokerage event can obtain event-level resolution; a user who reconciles less often sees statement-to-statement portfolio changes.
+
+Between statement snapshots, cleared investment contributions and withdrawals adjust the last reconciled cash value provisionally. Only transfers after the inclusive statement-snapshot date are applied, so a later statement snapshot supersedes those provisional deltas without double counting them. Pending transfers remain visible but do not change actual investment value or net worth. The UI identifies post-snapshot value as provisional until the next investment reconciliation.
 
 Moving cash from checking to brokerage is net-worth neutral. It is not income and it is not economic spending. It does affect budget planning because money has left the set of budget accounts available for spending.
 
@@ -917,6 +923,8 @@ I have $400 left available in Investment Contributions.
 The linked contribution category should feel like a normal budget category from the user perspective, but the activity is derived from transfer rows touching the linked investment account rather than from `category_id` on the transfer transaction.
 
 The contribution category can be funded in advance through normal allocation from Available to budget. If the category is not sufficiently funded, the transfer flow should require the user to choose how to handle the shortfall. The default is to fund the linked contribution category from Available to budget, then perform the contribution. If that makes Available to budget negative, dojo uses the existing negative-ATB warning behavior.
+
+The contribution flow previews the two transaction legs, the linked-category activity, resulting category availability, resulting Available to budget, and net-worth-neutral reporting effect before Save.
 
 The transaction row is not augmented to carry both `category_id` and `system_category`.
 
@@ -1019,6 +1027,14 @@ The exact internal representation may evolve, but the product semantics must rem
 
 Until a dedicated loan-payment flow exists, dojo may let the user attribute an existing budget transaction to one loan. That attribution is editable domain data, not a reconciliation record. A single transaction is attributed to at most one loan. Principal versus non-principal cost is derived from attributed transaction totals and principal-balance snapshots. For example, if attributed mortgage transactions total $5,000 for a period and the principal balance decreases by $2,000, dojo can report $3,000 as non-principal cost for that period. dojo does not persist a finer interest, fee, or escrow split in the first model.
 
+The first loan-payment model uses this lightweight attribution approach rather than requiring a split during transaction entry. Recording a payment from loan detail creates an ordinary budget transaction with the loan and its payment category preselected. On the Transactions page, a uniquely linked payment category attributes the transaction automatically. If several loans share the category, dojo asks for the loan in a follow-up control rather than adding a permanent loan column to the transaction table.
+
+New attribution behavior is prospective. Historical transactions are not automatically backfilled or reinterpreted.
+
+Loan reconciliation captures a statement period and the lender's current principal, accrued interest, escrow, and unapplied-credit balances. Given the previously verified principal, current principal, attributed payments in the period, and any explicit principal-changing adjustments, dojo derives the aggregate principal reduction and the remaining unallocated non-principal cash. dojo must label that remainder as unknown non-principal unless lender statement detail supplies a more precise classification; it must not guess that the remainder is interest, fees, or escrow.
+
+Escrow and unapplied credit are separate balances rather than immediate economic spending. They participate in the loan's balance-sheet presentation and net-worth calculation according to their asset or credit character. A later reconciliation may optionally record lender-provided component detail, but ordinary payment entry and historical import never require per-payment principal, interest, fee, escrow, or unapplied allocation.
+
 ### Tangible Assets
 
 A tangible asset is a non-budget asset entity outside the budget boundary.
@@ -1030,6 +1046,8 @@ A tangible asset:
 * does not participate in the Transactions page by default
 * does not create budget activity merely because its valuation changes
 * may later support purchase or sale flows, but valuation changes are not income, spending, or budget activity
+
+Tangible-asset valuation entry uses positive user-facing amounts. Same-date valuation entry corrects the existing dated value through SCD2 history. Future-dated valuations are allowed but excluded until effective. The latest effective valuation is the tangible asset's source of truth for Assets & Liabilities and net worth.
 
 Examples include a home, vehicle, jewelry, or collectibles.
 
@@ -1063,6 +1081,12 @@ The upgrade flow is:
 5. dojo links the new entity to the retired tracking account as its replacement.
 6. Historical as-of views before the cutover use the tracking account.
 7. Current and future views after the cutover use the richer entity.
+
+One tracking account may be replaced by more than one richer entity. For example, one Aspire brokerage tracking category may be allocated across several real investment accounts. All successor entities in one cutover share the cutover date and receive their own opening statement snapshot or valuation.
+
+Before applying cutover, dojo compares the latest tracking value at the cutover date with the combined opening values of all successors. The user reviews the variance and confirms a final tracking reconciliation that records a final source snapshot equal to the successor total. This preserves the prior imported snapshot history and prevents the representation change itself from creating income, spending, budget activity, or a net-worth jump.
+
+The cutover date is inclusive for successors: historical views before the date use the tracking account; views on and after the date use the successor entities. A completed cutover is one atomic operation that records the final tracking reconciliation, creates all successors and opening values, records replacement links, and retires the predecessor from current totals. Repeating or partially applying the operation must not duplicate entities or values.
 
 The cutover opening value is not a transfer, income, spending, or budget activity. It is a representation change.
 
@@ -1125,6 +1149,10 @@ A card may show:
 
 The source of truth describes how the current value is determined. Examples include ledger, snapshot, investment activity or valuation, loan balance, and manual valuation.
 
+Every displayed value and date is derived from the entity's real source of truth. The page must not display fabricated period change, fallback dates, attention state, or reconciliation freshness. Until reconciliation evidence exists, the truthful state is **Not reconciled**, not **Up to date**.
+
+Period change compares the current effective value with the latest effective value at or before the start of the selected period. When no earlier value exists, the UI displays an unavailable state rather than zero. Attention state may identify stale or missing source values, pending provisional investment value, or missing reconciliation evidence; it must not default every entity to **OK**.
+
 ### Add Entity
 
 The page provides one primary action:
@@ -1175,6 +1203,8 @@ Tracking account details include:
 * replacement or cutover affordance
 * retired or replaced state when applicable
 
+Adding a snapshot supports both a new effective date and correction of an existing date. The detail page always uses the latest effective snapshot, not a transaction-ledger balance.
+
 #### Investment Account Detail
 
 Investment account details include:
@@ -1189,6 +1219,10 @@ Investment account details include:
 * withdrawal flow
 * reconciliation status
 
+The investment activity list contains contribution and withdrawal transfers plus statement reconciliation events. Trades, dividends, interest, and sale proceeds are represented through changes between holdings, cash, and price snapshots rather than separate manual transaction-entry workflows.
+
+The current value is the latest reconciled holdings-plus-cash value plus cleared contribution and withdrawal cash deltas after that reconciliation. The page distinguishes reconciled and provisional portions.
+
 #### Loan Detail
 
 Loan details include:
@@ -1201,6 +1235,8 @@ Loan details include:
 * payment flow
 * edit configuration
 
+Payment entry does not require the user to allocate principal, interest, fees, escrow, or unapplied amounts. The detail page shows attributed payments, the latest statement balances, aggregate principal reduction, and unknown non-principal remainder until reconciliation supplies more detail.
+
 #### Tangible Asset Detail
 
 Tangible asset details include:
@@ -1209,6 +1245,8 @@ Tangible asset details include:
 * valuation history
 * metadata
 * reconciliation or manual update status
+
+Tangible-asset detail uses valuation history and a valuation trend. It does not show the ordinary transaction ledger unless a future purchase or sale feature explicitly introduces such activity.
 
 ### Transaction Settlement and Balances
 

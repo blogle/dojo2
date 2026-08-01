@@ -12,11 +12,12 @@ After this work, dojo will have a complete Assets & Liabilities frontend surface
 - [x] (2026-07-07) Work Item A: Overview page with `/assets-liabilities` route, MetricStrip, grouped stacked entity cards, Cypress component coverage, and visual validation against mock 01.
 - [x] (2026-07-07) Work Item B: Add item wizard with explicit `/assets-liabilities/add` route, entity type selection, type-specific account forms, and Cypress coverage.
 - [x] (2026-07-09) Work Item C: Budget account detail page aligned to mock 03 with split header actions, dense metric strip, scoped transaction table with memo/action affordances, balance chart preview, summary/notes panel, full sidebar action cards, focused Cypress coverage, and visual validation. `EntityDetailLayout` was not extracted or cataloged because the current shell still contains account-class-specific decisions and would not yet be a reusable fixtureable catalog contract.
-- [ ] Work Item D: Tracking account detail page + cutover modal.
-- [ ] Work Item E: Investment account detail page + contribution flow.
-- [ ] Work Item F: Loan detail page + payment flow.
-- [ ] Work Item G: Tangible asset detail page.
+- [x] (2026-07-09) Work Item D: Tracking account detail page + cutover modal visual shell. Snapshot submission and cutover persistence move to Phase 6.5.
+- [ ] Work Item E: Investment account detail, statement reconciliation, contribution, and withdrawal flows.
+- [ ] Work Item F: Loan detail, payment attribution, and aggregate statement reconciliation flow.
+- [ ] Work Item G: Tangible asset valuation detail and correction flow.
 - [ ] Work Item H: Settlement state presentation (StateBadge extensions).
+- [ ] (2026-07-31) Phase 6.5 remediation: canonical values, truthful status/change data, one-to-many cutover, and mock-alignment closure. See `docs/plans/complete-assets-liabilities.md`.
 
 ## Surprises & Discoveries
 
@@ -50,6 +51,18 @@ After this work, dojo will have a complete Assets & Liabilities frontend surface
 - Decision: Do not extract or catalog `EntityDetailLayout` during Work Item C.
   Rationale: The current `AccountDetailPage.vue` chrome is reused internally across budget, investment, loan, tracking, and tangible account branches, but its slots and sidebar content are still shaped by account-class-specific decisions. Cataloging it now would create a premature design-system contract. The budget-account detail alignment can be completed with smaller page-local edits and focused route coverage.
   Date/Author: 2026-07-09 / opencode
+
+- Decision: Mock parity is accepted only with correct type-specific financial behavior; visual placeholders do not complete a work item.
+  Rationale: The current tracking screen demonstrates that a visually aligned page can still show a zero current value beside nonzero snapshots. Rich values must first share one authoritative as-of read model.
+  Date/Author: 2026-07-31 / product owner and opencode
+
+- Decision: Investment activity is statement-snapshot-based rather than a parallel manual trade ledger.
+  Rationale: Holdings, prices, and cash can be reconciled at any cadence. Frequent reconciliation provides event-level resolution without requiring users to enter every trade, dividend, or interest event twice.
+  Date/Author: 2026-07-31 / product owner and opencode
+
+- Decision: Tracking cutover is one-to-many and reconciliation-backed.
+  Rationale: One Aspire tracking category can represent several real accounts. A final tracking snapshot matching combined successor openings makes the representation change auditable and net-worth neutral.
+  Date/Author: 2026-07-31 / product owner and opencode
 
 ## Outcomes & Retrospective
 

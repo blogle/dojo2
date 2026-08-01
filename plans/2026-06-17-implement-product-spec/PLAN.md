@@ -97,10 +97,11 @@ The following areas from SPEC.md are explicitly deferred to later phases:
 
 | Work Item | Description | Status |
 |-----------|-------------|--------|
-| 6.1 | Stacked entity cards | Planned |
-| 6.2 | Entity wizard for Add item | Planned |
-| 6.3 | Detail page component | Planned |
-| 6.4 | Settlement state and balance presentation | Planned |
+| 6.1 | Stacked entity cards and grouped overview | Complete; truthful change/attention data remains in 6.5 |
+| 6.2 | Entity wizard for Add item | Complete; confirmation and onboarding-link remediation remains in 6.5 |
+| 6.3 | Budget and tracking detail foundations | Complete; rich class flows remain in 6.5 |
+| 6.4 | Scoped budget ledger and balance presentation | Complete |
+| 6.5 | Type-aware values and complete tracking, tangible, investment, loan, and cutover flows | In progress; see `docs/plans/complete-assets-liabilities.md` |
 
 ### Phase 7: Dashboard (Backend + Frontend)
 

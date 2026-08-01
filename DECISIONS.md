@@ -517,3 +517,27 @@ Add `entry_order INTEGER NOT NULL` column to `transactions`. For Aspire imports,
 - Edit preserves entry order without requiring user attention.
 - Default sort becomes `entry_order ASC` instead of `created_at DESC, transaction_id DESC`.
 - Entry order is a durable ordering field, not subject to SCD2 versioning.
+
+## 2026-07-31 — Complete Assets & Liabilities around type-specific as-of values
+
+### Context
+
+The first Assets & Liabilities pass produced the overview, add wizard, budget-account detail, and a tracking-detail mock alignment. Rich investment, loan, and tangible records could be written, but most read paths still used ledger balances or legacy net-worth valuations. Several screens therefore displayed fabricated change, freshness, dates, or attention states, and tracking detail could show zero beside nonzero snapshot history.
+
+### Decision
+
+Use one type-aware, effective-date value model across account lists, Assets & Liabilities, net worth, details, trends, and cutover. Budget accounts use ledger balances; tracking and tangible entities use their latest effective snapshot; investments use dated holdings plus cash with statement prices preferred, followed by cleared post-snapshot contribution and withdrawal deltas; loans use statement principal, accrued-interest, escrow, and unapplied-credit balances.
+
+Users enter positive asset and obligation amounts. Entity type or tracking polarity determines the signed net-worth contribution. Same-date snapshot entry is a correction with SCD2 history, and future-dated records remain inactive until effective.
+
+Investment reconciliation is snapshot-based. dojo does not add a parallel trade/dividend/interest ledger. Loan payment entry creates or attributes an ordinary budget transaction without requiring a split; reconciliation derives aggregate principal reduction and leaves the remaining amount explicitly unknown non-principal unless the lender supplies component detail. Escrow and unapplied credit remain separate balances.
+
+Tracking cutover supports one predecessor to many richer successors. It atomically records a final tracking reconciliation equal to the combined successor openings, creates the successors, records replacement links, and makes successors effective on the cutover date without creating a transfer or net-worth change.
+
+### Consequence
+
+- Rich entity data must be connected to every aggregate read before mock controls are considered functional.
+- Reconciliation freshness remains **Not reconciled** until evidence exists; the UI cannot invent an up-to-date state.
+- Cleared investment transfers preserve net worth immediately but remain visibly provisional until the next statement snapshot supersedes them.
+- Historical Aspire transactions and investment events are not backfilled into richer records.
+- The full generic reconciliation review remains a later phase; this work adds only the statement capture and evidence required for correct entity values.
