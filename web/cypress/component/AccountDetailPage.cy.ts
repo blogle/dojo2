@@ -285,6 +285,11 @@ const trackingAccount = {
   tracking_source: "import",
   latest_valuation_minor: 9843221,
   latest_valuation_date: "2026-06-02",
+  current_value_minor: 9843221,
+  net_worth_contribution_minor: 9843221,
+  value_source: "imported_valuation",
+  value_effective_date: "2026-06-02",
+  reconciliation_status: "NOT_RECONCILED",
   metadata: '{"imported_from_net_worth": true}',
 };
 
@@ -325,7 +330,9 @@ function stubTrackingFetch() {
       );
     }
 
-    if (path === `/api/accounts/${trackingAccount.account_id}/tracking-snapshots`) {
+    if (
+      path === `/api/accounts/${trackingAccount.account_id}/tracking-snapshots`
+    ) {
       return Promise.resolve(
         new Response(JSON.stringify({ items: trackingSnapshots }), {
           status: 200,
@@ -335,7 +342,8 @@ function stubTrackingFetch() {
     }
 
     if (
-      path === `/api/accounts/${trackingAccount.account_id}/transactions/summary`
+      path ===
+      `/api/accounts/${trackingAccount.account_id}/transactions/summary`
     ) {
       return Promise.resolve(
         new Response(
@@ -446,7 +454,7 @@ describe("AccountDetailPage — tracking account", () => {
     );
     cy.get("[data-cy=account-details-section]").should(
       "contain.text",
-      "View budgeting details",
+      "$98,432.21",
     );
     cy.get("[data-cy=migration-context-section]").should(
       "contain.text",
@@ -466,6 +474,39 @@ describe("AccountDetailPage — tracking account", () => {
     cy.get("[data-cy=summary-section]").should("not.exist");
   });
 
+  it("submits a tracking snapshot correction", () => {
+    mountTrackingPage();
+
+    cy.get("[data-cy=account-detail-add-snapshot]").click();
+    cy.get("[data-cy=form-modal-root]").should("contain.text", "Add snapshot");
+    cy.get('input[name="value-amount"]').type("123.45");
+    cy.get('input[name="value-notes"]').type("Statement correction");
+    cy.get("[data-cy=form-modal-root]").contains("Save").click();
+
+    cy.window().then((win) => {
+      const calls = (
+        win.fetch as unknown as {
+          getCalls: () => Array<{ args: [string, RequestInit?] }>;
+        }
+      ).getCalls();
+      const snapshotCall = calls.find((call) => {
+        const requestUrl = new URL(call.args[0], "http://localhost");
+        return (
+          requestUrl.pathname ===
+            `/api/accounts/${trackingAccount.account_id}/tracking-snapshots` &&
+          call.args[1]?.method === "POST"
+        );
+      });
+      expect(snapshotCall).not.to.eq(undefined);
+      const body = JSON.parse(snapshotCall?.args[1]?.body as string);
+      expect(body).to.include({
+        amount_minor: 12345,
+        source: "manual",
+        notes: "Statement correction",
+      });
+    });
+  });
+
   it("opens and closes the cutover modal", () => {
     mountTrackingPage();
 
@@ -482,20 +523,172 @@ describe("AccountDetailPage — tracking account", () => {
       "contain.text",
       "New entity type",
     );
-    cy.get("[data-cy=form-modal-root]").should(
-      "contain.text",
-      "Cutover date",
-    );
+    cy.get("[data-cy=form-modal-root]").should("contain.text", "Cutover date");
     cy.get("[data-cy=form-modal-root]").should("contain.text", "Name");
-    cy.get("[data-cy=form-modal-root]").should(
-      "contain.text",
-      "Opening value",
-    );
+    cy.get("[data-cy=form-modal-root]").should("contain.text", "Opening value");
     cy.get("[data-cy=form-modal-root]").should(
       "contain.text",
       "Contribution category",
     );
     cy.get("[data-cy=form-modal-root]").contains("Cancel").click();
     cy.get("[data-cy=form-modal-root]").should("not.exist");
+  });
+});
+
+const tangibleAccount = {
+  account_id: "acct-tangible-0001",
+  name: "Home",
+  account_class: "TANGIBLE_ASSET",
+  is_hidden: false,
+  is_active: true,
+  institution: null,
+  account_number_last4: null,
+  actual_balance_minor: 0,
+  pending_balance_minor: 0,
+  cleared_balance_minor: 0,
+  display_balance_minor: 0,
+  current_value_minor: 42500000,
+  net_worth_contribution_minor: 42500000,
+  value_source: "manual_valuation",
+  value_effective_date: "2026-06-02",
+  reconciliation_status: "NOT_RECONCILED",
+};
+
+function mountTangiblePage() {
+  cy.stub(window, "fetch").callsFake((url: string, init?: RequestInit) => {
+    const path = new URL(url, "http://localhost").pathname;
+    if (path === "/api/accounts") {
+      return Promise.resolve(
+        new Response(JSON.stringify({ items: [tangibleAccount] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    }
+    if (
+      path === `/api/accounts/${tangibleAccount.account_id}/tangible-valuations`
+    ) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify(
+            init?.method === "POST"
+              ? { valuation_id: "valuation-new" }
+              : {
+                  items: [
+                    {
+                      valuation_id: "valuation-1",
+                      account_id: tangibleAccount.account_id,
+                      effective_date: "2026-06-02",
+                      amount_minor: 42500000,
+                      source: "manual",
+                      notes: "County assessment",
+                    },
+                  ],
+                },
+          ),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    }
+    if (path.endsWith("/transactions/summary")) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            inflow_minor: 0,
+            outflow_minor: 0,
+            net_flow_minor: 0,
+            transaction_count: 1,
+            average_daily_balance_minor: 42500000,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    }
+    if (path.endsWith("/balance-trend")) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            points: [{ date: "2026-06-02", balance_minor: 42500000 }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    }
+    if (path === "/api/transactions") {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            items: [],
+            total: 0,
+            offset: 0,
+            limit: 100,
+            has_more: false,
+            status_counts: { PENDING: 0, CLEARED: 0 },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    }
+    return Promise.resolve(
+      new Response(JSON.stringify({ items: [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+  });
+
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      { path: "/assets-liabilities", component: AssetsLiabilitiesPage },
+      { path: "/assets-liabilities/:id", component: AccountDetailPage },
+    ],
+  });
+  router.push(`/assets-liabilities/${tangibleAccount.account_id}`);
+  cy.wrap(router.isReady());
+  const queryClient = createDojoQueryClient();
+  mount(AccountDetailPage, {
+    global: { plugins: [router, [VueQueryPlugin, { queryClient }]] },
+  });
+}
+
+describe("AccountDetailPage — tangible asset", () => {
+  it("renders valuation history and submits a valuation", () => {
+    mountTangiblePage();
+
+    cy.get("[data-cy=page-header-root]").should(
+      "contain.text",
+      "Tangible asset",
+    );
+    cy.get("[data-cy=snapshot-history-section]").should(
+      "contain.text",
+      "Valuation history",
+    );
+    cy.get("[data-cy=transactions-section]").should("not.exist");
+    cy.get("[data-cy=account-detail-add-snapshot]").should(
+      "contain.text",
+      "Add valuation",
+    );
+    cy.get("[data-cy=account-detail-add-snapshot]").click();
+    cy.get('input[name="value-amount"]').type("430000");
+    cy.get("[data-cy=form-modal-root]").contains("Save").click();
+
+    cy.window().then((win) => {
+      const calls = (
+        win.fetch as unknown as {
+          getCalls: () => Array<{ args: [string, RequestInit?] }>;
+        }
+      ).getCalls();
+      const valuationCall = calls.find((call) => {
+        const requestUrl = new URL(call.args[0], "http://localhost");
+        return (
+          requestUrl.pathname ===
+            `/api/accounts/${tangibleAccount.account_id}/tangible-valuations` &&
+          call.args[1]?.method === "POST"
+        );
+      });
+      const body = JSON.parse(valuationCall?.args[1]?.body as string);
+      expect(body).to.include({ amount_minor: 43000000, source: "manual" });
+    });
   });
 });

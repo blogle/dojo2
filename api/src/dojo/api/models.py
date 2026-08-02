@@ -77,6 +77,7 @@ class TransactionPayload(BaseModel):
     status: TransactionStatus
     memo: str = ""
     insert_after_transaction_id: str | None = None
+    loan_account_id: str | None = None
 
     @model_validator(mode="after")
     def validate_category_choice(self) -> "TransactionPayload":
@@ -92,6 +93,23 @@ class TransferPayload(BaseModel):
     amount_minor: int = Field(gt=0)
     status: TransactionStatus
     memo: str = ""
+
+
+class AccountBudgetLinkPayload(BaseModel):
+    category_id: str
+    link_behavior: Literal["CREDIT_CARD_PAYMENT", "INVESTMENT_CONTRIBUTION", "LOAN_PAYMENT"]
+    effective_date: date
+
+
+class InvestmentTransferPayload(BaseModel):
+    direction: Literal["CONTRIBUTION", "WITHDRAWAL"]
+    budget_account_id: str
+    date: date
+    amount_minor: int = Field(gt=0)
+    status: TransactionStatus
+    memo: str = ""
+    fund_shortfall: bool = True
+    contribution_category_id: str | None = None
 
 
 class AccountPayload(BaseModel):
@@ -185,29 +203,62 @@ class GoalPayload(BaseModel):
 
 class TrackingAccountSnapshotPayload(BaseModel):
     effective_date: date
-    amount_minor: int
+    amount_minor: int = Field(ge=0)
     source: str = "manual"
     notes: str = ""
 
 
 class LoanBalanceSnapshotPayload(BaseModel):
     effective_date: date
-    principal_balance_minor: int
-    accrued_interest_minor: int | None = None
+    principal_balance_minor: int = Field(ge=0)
+    accrued_interest_minor: int | None = Field(default=None, ge=0)
+    escrow_balance_minor: int = Field(default=0, ge=0)
+    unapplied_credit_minor: int = Field(default=0, ge=0)
     notes: str = ""
+
+
+class LoanPaymentPayload(BaseModel):
+    date: date
+    budget_account_id: str
+    amount_minor: int = Field(gt=0)
+    category_id: str
+    status: TransactionStatus
+    memo: str = "Loan payment"
 
 
 class TangibleAssetValuationPayload(BaseModel):
     effective_date: date
-    amount_minor: int
+    amount_minor: int = Field(ge=0)
     source: str = "manual"
     notes: str = ""
 
 
 class InvestmentPositionPayload(BaseModel):
+    effective_date: date
     ticker: str = Field(min_length=1)
-    quantity_minor: int
+    quantity_micros: int = Field(ge=0)
     average_basis_minor: int | None = None
+
+
+class InvestmentStatementHoldingPayload(BaseModel):
+    ticker: str = Field(min_length=1)
+    quantity_micros: int = Field(ge=0)
+    price_minor: int = Field(gt=0)
+    average_basis_minor: int | None = Field(default=None, ge=0)
+
+
+class InvestmentStatementPayload(BaseModel):
+    effective_date: date
+    cash_balance_minor: int = Field(ge=0)
+    holdings: list[InvestmentStatementHoldingPayload]
+    notes: str = ""
+
+    @model_validator(mode="after")
+    def validate_unique_tickers(self) -> "InvestmentStatementPayload":
+        tickers = [holding.ticker.strip().upper() for holding in self.holdings]
+        if len(tickers) != len(set(tickers)):
+            raise ValueError("Statement holdings must use unique tickers")
+        return self
 
 
 class InvestmentCashSnapshotPayload(BaseModel):
@@ -217,6 +268,7 @@ class InvestmentCashSnapshotPayload(BaseModel):
 
 
 class InvestmentPriceSnapshotPayload(BaseModel):
+    account_id: str | None = None
     effective_date: date
     price_minor: int = Field(gt=0)
     source: str = "manual"

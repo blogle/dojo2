@@ -103,7 +103,23 @@ CREATE TABLE IF NOT EXISTS loan_balance_snapshots (
     effective_date DATE NOT NULL,
     principal_balance_minor BIGINT NOT NULL,
     accrued_interest_minor BIGINT,
+    escrow_balance_minor BIGINT NOT NULL DEFAULT 0,
+    unapplied_credit_minor BIGINT NOT NULL DEFAULT 0,
+    attributed_payment_minor BIGINT NOT NULL DEFAULT 0,
+    principal_reduction_minor BIGINT NOT NULL DEFAULT 0,
+    unknown_nonprincipal_minor BIGINT NOT NULL DEFAULT 0,
     notes TEXT,
+    valid_from TIMESTAMPTZ NOT NULL,
+    valid_to TIMESTAMPTZ NOT NULL DEFAULT TIMESTAMPTZ '9999-12-31 23:59:59+00',
+    created_at TIMESTAMPTZ NOT NULL,
+    created_by_user_id UUID
+);
+
+CREATE TABLE IF NOT EXISTS loan_transaction_attributions (
+    row_id UUID PRIMARY KEY,
+    attribution_id UUID NOT NULL,
+    transaction_id UUID NOT NULL,
+    loan_account_id UUID NOT NULL,
     valid_from TIMESTAMPTZ NOT NULL,
     valid_to TIMESTAMPTZ NOT NULL DEFAULT TIMESTAMPTZ '9999-12-31 23:59:59+00',
     created_at TIMESTAMPTZ NOT NULL,
@@ -142,7 +158,8 @@ CREATE TABLE IF NOT EXISTS investment_positions (
     position_id UUID NOT NULL,
     account_id UUID NOT NULL,
     ticker TEXT NOT NULL,
-    quantity_minor BIGINT NOT NULL,
+    effective_date DATE NOT NULL,
+    quantity_micros BIGINT NOT NULL,
     average_basis_minor BIGINT,
     valid_from TIMESTAMPTZ NOT NULL,
     valid_to TIMESTAMPTZ NOT NULL DEFAULT TIMESTAMPTZ '9999-12-31 23:59:59+00',
@@ -166,6 +183,7 @@ CREATE TABLE IF NOT EXISTS investment_cash_snapshots (
 CREATE TABLE IF NOT EXISTS investment_price_snapshots (
     row_id UUID PRIMARY KEY,
     snapshot_id UUID NOT NULL,
+    account_id UUID,
     ticker TEXT NOT NULL,
     effective_date DATE NOT NULL,
     price_minor BIGINT NOT NULL,
@@ -228,6 +246,7 @@ CREATE TABLE IF NOT EXISTS budget_buckets (
 CREATE TABLE IF NOT EXISTS transactions (
     row_id UUID PRIMARY KEY,
     transaction_id UUID NOT NULL,
+    transfer_id UUID,
     date DATE NOT NULL,
     account_id UUID NOT NULL,
     amount_minor BIGINT NOT NULL,
@@ -293,6 +312,9 @@ SELECT * FROM loan_details WHERE valid_to = TIMESTAMPTZ '9999-12-31 23:59:59+00'
 
 CREATE OR REPLACE VIEW current_loan_balance_snapshots AS
 SELECT * FROM loan_balance_snapshots WHERE valid_to = TIMESTAMPTZ '9999-12-31 23:59:59+00';
+
+CREATE OR REPLACE VIEW current_loan_transaction_attributions AS
+SELECT * FROM loan_transaction_attributions WHERE valid_to = TIMESTAMPTZ '9999-12-31 23:59:59+00';
 
 CREATE OR REPLACE VIEW current_tangible_asset_valuations AS
 SELECT * FROM tangible_asset_valuations WHERE valid_to = TIMESTAMPTZ '9999-12-31 23:59:59+00';

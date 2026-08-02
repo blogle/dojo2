@@ -83,7 +83,10 @@ const metricItems = computed(() => {
     {
       key: "change",
       label: "Change (30d)",
-      value: "+$0.00",
+      value:
+        data.value.change_30d_minor == null
+          ? "—"
+          : formatSignedCurrency(data.value.change_30d_minor),
     },
   ];
 });
@@ -170,7 +173,7 @@ const formatAccountId = (item: {
 };
 
 const formatDate = (dateStr: string | null | undefined) => {
-  if (!dateStr) return "Jun 2, 2026";
+  if (!dateStr) return "—";
   const date = new Date(dateStr + "T00:00:00");
   return date.toLocaleDateString("en-US", {
     month: "short",
@@ -179,11 +182,33 @@ const formatDate = (dateStr: string | null | undefined) => {
   });
 };
 
+const formatSignedCurrency = (amountMinor: number) => {
+  const formatted = formatCurrency(Math.abs(amountMinor));
+  if (amountMinor > 0) return `+${formatted}`;
+  if (amountMinor < 0) return `-${formatted}`;
+  return formatted;
+};
+
+const attention = (status: string) => {
+  if (status === "CURRENT") {
+    return { label: "OK", variant: "positive" as const };
+  }
+  if (status === "MISSING_VALUE") {
+    return { label: "Missing value", variant: "error" as const };
+  }
+  return { label: "Not reconciled", variant: "warning" as const };
+};
+
 const getSourceLabel = (source: string) => {
   const labels: Record<string, string> = {
     ledger: "System",
     valuation: "Valuation",
     manual: "Manual",
+    snapshot: "Snapshot",
+    imported_valuation: "Aspire",
+    manual_valuation: "Manual",
+    investment_statement: "Statement",
+    loan_statement: "Statement",
   };
   return labels[source] || source;
 };
@@ -362,17 +387,25 @@ const getSourceLabel = (source: string) => {
               <span
                 class="assets-liabilities-page__td assets-liabilities-page__td--change"
               >
-                +$0.00
+                {{
+                  item.change_30d_minor === null ||
+                  item.change_30d_minor === undefined
+                    ? "—"
+                    : formatSignedCurrency(item.change_30d_minor)
+                }}
               </span>
               <span
                 class="assets-liabilities-page__td assets-liabilities-page__td--as-of"
               >
-                {{ formatDate(item.latest_valuation_date) }}
+                {{ formatDate(item.value_effective_date) }}
               </span>
               <span
                 class="assets-liabilities-page__td assets-liabilities-page__td--attention"
               >
-                <StateBadge variant="positive" size="sm">
+                <StateBadge
+                  :variant="attention(item.attention_status).variant"
+                  size="sm"
+                >
                   <svg
                     class="assets-liabilities-page__attention-icon"
                     viewBox="0 0 16 16"
@@ -393,7 +426,7 @@ const getSourceLabel = (source: string) => {
                       stroke-linejoin="round"
                     />
                   </svg>
-                  OK
+                  {{ attention(item.attention_status).label }}
                 </StateBadge>
               </span>
               <span

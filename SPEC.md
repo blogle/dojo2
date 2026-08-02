@@ -827,7 +827,9 @@ Tracking accounts should remain simple. They should not be treated as transfer e
 
 Tracking accounts carry explicit asset/liability polarity. Aspire imports derive this from Aspire net-worth asset and debt metadata when available. If the source does not identify polarity, dojo infers it from the latest non-zero snapshot amount and flags the choice during onboarding so the user can correct it.
 
-Tracking snapshot entry uses unsigned user-facing amounts. The account's polarity determines whether the value contributes to net worth as an asset or liability. A new snapshot for a date that already has a snapshot corrects that date through the versioned record model rather than creating two competing effective values. Future-dated snapshots may be recorded, but they do not become current before their effective date.
+Tracking snapshot entry uses unsigned user-facing amounts. The account's polarity determines whether the value contributes to net worth as an asset or liability. A new snapshot for a date that already has a snapshot corrects that date through the versioned record model rather than creating two competing effective values. Tracking snapshots cannot use a future effective date.
+
+For a tracking account, recording a snapshot is the complete current value-update workflow. Until generic reconciliation is implemented, the UI shows snapshot source, date, and freshness rather than a separate reconciliation state or action.
 
 ### Investment Accounts
 
@@ -1033,7 +1035,15 @@ New attribution behavior is prospective. Historical transactions are not automat
 
 Loan reconciliation captures a statement period and the lender's current principal, accrued interest, escrow, and unapplied-credit balances. Given the previously verified principal, current principal, attributed payments in the period, and any explicit principal-changing adjustments, dojo derives the aggregate principal reduction and the remaining unallocated non-principal cash. dojo must label that remainder as unknown non-principal unless lender statement detail supplies a more precise classification; it must not guess that the remainder is interest, fees, or escrow.
 
-Escrow and unapplied credit are separate balances rather than immediate economic spending. They participate in the loan's balance-sheet presentation and net-worth calculation according to their asset or credit character. A later reconciliation may optionally record lender-provided component detail, but ordinary payment entry and historical import never require per-payment principal, interest, fee, escrow, or unapplied allocation.
+Escrow and unapplied credit are separate balances rather than immediate economic spending. Escrow is shown as a restricted asset separately from the loan liability; it must not be silently netted into the loan's displayed net-worth contribution. Unapplied credit is also presented separately when supplied. A later reconciliation may optionally record lender-provided component detail, but ordinary payment entry and historical import never require per-payment principal, interest, fee, escrow, or unapplied allocation.
+
+Loan creation requires current principal and its as-of date so a newly created loan immediately has a truthful obligation. Original loan amount, origination date, and rate remain optional historical and projection metadata.
+
+Loan configuration supports an estimated amortization model with interest rate, fixed or variable rate type, scheduled principal-and-interest payment, payment frequency, next payment date, maturity date or remaining term, and optional recurring extra principal. Escrow is excluded from the scheduled principal-and-interest amount.
+
+The amortization model projects interest, principal, remaining balance, payoff date, and extra-payment effects. Each statement reconciliation resets the projection to actual lender principal and regenerates the future schedule. Projected values are labeled **Estimated** and never presented as reconciled facts.
+
+Loan reconciliation primarily asks for statement date, principal, and escrow. Accrued interest and unapplied credit are optional advanced fields. Optional lender-provided year-to-date principal paid and year-to-date interest paid provide actual cumulative reporting without per-payment backfill. The UI distinguishes lender-provided actual values, balance-derived values, estimated values, and unknown non-principal cash.
 
 ### Tangible Assets
 
@@ -1047,7 +1057,7 @@ A tangible asset:
 * does not create budget activity merely because its valuation changes
 * may later support purchase or sale flows, but valuation changes are not income, spending, or budget activity
 
-Tangible-asset valuation entry uses positive user-facing amounts. Same-date valuation entry corrects the existing dated value through SCD2 history. Future-dated valuations are allowed but excluded until effective. The latest effective valuation is the tangible asset's source of truth for Assets & Liabilities and net worth.
+Tangible-asset valuation entry uses positive user-facing amounts. Same-date valuation entry corrects the existing dated value through SCD2 history. Future-dated valuations are rejected. The latest effective valuation is the tangible asset's source of truth for Assets & Liabilities and net worth.
 
 Examples include a home, vehicle, jewelry, or collectibles.
 
@@ -1169,6 +1179,10 @@ Supported names are:
 * loan
 * tangible asset
 
+Institution entry uses one consistent free-text combobox across entity creation, configuration, and cutover. It suggests common institutions and institutions already present in dojo while accepting any custom value.
+
+Investment creation configures its prospective linked contribution category. Loan creation configures its prospective linked payment category. Contribution and payment operations display the configured category and its available balance rather than asking the user to select the relationship on every operation.
+
 ### Detail Pages
 
 Selecting a stacked card opens a dedicated detail page.
@@ -1222,6 +1236,12 @@ Investment account details include:
 The investment activity list contains contribution and withdrawal transfers plus statement reconciliation events. Trades, dividends, interest, and sale proceeds are represented through changes between holdings, cash, and price snapshots rather than separate manual transaction-entry workflows.
 
 The current value is the latest reconciled holdings-plus-cash value plus cleared contribution and withdrawal cash deltas after that reconciliation. The page distinguishes reconciled and provisional portions.
+
+Investment statements may contain cash and no holdings. A cash-only investment account is valid.
+
+When a cleared contribution occurs after reconciliation on the same calendar date, it is provisional and changes current value. Statement and transaction recording timestamps disambiguate same-day ordering. A later statement correction supersedes only transfers included by that correction.
+
+Derived contribution activity appears in the linked category's monthly Activity and spending history without adding `category_id` to either transfer leg. Investment withdrawals never affect the linked contribution category and return cash to Available to budget.
 
 #### Loan Detail
 

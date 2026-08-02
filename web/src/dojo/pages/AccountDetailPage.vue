@@ -10,12 +10,23 @@ import { useRoute, useRouter } from "vue-router";
 
 import {
   deleteTransaction,
+  createTangibleValuation,
+  createTrackingSnapshot,
+  createInvestmentTransfer,
+  createLoanPayment,
+  fetchAccountBudgetLinks,
   fetchAccounts,
   fetchAccountBalanceTrend,
   fetchAccountTransactionSummary,
   fetchCategories,
+  fetchLatestInvestmentStatement,
+  fetchLoanPayments,
+  fetchLoanSnapshots,
   fetchTrackingSnapshots,
+  fetchTangibleValuations,
   fetchTransactionsPage,
+  reconcileInvestmentStatement,
+  reconcileLoanStatement,
   type TransactionFilters,
   updateAccount,
   updateTransaction,
@@ -29,6 +40,9 @@ import PageHeader from "@/dojo/components/data/PageHeader.vue";
 import KeyValueList from "@/dojo/components/display/KeyValueList.vue";
 import type { KeyValueItem } from "@/dojo/components/display/KeyValueList.vue";
 import StateBadge from "@/dojo/components/display/StateBadge.vue";
+import CurrencyField from "@/dojo/components/forms/CurrencyField.vue";
+import DatePicker from "@/dojo/components/forms/DatePicker.vue";
+import SelectField from "@/dojo/components/forms/SelectField.vue";
 import TextField from "@/dojo/components/forms/TextField.vue";
 import NavigationRail from "@/dojo/components/navigation/NavigationRail.vue";
 import FormModal from "@/dojo/components/overlays/FormModal.vue";
@@ -95,6 +109,45 @@ const configurationName = ref("");
 const configurationInstitution = ref("");
 const configurationLast4 = ref("");
 const actionMessage = ref("");
+const showValueModal = ref(false);
+const valueDate = ref(new Date().toISOString().slice(0, 10));
+const valueAmount = ref("");
+const valueNotes = ref("");
+const showInvestmentStatementModal = ref(false);
+const investmentStatementDate = ref(new Date().toISOString().slice(0, 10));
+const investmentStatementCash = ref("");
+const investmentStatementNotes = ref("");
+const investmentHoldingRows = ref<
+  Array<{
+    ticker: string;
+    quantity: string;
+    price: string;
+    averageBasis: string;
+  }>
+>([]);
+const showInvestmentTransferModal = ref(false);
+const investmentTransferDirection = ref<"CONTRIBUTION" | "WITHDRAWAL">(
+  "CONTRIBUTION",
+);
+const investmentTransferDate = ref(new Date().toISOString().slice(0, 10));
+const investmentTransferBudgetAccountId = ref("");
+const investmentTransferCategoryId = ref("");
+const investmentTransferAmount = ref("");
+const investmentTransferMemo = ref("");
+const investmentTransferStatus = ref<"PENDING" | "CLEARED">("CLEARED");
+const investmentTransferFundShortfall = ref(true);
+const showLoanPaymentModal = ref(false);
+const loanPaymentDate = ref(new Date().toISOString().slice(0, 10));
+const loanPaymentBudgetAccountId = ref("");
+const loanPaymentCategoryId = ref("");
+const loanPaymentAmount = ref("");
+const loanPaymentMemo = ref("Loan payment");
+const showLoanStatementModal = ref(false);
+const loanStatementDate = ref(new Date().toISOString().slice(0, 10));
+const loanPrincipal = ref("");
+const loanAccruedInterest = ref("");
+const loanEscrow = ref("");
+const loanUnapplied = ref("");
 
 const { data: categoriesResponse } = useQuery({
   queryKey: computed(() => ["categories", currentMonth.value]),
@@ -182,12 +235,101 @@ const isTrackingAccount = computed(
 const isTangibleAsset = computed(
   () => account.value?.account_class === "TANGIBLE_ASSET",
 );
+const isValuationEntity = computed(
+  () => isTrackingAccount.value || isTangibleAsset.value,
+);
+const accountCurrentValue = computed(() => {
+  if (!account.value) return null;
+  if (account.value.current_value_minor !== undefined) {
+    return account.value.current_value_minor;
+  }
+  if (isTrackingAccount.value) {
+    return account.value.latest_valuation_minor ?? null;
+  }
+  if (isBudgetAccount.value) {
+    return account.value.display_balance_minor;
+  }
+  return null;
+});
 
 const { data: trackingSnapshots } = useQuery({
   queryKey: computed(() => ["tracking-snapshots", accountId.value]),
   queryFn: () => fetchTrackingSnapshots(accountId.value),
   enabled: computed(() => !!accountId.value && isTrackingAccount.value),
 });
+
+const { data: tangibleValuations } = useQuery({
+  queryKey: computed(() => ["tangible-valuations", accountId.value]),
+  queryFn: () => fetchTangibleValuations(accountId.value),
+  enabled: computed(() => !!accountId.value && isTangibleAsset.value),
+});
+
+const { data: investmentStatement } = useQuery({
+  queryKey: computed(() => ["investment-statement", accountId.value]),
+  queryFn: () => fetchLatestInvestmentStatement(accountId.value),
+  enabled: computed(() => !!accountId.value && isInvestmentAccount.value),
+});
+
+const { data: accountBudgetLinks } = useQuery({
+  queryKey: computed(() => ["account-budget-links", accountId.value]),
+  queryFn: () => fetchAccountBudgetLinks(accountId.value),
+  enabled: computed(
+    () =>
+      !!accountId.value && (isInvestmentAccount.value || isLoanAccount.value),
+  ),
+});
+const { data: loanSnapshots } = useQuery({
+  queryKey: computed(() => ["loan-snapshots", accountId.value]),
+  queryFn: () => fetchLoanSnapshots(accountId.value),
+  enabled: computed(() => !!accountId.value && isLoanAccount.value),
+});
+const { data: loanPayments } = useQuery({
+  queryKey: computed(() => ["loan-payments", accountId.value]),
+  queryFn: () => fetchLoanPayments(accountId.value),
+  enabled: computed(() => !!accountId.value && isLoanAccount.value),
+});
+const latestLoanSnapshot = computed(() => loanSnapshots.value?.[0]);
+
+const budgetAccountOptions = computed(() =>
+  (accounts.value ?? [])
+    .filter(
+      (candidate) =>
+        candidate.account_class === "BUDGET" &&
+        candidate.budget_account_type !== "CREDIT_CARD",
+    )
+    .map((candidate) => ({
+      value: candidate.account_id,
+      label: candidate.name,
+    })),
+);
+const contributionCategoryOptions = computed(() =>
+  categories.value
+    .filter((category) => category.category_kind === "STANDARD")
+    .map((category) => ({ value: category.category_id, label: category.name })),
+);
+const linkedContributionCategoryId = computed(
+  () =>
+    accountBudgetLinks.value?.find(
+      (link) => link.link_behavior === "INVESTMENT_CONTRIBUTION",
+    )?.category_id ?? "",
+);
+const linkedLoanCategoryId = computed(
+  () =>
+    accountBudgetLinks.value?.find(
+      (link) => link.link_behavior === "LOAN_PAYMENT",
+    )?.category_id ?? "",
+);
+const selectedContributionCategory = computed(() =>
+  categories.value.find(
+    (category) => category.category_id === investmentTransferCategoryId.value,
+  ),
+);
+
+const valueHistory = computed(() =>
+  isTrackingAccount.value
+    ? (trackingSnapshots.value ?? [])
+    : (tangibleValuations.value ?? []),
+);
 
 const showCutoverModal = ref(false);
 const cutoverEntityType = ref("INVESTMENT");
@@ -264,78 +406,92 @@ const metricItems = computed((): MetricStripItem[] => {
       {
         key: "recon",
         label: "Reconciliation freshness",
-        value: "Up to date",
-        auxValue: `As of ${formatDateShort()}`,
-        status: { label: "", variant: "positive" as const },
+        value: "Not reconciled",
+        auxValue: "No reconciliation recorded",
+        status: { label: "", variant: "warning" as const },
       },
     ];
   }
 
   if (isInvestmentAccount.value) {
+    const currentValue = accountCurrentValue.value;
+    const change = account.value.change_30d_minor;
     return [
       {
         key: "value",
         label: "Current value",
-        value: formatCurrency(account.value.display_balance_minor),
-        auxValue: `As of ${formatDateShort()}`,
+        value: formatOptionalCurrency(currentValue),
+        auxValue: valueAsOfLabel.value,
       },
       {
         key: "cash",
         label: "Cash",
-        value: formatCurrency(account.value.cleared_balance_minor),
-        auxValue: `As of ${formatDateShort()}`,
+        value: formatOptionalCurrency(
+          investmentStatement.value?.cash_balance_minor,
+        ),
+        auxValue: valueAsOfLabel.value,
       },
       {
         key: "holdings",
         label: "Holdings value",
-        value: formatCurrency(
-          account.value.display_balance_minor -
-            account.value.cleared_balance_minor,
+        value: formatOptionalCurrency(
+          investmentStatement.value?.holdings_value_minor,
         ),
-        auxValue: `As of ${formatDateShort()}`,
+        auxValue: valueAsOfLabel.value,
+      },
+      {
+        key: "change",
+        label: "30d change",
+        value:
+          change === null || change === undefined
+            ? "—"
+            : formatCurrency(change),
+        auxValue:
+          change === null || change === undefined ? "Unavailable" : "30 days",
       },
       {
         key: "net-worth",
         label: "Net worth contribution",
-        value: formatCurrency(account.value.display_balance_minor),
+        value: formatCurrency(account.value.net_worth_contribution_minor ?? 0),
         auxValue: "Asset",
       },
       {
         key: "recon",
         label: "Reconciliation freshness",
-        value: "Up to date",
-        auxValue: `As of ${formatDateShort()}`,
-        status: { label: "", variant: "positive" as const },
+        value: "Not reconciled",
+        auxValue: "No statement recorded",
+        status: { label: "", variant: "warning" as const },
       },
     ];
   }
 
   if (isLoanAccount.value) {
+    const obligation = accountCurrentValue.value;
     return [
       {
         key: "obligation",
         label: "Current obligation",
-        value: formatCurrency(account.value.display_balance_minor),
-        auxValue: `Due on ${formatDateShort()}`,
+        value: formatOptionalCurrency(obligation),
+        auxValue: valueAsOfLabel.value,
       },
       {
         key: "balance",
         label: "Principal balance",
-        value: formatCurrency(account.value.display_balance_minor),
-        auxValue: `As of ${formatDateShort()}`,
+        value: formatOptionalCurrency(obligation),
+        auxValue: valueAsOfLabel.value,
       },
       {
         key: "net-worth",
         label: "Net worth contribution",
-        value: formatCurrency(account.value.display_balance_minor),
+        value: formatCurrency(account.value.net_worth_contribution_minor ?? 0),
         auxValue: "Liability",
       },
       {
         key: "recon",
         label: "Reconciliation freshness",
-        value: "Up to date",
-        auxValue: `As of ${formatDateShort()}`,
-        status: { label: "", variant: "positive" as const },
+        value: "Not reconciled",
+        auxValue: "No statement recorded",
+        status: { label: "", variant: "warning" as const },
       },
     ];
   }
@@ -367,7 +523,7 @@ const metricItems = computed((): MetricStripItem[] => {
       {
         key: "value",
         label: "Current value",
-        value: formatCurrency(account.value.display_balance_minor),
+        value: formatOptionalCurrency(accountCurrentValue.value),
         auxValue: `As of ${valuationDate}`,
       },
       {
@@ -392,9 +548,9 @@ const metricItems = computed((): MetricStripItem[] => {
       {
         key: "recon",
         label: "Reconciliation freshness",
-        value: "Up to date",
-        auxValue: `As of ${valuationDate}`,
-        status: { label: "", variant: "positive" as const },
+        value: "Not reconciled",
+        auxValue: "No reconciliation recorded",
+        status: { label: "", variant: "warning" as const },
       },
     ];
   }
@@ -403,21 +559,21 @@ const metricItems = computed((): MetricStripItem[] => {
     {
       key: "value",
       label: "Current value",
-      value: formatCurrency(account.value.display_balance_minor),
-      auxValue: `As of ${formatDateShort()}`,
+      value: formatOptionalCurrency(accountCurrentValue.value),
+      auxValue: valueAsOfLabel.value,
     },
     {
       key: "net-worth",
       label: "Net worth contribution",
-      value: formatCurrency(account.value.display_balance_minor),
+      value: formatCurrency(account.value.net_worth_contribution_minor ?? 0),
       auxValue: isTrackingAccount.value ? "Asset" : "Assets",
     },
     {
       key: "recon",
       label: "Reconciliation freshness",
-      value: "Up to date",
-      auxValue: `As of ${formatDateShort()}`,
-      status: { label: "", variant: "positive" as const },
+      value: "Not reconciled",
+      auxValue: "No reconciliation recorded",
+      status: { label: "", variant: "warning" as const },
     },
   ];
 });
@@ -439,23 +595,30 @@ const accountDetails = computed((): KeyValueItem[] => {
     items.push({ label: "Ledger", value: "Cash & equivalents" });
     items.push({ label: "Budget category", value: "System" });
   }
+  if (isInvestmentAccount.value) {
+    items.push({
+      label: "Investment style",
+      value: account.value.investment_self_managed ? "Self-managed" : "Managed",
+    });
+    items.push({
+      label: "Tax treatment",
+      value: formatTaxTreatment(account.value.investment_tax_treatment),
+    });
+  }
   items.push({
     label: "Current balance",
-    value: formatCurrency(account.value.display_balance_minor),
+    value: isBudgetAccount.value
+      ? formatCurrency(account.value.display_balance_minor)
+      : formatOptionalCurrency(accountCurrentValue.value),
   });
   return items;
 });
 
 const reconciliationDetails = computed((): KeyValueItem[] => [
-  { label: "Status", value: "Up to date", variant: "positive" },
-  { label: "Last reconciled", value: formatDateShort() },
-  {
-    label: "Statement balance",
-    value: account.value
-      ? formatCurrency(account.value.display_balance_minor)
-      : "—",
-  },
-  { label: "Difference", value: formatCurrency(0) },
+  { label: "Status", value: "Not reconciled", variant: "warning" },
+  { label: "Last reconciled", value: "—" },
+  { label: "Statement balance", value: "—" },
+  { label: "Difference", value: "—" },
 ]);
 
 const summaryDetails = computed((): KeyValueItem[] => {
@@ -504,13 +667,18 @@ const trackingSummaryDetails = computed((): KeyValueItem[] => {
 
 const migrationContextDetails = computed((): KeyValueItem[] => [
   { label: "Imported from", value: "Google Aspire" },
-  { label: "Imported on", value: "May 15, 2026" },
+  { label: "Imported on", value: "—" },
   { label: "Import type", value: "Net-worth migration" },
 ]);
 
 const historyConfigDetails = computed((): KeyValueItem[] => {
   const items: KeyValueItem[] = [];
-  items.push({ label: "Created", value: formatDateShort() });
+  items.push({
+    label: "Created",
+    value: account.value?.created_at
+      ? formatDateShort(new Date(account.value.created_at))
+      : "—",
+  });
   const latestDate = account.value?.latest_valuation_date;
   if (latestDate) {
     items.push({
@@ -518,16 +686,7 @@ const historyConfigDetails = computed((): KeyValueItem[] => {
       value: formatDateShort(new Date(latestDate + "T00:00:00")),
     });
   }
-  if (isTrackingAccount.value) {
-    items.push({ label: "Snapshot frequency", value: "Daily" });
-  }
   items.push({ label: "Configuration", value: "" });
-  if (isTrackingAccount.value) {
-    items.push({
-      label: "Alerts",
-      value: "Low balance, Large expense",
-    });
-  }
   return items;
 });
 
@@ -553,6 +712,12 @@ const budgetAccountTypeLabel = computed(() => {
   return accountTypeBadge.value?.label ?? account.value.account_class;
 });
 
+const valueAsOfLabel = computed(() => {
+  const effectiveDate = account.value?.value_effective_date;
+  if (!effectiveDate) return "No value recorded";
+  return `As of ${formatDateShort(new Date(`${effectiveDate}T00:00:00`))}`;
+});
+
 const runningBalances = computed(() => {
   let runningBalance = account.value?.display_balance_minor ?? 0;
   const sorted = [...transactions.value].sort(
@@ -575,20 +740,6 @@ const balanceChartPoints = computed(() =>
 
 const moreActions = computed(() => {
   const actions: { key: string; label: string }[] = [];
-  if (isInvestmentAccount.value) {
-    actions.unshift(
-      { key: "contribute", label: "Contribute" },
-      { key: "withdraw", label: "Withdraw" },
-      { key: "reconcile", label: "Reconcile" },
-    );
-  }
-  if (isLoanAccount.value) {
-    actions.unshift(
-      { key: "record-payment", label: "Record payment" },
-      { key: "reconcile", label: "Reconcile" },
-      { key: "edit-loan", label: "Edit loan" },
-    );
-  }
   return actions;
 });
 
@@ -629,6 +780,60 @@ const updateAccountMutation = useMutation({
     invalidateAccountDetailQueries();
   },
 });
+const createValueMutation = useMutation({
+  mutationFn: (payload: {
+    effective_date: string;
+    amount_minor: number;
+    source: string;
+    notes: string;
+  }) =>
+    isTrackingAccount.value
+      ? createTrackingSnapshot(accountId.value, payload)
+      : createTangibleValuation(accountId.value, payload),
+  onSuccess: () => {
+    showValueModal.value = false;
+    queryClient.invalidateQueries({ queryKey: ["tracking-snapshots"] });
+    queryClient.invalidateQueries({ queryKey: ["tangible-valuations"] });
+    invalidateAccountDetailQueries();
+  },
+});
+const reconcileInvestmentMutation = useMutation({
+  mutationFn: (payload: Parameters<typeof reconcileInvestmentStatement>[1]) =>
+    reconcileInvestmentStatement(accountId.value, payload),
+  onSuccess: () => {
+    showInvestmentStatementModal.value = false;
+    queryClient.invalidateQueries({ queryKey: ["investment-statement"] });
+    invalidateAccountDetailQueries();
+  },
+});
+const investmentTransferMutation = useMutation({
+  mutationFn: (payload: Parameters<typeof createInvestmentTransfer>[1]) =>
+    createInvestmentTransfer(accountId.value, payload),
+  onSuccess: () => {
+    showInvestmentTransferModal.value = false;
+    queryClient.invalidateQueries({ queryKey: ["account-budget-links"] });
+    invalidateAccountDetailQueries();
+  },
+});
+const loanPaymentMutation = useMutation({
+  mutationFn: (payload: Parameters<typeof createLoanPayment>[1]) =>
+    createLoanPayment(accountId.value, payload),
+  onSuccess: () => {
+    showLoanPaymentModal.value = false;
+    queryClient.invalidateQueries({ queryKey: ["loan-payments"] });
+    queryClient.invalidateQueries({ queryKey: ["account-budget-links"] });
+    invalidateAccountDetailQueries();
+  },
+});
+const loanStatementMutation = useMutation({
+  mutationFn: (payload: Parameters<typeof reconcileLoanStatement>[1]) =>
+    reconcileLoanStatement(accountId.value, payload),
+  onSuccess: () => {
+    showLoanStatementModal.value = false;
+    queryClient.invalidateQueries({ queryKey: ["loan-snapshots"] });
+    invalidateAccountDetailQueries();
+  },
+});
 const configurationSaving = computed(
   () => updateAccountMutation.isPending.value,
 );
@@ -654,6 +859,194 @@ function invalidateAccountDetailQueries() {
   queryClient.invalidateQueries({ queryKey: ["allocations"] });
   queryClient.invalidateQueries({ queryKey: ["net-worth"] });
 }
+
+function openValueModal() {
+  valueDate.value = new Date().toISOString().slice(0, 10);
+  valueAmount.value = "";
+  valueNotes.value = "";
+  showValueModal.value = true;
+}
+
+function saveValue() {
+  const amountMinor = parseCurrencyMinor(valueAmount.value);
+  if (amountMinor === null) return;
+  createValueMutation.mutate({
+    effective_date: valueDate.value,
+    amount_minor: amountMinor,
+    source: "manual",
+    notes: valueNotes.value,
+  });
+}
+
+function openInvestmentStatementModal() {
+  const statement = investmentStatement.value;
+  investmentStatementDate.value =
+    statement?.effective_date ?? new Date().toISOString().slice(0, 10);
+  investmentStatementCash.value =
+    statement?.cash_balance_minor === null ||
+    statement?.cash_balance_minor === undefined
+      ? ""
+      : String(statement.cash_balance_minor / 100);
+  investmentStatementNotes.value = "";
+  investmentHoldingRows.value = (statement?.holdings ?? []).map((holding) => ({
+    ticker: holding.ticker,
+    quantity: String(holding.quantity_micros / 1_000_000),
+    price: String(holding.price_minor / 100),
+    averageBasis:
+      holding.average_basis_minor === null
+        ? ""
+        : String(holding.average_basis_minor / 100),
+  }));
+  if (investmentHoldingRows.value.length === 0) addInvestmentHoldingRow();
+  showInvestmentStatementModal.value = true;
+}
+
+function addInvestmentHoldingRow() {
+  investmentHoldingRows.value.push({
+    ticker: "",
+    quantity: "",
+    price: "",
+    averageBasis: "",
+  });
+}
+
+function removeInvestmentHoldingRow(index: number) {
+  investmentHoldingRows.value.splice(index, 1);
+}
+
+function saveInvestmentStatement() {
+  const cash = parseCurrencyMinor(investmentStatementCash.value);
+  if (cash === null) return;
+  const holdings = investmentHoldingRows.value.map((holding) => ({
+    ticker: holding.ticker.trim().toUpperCase(),
+    quantity_micros: Math.round(Number(holding.quantity) * 1_000_000),
+    price_minor: parseCurrencyMinor(holding.price) ?? 0,
+    ...(holding.averageBasis.trim()
+      ? { average_basis_minor: parseCurrencyMinor(holding.averageBasis) ?? 0 }
+      : {}),
+  }));
+  reconcileInvestmentMutation.mutate({
+    effective_date: investmentStatementDate.value,
+    cash_balance_minor: cash,
+    holdings,
+    notes: investmentStatementNotes.value,
+  });
+}
+
+function openInvestmentTransferModal(direction: "CONTRIBUTION" | "WITHDRAWAL") {
+  investmentTransferDirection.value = direction;
+  investmentTransferDate.value = new Date().toISOString().slice(0, 10);
+  investmentTransferBudgetAccountId.value =
+    budgetAccountOptions.value[0]?.value ?? "";
+  investmentTransferCategoryId.value =
+    linkedContributionCategoryId.value ??
+    contributionCategoryOptions.value[0]?.value ??
+    "";
+  if (!investmentTransferCategoryId.value) {
+    investmentTransferCategoryId.value =
+      contributionCategoryOptions.value[0]?.value ?? "";
+  }
+  investmentTransferAmount.value = "";
+  investmentTransferMemo.value =
+    direction === "CONTRIBUTION"
+      ? "Investment contribution"
+      : "Investment withdrawal";
+  investmentTransferStatus.value = "CLEARED";
+  investmentTransferFundShortfall.value = true;
+  showInvestmentTransferModal.value = true;
+}
+
+function saveInvestmentTransfer() {
+  const amount = parseCurrencyMinor(investmentTransferAmount.value);
+  if (amount === null || !investmentTransferBudgetAccountId.value) return;
+  investmentTransferMutation.mutate({
+    direction: investmentTransferDirection.value,
+    budget_account_id: investmentTransferBudgetAccountId.value,
+    date: investmentTransferDate.value,
+    amount_minor: amount,
+    status: investmentTransferStatus.value,
+    memo: investmentTransferMemo.value,
+    fund_shortfall: investmentTransferFundShortfall.value,
+    ...(investmentTransferDirection.value === "CONTRIBUTION" &&
+    investmentTransferCategoryId.value
+      ? { contribution_category_id: investmentTransferCategoryId.value }
+      : {}),
+  });
+}
+
+const investmentTransferCanSave = computed(
+  () =>
+    parseCurrencyMinor(investmentTransferAmount.value) !== null &&
+    investmentTransferBudgetAccountId.value.length > 0 &&
+    (investmentTransferDirection.value === "WITHDRAWAL" ||
+      investmentTransferCategoryId.value.length > 0),
+);
+
+function openLoanPaymentModal() {
+  loanPaymentDate.value = new Date().toISOString().slice(0, 10);
+  loanPaymentBudgetAccountId.value = budgetAccountOptions.value[0]?.value ?? "";
+  loanPaymentCategoryId.value =
+    linkedLoanCategoryId.value ||
+    contributionCategoryOptions.value[0]?.value ||
+    "";
+  loanPaymentAmount.value = "";
+  loanPaymentMemo.value = "Loan payment";
+  showLoanPaymentModal.value = true;
+}
+
+function saveLoanPayment() {
+  const amount = parseCurrencyMinor(loanPaymentAmount.value);
+  if (amount === null) return;
+  loanPaymentMutation.mutate({
+    date: loanPaymentDate.value,
+    budget_account_id: loanPaymentBudgetAccountId.value,
+    amount_minor: amount,
+    category_id: loanPaymentCategoryId.value,
+    status: "CLEARED",
+    memo: loanPaymentMemo.value,
+  });
+}
+
+function openLoanStatementModal() {
+  const snapshot = latestLoanSnapshot.value;
+  loanStatementDate.value = new Date().toISOString().slice(0, 10);
+  loanPrincipal.value = snapshot
+    ? String(snapshot.principal_balance_minor / 100)
+    : "";
+  loanAccruedInterest.value = snapshot?.accrued_interest_minor
+    ? String(snapshot.accrued_interest_minor / 100)
+    : "0";
+  loanEscrow.value = snapshot
+    ? String(snapshot.escrow_balance_minor / 100)
+    : "0";
+  loanUnapplied.value = snapshot
+    ? String(snapshot.unapplied_credit_minor / 100)
+    : "0";
+  showLoanStatementModal.value = true;
+}
+
+function saveLoanStatement() {
+  const principal = parseCurrencyMinor(loanPrincipal.value);
+  if (principal === null) return;
+  loanStatementMutation.mutate({
+    effective_date: loanStatementDate.value,
+    principal_balance_minor: principal,
+    accrued_interest_minor: parseCurrencyMinor(loanAccruedInterest.value) ?? 0,
+    escrow_balance_minor: parseCurrencyMinor(loanEscrow.value) ?? 0,
+    unapplied_credit_minor: parseCurrencyMinor(loanUnapplied.value) ?? 0,
+  });
+}
+
+const investmentStatementCanSave = computed(() => {
+  if (parseCurrencyMinor(investmentStatementCash.value) === null) return false;
+  return investmentHoldingRows.value.every(
+    (holding) =>
+      holding.ticker.trim().length > 0 &&
+      Number.isFinite(Number(holding.quantity)) &&
+      Number(holding.quantity) >= 0 &&
+      (parseCurrencyMinor(holding.price) ?? 0) > 0,
+  );
+});
 
 function handleCommitEdit(id: string, payload: TransactionPayload) {
   updateTransactionMutation.mutate({ id, payload });
@@ -757,6 +1150,12 @@ function amountPresetToFilter(
   return {};
 }
 
+function parseCurrencyMinor(value: string): number | null {
+  const amount = Number(value.replace(/[$,]/g, "").trim());
+  if (!Number.isFinite(amount) || amount < 0) return null;
+  return Math.round(amount * 100);
+}
+
 function cleanAccountName(name: string | undefined): string | null {
   if (!name) return null;
   return name.replace(/^[^\p{L}\p{N}]+\s*/u, "").trim() || name;
@@ -768,6 +1167,23 @@ function formatDateShort(date?: Date): string {
     day: "numeric",
     year: "numeric",
   });
+}
+
+function formatOptionalCurrency(
+  amountMinor: number | null | undefined,
+): string {
+  return amountMinor === null || amountMinor === undefined
+    ? "—"
+    : formatCurrency(amountMinor);
+}
+
+function formatTaxTreatment(value: string | null | undefined): string {
+  if (!value) return "—";
+  return value
+    .toLowerCase()
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }
 </script>
 
@@ -825,11 +1241,11 @@ function formatDateShort(date?: Date): string {
           </template>
           <template #actions>
             <Button
-              v-if="isTrackingAccount"
+              v-if="isValuationEntity"
               data-cy="account-detail-add-snapshot"
-              @click="showCutoverModal = false"
+              @click="openValueModal"
             >
-              Add snapshot
+              {{ isTrackingAccount ? "Add snapshot" : "Add valuation" }}
             </Button>
             <Button
               v-if="isTrackingAccount"
@@ -838,6 +1254,44 @@ function formatDateShort(date?: Date): string {
               @click="openCutoverModal"
             >
               Create richer account
+            </Button>
+            <Button
+              v-if="isLoanAccount"
+              data-cy="account-detail-record-payment"
+              @click="openLoanPaymentModal"
+            >
+              Record payment
+            </Button>
+            <Button
+              v-if="isLoanAccount"
+              variant="secondary"
+              data-cy="account-detail-reconcile-loan"
+              @click="openLoanStatementModal"
+            >
+              Reconcile statement
+            </Button>
+            <Button
+              v-if="isInvestmentAccount"
+              data-cy="account-detail-contribute"
+              @click="openInvestmentTransferModal('CONTRIBUTION')"
+            >
+              Contribute
+            </Button>
+            <Button
+              v-if="isInvestmentAccount"
+              variant="secondary"
+              data-cy="account-detail-withdraw"
+              @click="openInvestmentTransferModal('WITHDRAWAL')"
+            >
+              Withdraw
+            </Button>
+            <Button
+              v-if="isInvestmentAccount"
+              variant="secondary"
+              data-cy="account-detail-reconcile-investment"
+              @click="openInvestmentStatementModal"
+            >
+              Reconcile statement
             </Button>
             <Button
               v-if="isBudgetAccount"
@@ -916,12 +1370,12 @@ function formatDateShort(date?: Date): string {
             />
           </svg>
           This tracking account was imported from Google Aspire during net-worth
-          migration on May 15, 2026.
+          migration.
         </div>
 
         <div class="account-detail-page__content">
           <div class="account-detail-page__left">
-            <template v-if="isTrackingAccount">
+            <template v-if="isValuationEntity">
               <section
                 class="account-detail-page__section"
                 data-cy="snapshot-history-section"
@@ -948,12 +1402,16 @@ function formatDateShort(date?: Date): string {
                     />
                   </svg>
                   <h2 class="account-detail-page__section-title">
-                    Snapshot history
+                    {{
+                      isTrackingAccount
+                        ? "Snapshot history"
+                        : "Valuation history"
+                    }}
                   </h2>
                   <span class="account-detail-page__section-count">
-                    {{ trackingSnapshots?.length ?? 0 }} snapshot{{
-                      (trackingSnapshots?.length ?? 0) !== 1 ? "s" : ""
-                    }}
+                    {{ valueHistory.length }}
+                    {{ isTrackingAccount ? "snapshot" : "valuation"
+                    }}{{ valueHistory.length !== 1 ? "s" : "" }}
                   </span>
                 </div>
                 <div class="account-detail-page__snapshot-table">
@@ -965,7 +1423,7 @@ function formatDateShort(date?: Date): string {
                     >
                   </div>
                   <div
-                    v-for="snapshot in trackingSnapshots ?? []"
+                    v-for="snapshot in valueHistory"
                     :key="snapshot.valuation_id"
                     class="account-detail-page__snapshot-row"
                   >
@@ -997,13 +1455,17 @@ function formatDateShort(date?: Date): string {
                 data-cy="tracking-summary-section"
               >
                 <h2 class="account-detail-page__section-title">
-                  Valuation history
+                  {{
+                    isTrackingAccount
+                      ? "Valuation history"
+                      : "Valuation summary"
+                  }}
                 </h2>
                 <p class="account-detail-page__summary-sub">
                   As of {{ formatDateShort() }}
                 </p>
                 <div class="account-detail-page__chart-value">
-                  {{ formatCurrency(account?.display_balance_minor ?? 0) }}
+                  {{ formatOptionalCurrency(accountCurrentValue) }}
                 </div>
                 <p class="account-detail-page__chart-sub">Current value</p>
                 <KeyValueList :items="trackingSummaryDetails" />
@@ -1011,9 +1473,84 @@ function formatDateShort(date?: Date): string {
                   <h3>Notes</h3>
                   <p>No notes yet.</p>
                 </div>
-                <button class="account-detail-page__sidebar-link">
-                  Add note
-                </button>
+              </section>
+            </template>
+
+            <template v-else-if="isLoanAccount">
+              <section
+                class="account-detail-page__section"
+                data-cy="loan-payments-section"
+              >
+                <div class="account-detail-page__section-header">
+                  <h2 class="account-detail-page__section-title">
+                    Payment activity
+                  </h2>
+                  <span class="account-detail-page__section-count">
+                    {{ loanPayments?.length ?? 0 }} payments
+                  </span>
+                </div>
+                <div class="account-detail-page__snapshot-table">
+                  <div class="account-detail-page__snapshot-header">
+                    <span class="account-detail-page__snapshot-th"
+                      >Date / account</span
+                    >
+                    <span
+                      class="account-detail-page__snapshot-th account-detail-page__snapshot-th--end"
+                      >Amount</span
+                    >
+                  </div>
+                  <div
+                    v-for="payment in loanPayments ?? []"
+                    :key="payment.transaction_id"
+                    class="account-detail-page__snapshot-row"
+                  >
+                    <span class="account-detail-page__snapshot-td"
+                      >{{ payment.date }} · {{ payment.account_name }}</span
+                    >
+                    <span
+                      class="account-detail-page__snapshot-td account-detail-page__snapshot-td--end"
+                      >{{
+                        formatCurrency(Math.abs(payment.amount_minor))
+                      }}</span
+                    >
+                  </div>
+                </div>
+              </section>
+              <section
+                class="account-detail-page__section account-detail-page__summary"
+                data-cy="loan-summary-section"
+              >
+                <h2 class="account-detail-page__section-title">
+                  Loan statement summary
+                </h2>
+                <KeyValueList
+                  :items="[
+                    {
+                      label: 'Principal reduction',
+                      value: formatCurrency(
+                        latestLoanSnapshot?.principal_reduction_minor ?? 0,
+                      ),
+                    },
+                    {
+                      label: 'Unknown non-principal',
+                      value: formatCurrency(
+                        latestLoanSnapshot?.unknown_nonprincipal_minor ?? 0,
+                      ),
+                    },
+                    {
+                      label: 'Escrow balance',
+                      value: formatCurrency(
+                        latestLoanSnapshot?.escrow_balance_minor ?? 0,
+                      ),
+                    },
+                    {
+                      label: 'Unapplied credit',
+                      value: formatCurrency(
+                        latestLoanSnapshot?.unapplied_credit_minor ?? 0,
+                      ),
+                    },
+                  ]"
+                />
               </section>
             </template>
 
@@ -1123,6 +1660,47 @@ function formatDateShort(date?: Date): string {
                   Edit notes
                 </button>
               </section>
+              <section
+                v-if="isInvestmentAccount"
+                class="account-detail-page__section account-detail-page__summary"
+                data-cy="holdings-summary-section"
+              >
+                <h2 class="account-detail-page__section-title">
+                  Holdings summary
+                </h2>
+                <p class="account-detail-page__summary-sub">
+                  {{ valueAsOfLabel }}
+                </p>
+                <div
+                  v-if="investmentStatement?.holdings.length"
+                  class="account-detail-page__snapshot-table"
+                >
+                  <div class="account-detail-page__snapshot-header">
+                    <span class="account-detail-page__snapshot-th">Symbol</span>
+                    <span
+                      class="account-detail-page__snapshot-th account-detail-page__snapshot-th--end"
+                      >Value</span
+                    >
+                  </div>
+                  <div
+                    v-for="holding in investmentStatement.holdings"
+                    :key="holding.position_id"
+                    class="account-detail-page__snapshot-row"
+                  >
+                    <span class="account-detail-page__snapshot-td">{{
+                      holding.ticker
+                    }}</span>
+                    <span
+                      class="account-detail-page__snapshot-td account-detail-page__snapshot-td--end"
+                    >
+                      {{ formatCurrency(holding.value_minor) }}
+                    </span>
+                  </div>
+                </div>
+                <p v-else class="account-detail-page__empty">
+                  No statement recorded.
+                </p>
+              </section>
             </template>
           </div>
 
@@ -1158,12 +1736,6 @@ function formatDateShort(date?: Date): string {
                 </svg>
               </div>
               <KeyValueList :items="accountDetails" />
-              <button
-                v-if="isTrackingAccount"
-                class="account-detail-page__sidebar-link"
-              >
-                View budgeting details
-              </button>
             </section>
 
             <section
@@ -1175,9 +1747,6 @@ function formatDateShort(date?: Date): string {
                 Migration / import context
               </h3>
               <KeyValueList :items="migrationContextDetails" />
-              <button class="account-detail-page__sidebar-link">
-                View import details
-              </button>
             </section>
 
             <section
@@ -1234,6 +1803,300 @@ function formatDateShort(date?: Date): string {
               Account type and net-worth inclusion are not configurable here.
               Active financial entities contribute to net worth according to
               their type.
+            </p>
+          </div>
+        </FormModal>
+
+        <FormModal
+          :visible="showLoanPaymentModal"
+          title="Record payment"
+          submit-text="Record payment"
+          :submit-disabled="
+            parseCurrencyMinor(loanPaymentAmount) === null ||
+            !loanPaymentBudgetAccountId ||
+            !loanPaymentCategoryId
+          "
+          :loading="loanPaymentMutation.isPending.value"
+          @submit="saveLoanPayment"
+          @cancel="showLoanPaymentModal = false"
+          @close="showLoanPaymentModal = false"
+        >
+          <div class="account-detail-page__config-form">
+            <DatePicker
+              v-model="loanPaymentDate"
+              label="Date"
+              name="loan-payment-date"
+            />
+            <SelectField
+              v-model="loanPaymentBudgetAccountId"
+              label="Cash account"
+              name="loan-payment-account"
+              :options="budgetAccountOptions"
+            />
+            <CurrencyField
+              v-model="loanPaymentAmount"
+              label="Amount"
+              name="loan-payment-amount"
+            />
+            <SelectField
+              v-model="loanPaymentCategoryId"
+              label="Payment category"
+              name="loan-payment-category"
+              :options="contributionCategoryOptions"
+            />
+            <TextField
+              v-model="loanPaymentMemo"
+              label="Memo"
+              name="loan-payment-memo"
+            />
+            <p class="account-detail-page__config-note">
+              Enter the cash payment only. Principal and non-principal amounts
+              are derived when the lender statement is reconciled.
+            </p>
+          </div>
+        </FormModal>
+
+        <FormModal
+          :visible="showLoanStatementModal"
+          title="Reconcile loan statement"
+          submit-text="Apply statement"
+          :submit-disabled="parseCurrencyMinor(loanPrincipal) === null"
+          :loading="loanStatementMutation.isPending.value"
+          @submit="saveLoanStatement"
+          @cancel="showLoanStatementModal = false"
+          @close="showLoanStatementModal = false"
+        >
+          <div class="account-detail-page__config-form">
+            <DatePicker
+              v-model="loanStatementDate"
+              label="Statement date"
+              name="loan-statement-date"
+            />
+            <CurrencyField
+              v-model="loanPrincipal"
+              label="Principal balance"
+              name="loan-principal"
+            />
+            <CurrencyField
+              v-model="loanAccruedInterest"
+              label="Accrued interest"
+              name="loan-interest"
+            />
+            <CurrencyField
+              v-model="loanEscrow"
+              label="Escrow balance"
+              name="loan-escrow"
+            />
+            <CurrencyField
+              v-model="loanUnapplied"
+              label="Unapplied credit"
+              name="loan-unapplied"
+            />
+            <p class="account-detail-page__config-note">
+              dojo derives aggregate principal reduction and leaves the
+              remaining attributed cash explicitly unknown non-principal.
+            </p>
+          </div>
+        </FormModal>
+
+        <FormModal
+          :visible="showInvestmentTransferModal"
+          :title="
+            investmentTransferDirection === 'CONTRIBUTION'
+              ? 'Contribute to investment account'
+              : 'Withdraw from investment account'
+          "
+          :submit-text="
+            investmentTransferDirection === 'CONTRIBUTION'
+              ? 'Save contribution'
+              : 'Save withdrawal'
+          "
+          :submit-disabled="!investmentTransferCanSave"
+          :loading="investmentTransferMutation.isPending.value"
+          @submit="saveInvestmentTransfer"
+          @cancel="showInvestmentTransferModal = false"
+          @close="showInvestmentTransferModal = false"
+        >
+          <div class="account-detail-page__config-form">
+            <DatePicker
+              v-model="investmentTransferDate"
+              label="Date"
+              name="investment-transfer-date"
+            />
+            <SelectField
+              v-model="investmentTransferBudgetAccountId"
+              :label="
+                investmentTransferDirection === 'CONTRIBUTION'
+                  ? 'From account'
+                  : 'To account'
+              "
+              name="investment-transfer-budget-account"
+              :options="budgetAccountOptions"
+            />
+            <CurrencyField
+              v-model="investmentTransferAmount"
+              label="Amount"
+              name="investment-transfer-amount"
+            />
+            <SelectField
+              v-model="investmentTransferStatus"
+              label="Status"
+              name="investment-transfer-status"
+              :options="[
+                { value: 'CLEARED', label: 'Cleared' },
+                { value: 'PENDING', label: 'Pending' },
+              ]"
+            />
+            <SelectField
+              v-if="investmentTransferDirection === 'CONTRIBUTION'"
+              v-model="investmentTransferCategoryId"
+              label="Linked contribution category"
+              name="investment-transfer-category"
+              :options="contributionCategoryOptions"
+            />
+            <label
+              v-if="investmentTransferDirection === 'CONTRIBUTION'"
+              class="account-detail-page__cutover-checkbox"
+            >
+              <input
+                v-model="investmentTransferFundShortfall"
+                type="checkbox"
+              />
+              <span>
+                Fund any category shortfall from Available to budget before the
+                contribution.
+              </span>
+            </label>
+            <TextField
+              v-model="investmentTransferMemo"
+              label="Memo"
+              name="investment-transfer-memo"
+            />
+            <div class="account-detail-page__cutover-info">
+              <span v-if="investmentTransferDirection === 'CONTRIBUTION'">
+                Category available before contribution:
+                {{
+                  formatCurrency(
+                    selectedContributionCategory?.available_minor ?? 0,
+                  )
+                }}. The transfer creates two ledger legs and does not change net
+                worth or economic spending.
+              </span>
+              <span v-else>
+                Returned cash increases Available to budget. It is not income or
+                investment performance.
+              </span>
+            </div>
+          </div>
+        </FormModal>
+
+        <FormModal
+          :visible="showInvestmentStatementModal"
+          title="Reconcile investment statement"
+          submit-text="Apply statement"
+          :submit-disabled="!investmentStatementCanSave"
+          :loading="reconcileInvestmentMutation.isPending.value"
+          @submit="saveInvestmentStatement"
+          @cancel="showInvestmentStatementModal = false"
+          @close="showInvestmentStatementModal = false"
+        >
+          <div class="account-detail-page__config-form">
+            <DatePicker
+              v-model="investmentStatementDate"
+              label="Statement date"
+              name="investment-statement-date"
+            />
+            <CurrencyField
+              v-model="investmentStatementCash"
+              label="Cash balance"
+              name="investment-statement-cash"
+            />
+            <div class="account-detail-page__statement-holdings">
+              <div class="account-detail-page__section-header">
+                <h3 class="account-detail-page__section-title">Holdings</h3>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  @click="addInvestmentHoldingRow"
+                >
+                  Add holding
+                </Button>
+              </div>
+              <div
+                v-for="(holding, index) in investmentHoldingRows"
+                :key="index"
+                class="account-detail-page__statement-holding"
+              >
+                <TextField
+                  v-model="holding.ticker"
+                  label="Ticker"
+                  :name="`holding-ticker-${index}`"
+                />
+                <TextField
+                  v-model="holding.quantity"
+                  label="Quantity"
+                  :name="`holding-quantity-${index}`"
+                  inputmode="decimal"
+                />
+                <CurrencyField
+                  v-model="holding.price"
+                  label="Statement price"
+                  :name="`holding-price-${index}`"
+                />
+                <CurrencyField
+                  v-model="holding.averageBasis"
+                  label="Average basis"
+                  :name="`holding-basis-${index}`"
+                />
+                <Button
+                  v-if="investmentHoldingRows.length > 1"
+                  variant="tertiary"
+                  size="sm"
+                  @click="removeInvestmentHoldingRow(index)"
+                >
+                  Remove
+                </Button>
+              </div>
+            </div>
+            <TextField
+              v-model="investmentStatementNotes"
+              label="Notes"
+              name="investment-statement-notes"
+            />
+            <p class="account-detail-page__config-note">
+              This statement replaces provisional transfer adjustments through
+              the statement date. Trades, dividends, and interest are reflected
+              by the holdings and cash snapshot.
+            </p>
+          </div>
+        </FormModal>
+
+        <FormModal
+          :visible="showValueModal"
+          :title="isTrackingAccount ? 'Add snapshot' : 'Add valuation'"
+          submit-text="Save"
+          :submit-disabled="parseCurrencyMinor(valueAmount) === null"
+          :loading="createValueMutation.isPending.value"
+          @submit="saveValue"
+          @cancel="showValueModal = false"
+          @close="showValueModal = false"
+        >
+          <div class="account-detail-page__config-form">
+            <DatePicker
+              v-model="valueDate"
+              label="Effective date"
+              name="value-date"
+            />
+            <CurrencyField
+              v-model="valueAmount"
+              :label="isTrackingAccount ? 'Snapshot value' : 'Valuation'"
+              name="value-amount"
+              data-cy="account-detail-value-amount"
+            />
+            <TextField v-model="valueNotes" label="Notes" name="value-notes" />
+            <p class="account-detail-page__config-note">
+              Saving another value for this date corrects the existing dated
+              value while preserving its history.
             </p>
           </div>
         </FormModal>

@@ -337,14 +337,204 @@ export async function createTrackingSnapshot(
     source?: string;
     notes?: string;
   },
-): Promise<TrackingSnapshot> {
-  return request<TrackingSnapshot>(
+): Promise<{ valuation_id: string }> {
+  return request<{ valuation_id: string }>(
     `/api/accounts/${accountId}/tracking-snapshots`,
     {
       method: "POST",
       body: JSON.stringify(payload),
     },
   );
+}
+
+export type TangibleValuation = {
+  valuation_id: string;
+  account_id: string;
+  effective_date: string;
+  amount_minor: number;
+  source: string;
+  notes: string;
+};
+
+export async function fetchTangibleValuations(
+  accountId: string,
+): Promise<TangibleValuation[]> {
+  const response = await request<{ items: TangibleValuation[] }>(
+    `/api/accounts/${accountId}/tangible-valuations`,
+  );
+  return response.items;
+}
+
+export async function createTangibleValuation(
+  accountId: string,
+  payload: {
+    effective_date: string;
+    amount_minor: number;
+    source?: string;
+    notes?: string;
+  },
+): Promise<{ valuation_id: string }> {
+  return request<{ valuation_id: string }>(
+    `/api/accounts/${accountId}/tangible-valuations`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export type InvestmentStatementHolding = {
+  position_id: string;
+  ticker: string;
+  quantity_micros: number;
+  average_basis_minor: number | null;
+  price_minor: number;
+  value_minor: number;
+};
+
+export type InvestmentStatement = {
+  effective_date: string | null;
+  cash_balance_minor: number | null;
+  holdings: InvestmentStatementHolding[];
+  holdings_value_minor: number | null;
+  current_value_minor: number | null;
+  provisional_transfer_minor: number;
+};
+
+export async function fetchLatestInvestmentStatement(
+  accountId: string,
+): Promise<InvestmentStatement> {
+  return request<InvestmentStatement>(
+    `/api/accounts/${accountId}/investment-statements/latest`,
+  );
+}
+
+export async function reconcileInvestmentStatement(
+  accountId: string,
+  payload: {
+    effective_date: string;
+    cash_balance_minor: number;
+    holdings: Array<{
+      ticker: string;
+      quantity_micros: number;
+      price_minor: number;
+      average_basis_minor?: number;
+    }>;
+    notes?: string;
+  },
+): Promise<{ effective_date: string }> {
+  return request(`/api/accounts/${accountId}/investment-statements`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export type AccountBudgetLink = {
+  account_id: string;
+  category_id: string;
+  link_behavior: string;
+  derivation_method: string;
+  effective_date: string;
+};
+
+export async function fetchAccountBudgetLinks(
+  accountId: string,
+): Promise<AccountBudgetLink[]> {
+  const response = await request<{ items: AccountBudgetLink[] }>(
+    `/api/accounts/${accountId}/budget-links`,
+  );
+  return response.items;
+}
+
+export async function createInvestmentTransfer(
+  accountId: string,
+  payload: {
+    direction: "CONTRIBUTION" | "WITHDRAWAL";
+    budget_account_id: string;
+    date: string;
+    amount_minor: number;
+    status: "PENDING" | "CLEARED";
+    memo: string;
+    fund_shortfall: boolean;
+    contribution_category_id?: string;
+  },
+): Promise<{
+  transfer_id: string;
+  source_transaction_id: string;
+  destination_transaction_id: string;
+  funded_shortfall_minor: number;
+  linked_category_id: string | null;
+}> {
+  return request(`/api/accounts/${accountId}/investment-transfers`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export type LoanSnapshot = {
+  snapshot_id: string;
+  account_id: string;
+  effective_date: string;
+  principal_balance_minor: number;
+  accrued_interest_minor: number | null;
+  escrow_balance_minor: number;
+  unapplied_credit_minor: number;
+  attributed_payment_minor: number;
+  principal_reduction_minor: number;
+  unknown_nonprincipal_minor: number;
+  notes: string;
+};
+
+export async function fetchLoanSnapshots(
+  accountId: string,
+): Promise<LoanSnapshot[]> {
+  const response = await request<{ items: LoanSnapshot[] }>(
+    `/api/accounts/${accountId}/loan-snapshots`,
+  );
+  return response.items;
+}
+
+export async function reconcileLoanStatement(
+  accountId: string,
+  payload: {
+    effective_date: string;
+    principal_balance_minor: number;
+    accrued_interest_minor?: number;
+    escrow_balance_minor: number;
+    unapplied_credit_minor: number;
+    notes?: string;
+  },
+): Promise<{ snapshot_id: string }> {
+  return request(`/api/accounts/${accountId}/loan-snapshots`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function createLoanPayment(
+  accountId: string,
+  payload: {
+    date: string;
+    budget_account_id: string;
+    amount_minor: number;
+    category_id: string;
+    status: "PENDING" | "CLEARED";
+    memo: string;
+  },
+): Promise<{ transaction_id: string }> {
+  return request(`/api/accounts/${accountId}/loan-payments`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function fetchLoanPayments(
+  accountId: string,
+): Promise<Transaction[]> {
+  const response = await request<{ items: Transaction[] }>(
+    `/api/accounts/${accountId}/loan-payments`,
+  );
+  return response.items;
 }
 
 export async function createCategoryGroup(

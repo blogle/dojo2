@@ -12,13 +12,20 @@ The observable result is that mocks 01 through 07 are represented by working scr
 
 - [x] (2026-07-31) Audited current screens, API, persistence, tests, SPEC.md, and mocks 01–07.
 - [x] (2026-07-31) Resolved product decisions for value signs, effective dates, investments, loan attribution, escrow, and one-to-many cutover.
-- [ ] Milestone 1: implement one type-aware as-of value resolver and truthful overview/detail data.
-- [ ] Milestone 2: complete tracking snapshot correction and tangible valuation flows.
-- [ ] Milestone 3: complete investment statement reconciliation and holdings-plus-cash valuation.
-- [ ] Milestone 4: complete investment contribution and withdrawal operations.
-- [ ] Milestone 5: complete loan payment attribution and aggregate statement reconciliation.
+- [x] (2026-07-31) Milestone 1: implemented a type-aware current/effective-date value resolver and removed fabricated overview/detail values.
+- [x] (2026-07-31) Milestone 2: completed tracking snapshot correction and tangible valuation flows with SCD history and focused Cypress coverage.
+- [ ] Milestone 3 (backend and UI implemented; remaining: focused Cypress and statement-correction edge tests): complete investment statement reconciliation and holdings-plus-cash valuation.
+- [ ] Milestone 4 (backend and UI implemented; remaining: focused Cypress and preview refinement): complete investment contribution and withdrawal operations.
+- [ ] Milestone 5 (backend and UI implemented; remaining: focused Cypress, edit-attribution tests, and chart dispatch): complete loan payment attribution and aggregate statement reconciliation.
 - [ ] Milestone 6: complete one-to-many tracking cutover.
 - [ ] Milestone 7: close mock-alignment gaps, remove inert controls, and run full verification.
+- [x] (2026-08-01) Completed product-owner manual validation of tracking, tangible, investment, and loan flows; captured accepted remediation decisions below.
+- [ ] Remediation A: correct Aspire terminology, block future effective dates, and add the shared institution combobox.
+- [ ] Remediation B: move investment/loan category links to account configuration and remove per-operation relationship selection.
+- [ ] Remediation C: fix same-day provisional investment value, derived monthly activity, and category spending history; preserve withdrawal-to-ATB behavior.
+- [ ] Remediation D: support cash-only statements and complete investment edge/Cypress coverage.
+- [ ] Remediation E: require opening current principal, simplify statement inputs, add amortization estimates/YTD checkpoints, and present escrow as a separate restricted asset.
+- [ ] Remediation F: replace tracking reconciliation language with snapshot source/date/freshness.
 
 ## Surprises & Discoveries
 
@@ -30,6 +37,37 @@ The observable result is that mocks 01 through 07 are represented by working scr
 
 - Observation: Existing investment and loan transfer property tests use budget accounts as both endpoints, so they do not prove rich-account net-worth neutrality.
   Evidence: `api/tests/test_properties.py` investment and loan transfer scenarios do not create investment or loan account classes.
+
+- Observation: The focused rich-account integration tests now prove investment transfer neutrality and loan aggregate reconciliation, but the existing property suite still needs generators that create real rich account classes.
+  Evidence: `api/tests/test_account_values.py` covers holdings-plus-cash, provisional transfer deltas, linked-category funding, withdrawal ATB return, and loan principal/non-principal derivation.
+
+- Observation: A contribution recorded after an investment statement on the same date is excluded from provisional value.
+  Evidence: `investment_transfer_delta_after_date.sql` uses only `date > statement_date`; it needs same-day record-version ordering.
+
+- Observation: Linked contribution transfers change all-time category availability but not monthly Activity or category spending history.
+  Evidence: `list_categories()` subtracts `link_derived_by_cat` from available while `month_activity_minor` reads only transactions with `category_id`; transfer legs intentionally have only `system_category`.
+
+- Observation: Auto-funding a contribution shortfall increased the category's Budgeted amount while missing derived Activity made the category appear to gain money.
+  Evidence: Product-owner validation contributed $1,000; Available to budget decreased and the linked category budgeted value increased, but Activity remained zero.
+
+- Observation: Current mortgage net worth silently combines principal liability and escrow asset.
+  Evidence: Principal `$770,168.00` less escrow `$4,060.83` produced `-$766,107.17`; the arithmetic is correct under the prior policy but the presentation was not understandable.
+
+## Known Defects From Manual Validation
+
+- User-facing copy says “Google Aspire”; the correct product name is “Aspire Budgeting,” with Google Sheets described only as the storage platform.
+- Future effective dates are accepted without blocking, allowing accidental zero-current-value entities.
+- Institution entry is inconsistent free text rather than a shared suggestion-enabled combobox.
+- Investment and loan operations ask for relationship categories instead of using account configuration.
+- Contribution UI does not clearly show the linked category's current available balance and resulting balance.
+- Same-day cleared contributions do not update provisional investment value.
+- Derived contribution Activity and spending-history rows are missing.
+- Cash-only investment reconciliation is obstructed by a mandatory blank holding row.
+- Loan creation records original amount but not current principal/as-of, so current obligation begins unavailable.
+- Loan reconciliation overemphasizes accrued interest and unapplied credit, which many lenders do not expose.
+- Missing loan-derived values display as zero instead of Awaiting statement/Unavailable.
+- Escrow is silently netted into the loan contribution instead of appearing as a restricted asset.
+- Tracking exposes premature reconciliation language even though snapshot entry is the complete current workflow.
 
 ## Decision Log
 
@@ -57,9 +95,25 @@ The observable result is that mocks 01 through 07 are represented by working scr
   Rationale: Imported Aspire categories can combine several real accounts. Matching the final predecessor value to successor openings makes cutover net-worth neutral and auditable.
   Date/Author: 2026-07-31 / product owner and opencode
 
+- Decision: Future snapshots and statements are rejected; future dating remains specific to cutover.
+  Rationale: Manual entry of a future tangible valuation looked like a broken zero-value entity and did not provide enough benefit to justify accidental scheduling.
+  Date/Author: 2026-08-01 / product owner and opencode
+
+- Decision: Tracking snapshots do not have a separate reconciliation workflow in this phase.
+  Rationale: Snapshot entry already establishes the tracking account's value. Source/date/freshness is truthful without inventing generic reconciliation evidence.
+  Date/Author: 2026-08-01 / product owner and opencode
+
+- Decision: Mortgage escrow is a separately presented restricted asset.
+  Rationale: Silently subtracting escrow from the principal liability produced a surprising account contribution even though the aggregate arithmetic was explainable.
+  Date/Author: 2026-08-01 / product owner and opencode
+
+- Decision: Loan projections use contractual terms and reset to actual principal at reconciliation.
+  Rationale: This supports interest/principal estimates and amortization without requiring unavailable accrued-interest or per-payment statement splits. Optional YTD lender totals provide actual checkpoints.
+  Date/Author: 2026-08-01 / product owner and opencode
+
 ## Outcomes & Retrospective
 
-Implementation has not started. The requirements and dependency order are now explicit, and Dashboard work is blocked until this plan's acceptance behavior passes.
+Milestones 1 and 2 are implemented. Investment and loan backend/UI paths are present and pass focused integration/type/lint checks, but manual validation found the known defects listed above. Those defects now precede one-to-many cutover and final mock/browser alignment. Dashboard work remains blocked.
 
 ## Context and Orientation
 

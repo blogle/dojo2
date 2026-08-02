@@ -53,7 +53,7 @@ test-property:
 
 test-integration:
 	@printf '==> running backend integration tests\n'
-	cd api && uv run python -m pytest tests/test_health.py tests/test_api_endpoints.py tests/test_budget_formulas.py tests/test_scd.py tests/test_migrations.py
+	cd api && uv run python -m pytest tests/test_health.py tests/test_api_endpoints.py tests/test_budget_formulas.py tests/test_account_values.py tests/test_scd.py tests/test_migrations.py
 
 test-e2e:
 	@printf 'No deterministic Cypress browser e2e suite is configured yet; Cypress component testing is available under `just test-web`.\n'

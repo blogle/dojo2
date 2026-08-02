@@ -541,3 +541,24 @@ Tracking cutover supports one predecessor to many richer successors. It atomical
 - Cleared investment transfers preserve net worth immediately but remain visibly provisional until the next statement snapshot supersedes them.
 - Historical Aspire transactions and investment events are not backfilled into richer records.
 - The full generic reconciliation review remains a later phase; this work adds only the statement capture and evidence required for correct entity values.
+
+## 2026-08-01 — Refine rich-account UX from hands-on validation
+
+### Context
+
+Manual validation found that same-day investment contributions did not update provisional value, derived category activity was absent from monthly activity/history, relationship categories were selected during each operation, future values could be entered accidentally, and mortgage escrow was silently netted into the loan contribution. Loan statement dashboards also do not consistently expose accrued-interest or unapplied-credit aggregates.
+
+### Decision
+
+Block future snapshot and statement dates. Configure investment contribution and loan payment category links on the account, not per operation. Resolve same-day investment ordering with financial date plus record-version timestamp. Surface derived contributions in category activity/history while keeping transfer legs account-centric; withdrawals bypass the linked category and return to Available to budget.
+
+Treat tracking snapshots as the complete tracking-value workflow until generic reconciliation exists. Present mortgage escrow as a separate restricted asset instead of silently netting it into the loan liability. Require current principal at loan creation, keep accrued interest and unapplied credit optional/advanced, and support estimated amortization from contractual loan terms with optional lender-confirmed YTD principal and interest checkpoints.
+
+Use one shared free-text institution combobox with curated and previously used suggestions.
+
+### Consequence
+
+- Existing rich-account UI is a checkpoint, not accepted behavior; the defects above must be remediated before cutover work.
+- Actual, derived, estimated, provisional, and unknown values require explicit labels.
+- Cash-only investment statements are valid.
+- The A&L overview needs a visible restricted-assets presentation when escrow contributes to total assets.

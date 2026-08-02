@@ -52,6 +52,20 @@ export type Account = {
   tracking_source?: string | null;
   latest_valuation_minor?: number | null;
   latest_valuation_date?: string | null;
+  current_value_minor?: number | null;
+  net_worth_contribution_minor?: number;
+  value_source?: string;
+  value_effective_date?: string | null;
+  change_30d_minor?: number | null;
+  reconciliation_status?: "CURRENT" | "NOT_RECONCILED" | "PROVISIONAL";
+  provisional_value_minor?: number;
+  investment_self_managed?: boolean | null;
+  investment_tax_treatment?: string | null;
+  loan_original_amount_minor?: number | null;
+  loan_origination_date?: string | null;
+  loan_rate_minor?: number | null;
+  loan_status?: string | null;
+  created_at?: string;
   metadata?: string | null;
 };
 
@@ -237,6 +251,7 @@ export type TransactionPayload = {
 export type AssetsLiabilitiesItem = Account & {
   value_minor: number;
   source_of_truth: string;
+  attention_status: "CURRENT" | "NOT_RECONCILED" | "MISSING_VALUE";
 };
 
 export type AssetsLiabilitiesGroup = {
@@ -249,6 +264,7 @@ export type AssetsLiabilitiesResponse = {
   assets_minor: number;
   liabilities_minor: number;
   net_worth_minor: number;
+  change_30d_minor: number | null;
   needs_attention_count: number;
   groups: AssetsLiabilitiesGroup[];
 };

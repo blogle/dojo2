@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 
 from dojo.api.models import (
+    AccountBudgetLinkPayload,
     AccountPayload,
     AccountUpdatePayload,
     AllocationRequest,
@@ -20,7 +21,10 @@ from dojo.api.models import (
     InvestmentCashSnapshotPayload,
     InvestmentPositionPayload,
     InvestmentPriceSnapshotPayload,
+    InvestmentStatementPayload,
+    InvestmentTransferPayload,
     LoanBalanceSnapshotPayload,
+    LoanPaymentPayload,
     TangibleAssetValuationPayload,
     TrackingAccountSnapshotPayload,
     TransactionPayload,
@@ -412,6 +416,37 @@ def list_positions(request: Request, account_id: str) -> dict[str, Any]:
     return {"items": get_service(request).list_investment_positions(account_id)}
 
 
+@router.post("/accounts/{account_id}/investment-statements")
+def reconcile_investment_statement(
+    request: Request, account_id: str, payload: InvestmentStatementPayload
+) -> dict[str, Any]:
+    return get_service(request).reconcile_investment_statement(account_id, payload.model_dump())
+
+
+@router.get("/accounts/{account_id}/investment-statements/latest")
+def latest_investment_statement(request: Request, account_id: str) -> dict[str, Any]:
+    return get_service(request).latest_investment_statement(account_id)
+
+
+@router.get("/accounts/{account_id}/budget-links")
+def account_budget_links(request: Request, account_id: str) -> dict[str, Any]:
+    return {"items": get_service(request).list_account_budget_links(account_id)}
+
+
+@router.put("/accounts/{account_id}/budget-links")
+def set_account_budget_link(
+    request: Request, account_id: str, payload: AccountBudgetLinkPayload
+) -> dict[str, Any]:
+    return get_service(request).set_account_budget_link(account_id, payload.model_dump())
+
+
+@router.post("/accounts/{account_id}/investment-transfers")
+def create_investment_transfer(
+    request: Request, account_id: str, payload: InvestmentTransferPayload
+) -> dict[str, Any]:
+    return get_service(request).create_investment_transfer(account_id, payload.model_dump())
+
+
 @router.post("/accounts/{account_id}/cash-snapshots")
 def create_cash_snapshot(
     request: Request, account_id: str, payload: "InvestmentCashSnapshotPayload"
@@ -458,6 +493,18 @@ def create_loan_snapshot(
 @router.get("/accounts/{account_id}/loan-snapshots")
 def list_loan_snapshots(request: Request, account_id: str) -> dict[str, Any]:
     return {"items": get_service(request).list_loan_snapshots(account_id)}
+
+
+@router.post("/accounts/{account_id}/loan-payments")
+def create_loan_payment(
+    request: Request, account_id: str, payload: LoanPaymentPayload
+) -> dict[str, Any]:
+    return get_service(request).create_loan_payment(account_id, payload.model_dump())
+
+
+@router.get("/accounts/{account_id}/loan-payments")
+def list_loan_payments(request: Request, account_id: str) -> dict[str, Any]:
+    return {"items": get_service(request).list_loan_payments(account_id)}
 
 
 @router.post("/accounts/{account_id}/tangible-valuations")
