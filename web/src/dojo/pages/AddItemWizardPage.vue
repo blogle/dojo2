@@ -1,15 +1,21 @@
 <script setup lang="ts">
-import { useMutation, useQueryClient } from "@tanstack/vue-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
 import { computed, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
-import { createAccount } from "@/dojo/api/client";
+import {
+  createAccount,
+  fetchAccounts,
+  fetchCategories,
+} from "@/dojo/api/client";
 import Button from "@/dojo/components/actions/Button.vue";
 import CurrencyField from "@/dojo/components/forms/CurrencyField.vue";
 import DatePicker from "@/dojo/components/forms/DatePicker.vue";
+import InstitutionCombobox from "@/dojo/components/forms/InstitutionCombobox.vue";
 import SelectField from "@/dojo/components/forms/SelectField.vue";
 import TextField from "@/dojo/components/forms/TextField.vue";
 import AssetsLiabilitiesPage from "@/dojo/pages/AssetsLiabilitiesPage.vue";
+import { institutionSuggestions } from "@/dojo/utils/institutions";
 
 type EntityType =
   | "budget-account"
@@ -69,6 +75,31 @@ const entityTypeKeys = new Set(entityTypes.map((type) => type.key));
 const route = useRoute();
 const router = useRouter();
 const queryClient = useQueryClient();
+const currentDate = new Date().toISOString().slice(0, 10);
+
+const { data: existingAccounts } = useQuery({
+  queryKey: ["accounts", { showHidden: true }],
+  queryFn: () => fetchAccounts(true),
+});
+
+const suggestedInstitutions = computed(() =>
+  institutionSuggestions(
+    existingAccounts.value?.map((account) => account.institution) ?? [],
+  ),
+);
+const { data: categoriesResponse } = useQuery({
+  queryKey: ["categories", currentDate.slice(0, 7)],
+  queryFn: () => fetchCategories(currentDate.slice(0, 7), false),
+});
+const categoryOptions = computed(() =>
+  (categoriesResponse.value?.items ?? [])
+    .filter((category) => category.category_kind === "STANDARD")
+    .map((category) => ({ value: category.category_id, label: category.name })),
+);
+const investmentCategoryOptions = computed(() => [
+  { value: "", label: "Do not link a category yet" },
+  ...categoryOptions.value,
+]);
 
 const initialType = Array.isArray(route.query.type)
   ? route.query.type[0]
@@ -91,9 +122,20 @@ const form = reactive({
   apyPercent: "",
   investmentSelfManaged: "false",
   investmentTaxTreatment: "TAXABLE_BROKERAGE",
+  investmentContributionCategoryId: "",
+  loanPaymentCategoryId: "",
+  currentPrincipal: "",
+  currentPrincipalAsOf: currentDate,
   originalAmount: "",
   originationDate: "",
   ratePercent: "",
+  rateType: "FIXED",
+  scheduledPrincipalInterest: "",
+  paymentFrequency: "MONTHLY",
+  nextPaymentDate: "",
+  maturityDate: "",
+  remainingTermMonths: "",
+  recurringExtraPrincipal: "",
   openingValuation: "",
   openingValuationDate: "",
 });
@@ -117,7 +159,13 @@ const canContinue = computed(() => {
     return selectedType.value !== null;
   }
   if (step.value === 2) {
-    return form.name.trim().length > 0;
+    const hasRequiredCategory =
+      selectedType.value === "loan"
+        ? form.loanPaymentCategoryId.length > 0 &&
+          parseCurrencyMinor(form.currentPrincipal) !== undefined &&
+          form.currentPrincipalAsOf.length > 0
+        : true;
+    return form.name.trim().length > 0 && hasRequiredCategory;
   }
   return true;
 });
@@ -216,15 +264,43 @@ const buildPayload = () => {
   } else if (selectedType.value === "investment-account") {
     payload.self_managed = form.investmentSelfManaged === "true";
     payload.tax_treatment = form.investmentTaxTreatment;
+    if (form.investmentContributionCategoryId) {
+      payload.investment_contribution_category_id =
+        form.investmentContributionCategoryId;
+    }
   } else if (selectedType.value === "loan") {
+    payload.current_principal_minor = parseCurrencyMinor(form.currentPrincipal);
+    payload.current_principal_as_of = form.currentPrincipalAsOf;
     const originalAmountMinor = parseCurrencyMinor(form.originalAmount);
     const rateMinor = parsePercentMinor(form.ratePercent);
+    const scheduledPaymentMinor = parseCurrencyMinor(
+      form.scheduledPrincipalInterest,
+    );
+    const recurringExtraMinor = parseCurrencyMinor(
+      form.recurringExtraPrincipal,
+    );
     if (originalAmountMinor !== undefined) {
       payload.original_amount_minor = originalAmountMinor;
     }
     if (form.originationDate) payload.origination_date = form.originationDate;
     if (rateMinor !== undefined) payload.rate_minor = rateMinor;
+    if (rateMinor !== undefined) payload.rate_type = form.rateType;
+    if (scheduledPaymentMinor !== undefined) {
+      payload.scheduled_principal_interest_minor = scheduledPaymentMinor;
+    }
+    if (form.nextPaymentDate) {
+      payload.next_payment_date = form.nextPaymentDate;
+      payload.payment_frequency = form.paymentFrequency;
+    }
+    if (form.maturityDate) payload.maturity_date = form.maturityDate;
+    if (form.remainingTermMonths) {
+      payload.remaining_term_months = Number(form.remainingTermMonths);
+    }
+    if (recurringExtraMinor !== undefined) {
+      payload.recurring_extra_principal_minor = recurringExtraMinor;
+    }
     payload.status = "IN_REPAYMENT";
+    payload.loan_payment_category_id = form.loanPaymentCategoryId;
   } else if (selectedType.value === "tangible-asset") {
     const openingValuationMinor = parseCurrencyMinor(form.openingValuation);
     if (openingValuationMinor !== undefined) {
@@ -468,11 +544,10 @@ const backWizard = () => {
               placeholder="Account or item name"
               data-cy="add-item-name"
             />
-            <TextField
+            <InstitutionCombobox
               v-model="form.institution"
-              label="Institution"
               name="institution"
-              placeholder="Optional"
+              :options="suggestedInstitutions"
             />
             <TextField
               v-model="form.accountNumberLast4"
@@ -520,9 +595,32 @@ const backWizard = () => {
                 name="tax-treatment"
                 :options="taxTreatmentOptions"
               />
+              <SelectField
+                v-model="form.investmentContributionCategoryId"
+                label="Contribution category"
+                name="investment-contribution-category"
+                :options="investmentCategoryOptions"
+              />
             </template>
 
             <template v-else-if="selectedType === 'loan'">
+              <SelectField
+                v-model="form.loanPaymentCategoryId"
+                label="Payment category"
+                name="loan-payment-category"
+                :options="categoryOptions"
+              />
+              <CurrencyField
+                v-model="form.currentPrincipal"
+                label="Current principal"
+                name="current-principal"
+              />
+              <DatePicker
+                v-model="form.currentPrincipalAsOf"
+                label="Principal as of"
+                name="current-principal-as-of"
+                :max="currentDate"
+              />
               <CurrencyField
                 v-model="form.originalAmount"
                 label="Original amount"
@@ -541,6 +639,54 @@ const backWizard = () => {
                 placeholder="Optional percent"
                 inputmode="decimal"
               />
+              <SelectField
+                v-model="form.rateType"
+                label="Rate type"
+                name="rate-type"
+                :options="[
+                  { value: 'FIXED', label: 'Fixed' },
+                  { value: 'VARIABLE', label: 'Variable' },
+                ]"
+              />
+              <CurrencyField
+                v-model="form.scheduledPrincipalInterest"
+                label="Scheduled principal and interest"
+                name="scheduled-principal-interest"
+                placeholder="Optional"
+              />
+              <SelectField
+                v-model="form.paymentFrequency"
+                label="Payment frequency"
+                name="payment-frequency"
+                :options="[
+                  { value: 'MONTHLY', label: 'Monthly' },
+                  { value: 'BIWEEKLY', label: 'Every two weeks' },
+                  { value: 'WEEKLY', label: 'Weekly' },
+                ]"
+              />
+              <DatePicker
+                v-model="form.nextPaymentDate"
+                label="Next payment date"
+                name="next-payment-date"
+              />
+              <DatePicker
+                v-model="form.maturityDate"
+                label="Maturity date"
+                name="maturity-date"
+              />
+              <TextField
+                v-model="form.remainingTermMonths"
+                label="Remaining term in months"
+                name="remaining-term-months"
+                placeholder="Optional"
+                inputmode="numeric"
+              />
+              <CurrencyField
+                v-model="form.recurringExtraPrincipal"
+                label="Recurring extra principal"
+                name="recurring-extra-principal"
+                placeholder="Optional"
+              />
             </template>
 
             <template v-else-if="selectedType === 'tangible-asset'">
@@ -554,6 +700,7 @@ const backWizard = () => {
                 v-model="form.openingValuationDate"
                 label="Valuation date"
                 name="opening-valuation-date"
+                :max="currentDate"
               />
             </template>
           </div>

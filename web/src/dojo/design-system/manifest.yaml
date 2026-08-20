@@ -62,6 +62,8 @@ sections:
         fixture: forms/TextField.fixtures.ts
       - component: SelectField
         fixture: forms/SelectField.fixtures.ts
+      - component: InstitutionCombobox
+        fixture: forms/InstitutionCombobox.fixtures.ts
       - component: IconPicker
         fixture: forms/IconPicker.fixtures.ts
       - component: CurrencyField

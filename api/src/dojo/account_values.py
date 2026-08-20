@@ -13,6 +13,9 @@ class AccountValue:
     change_minor: int | None
     reconciliation_status: str
     provisional_minor: int = 0
+    liability_minor: int = 0
+    restricted_asset_minor: int = 0
+    unapplied_credit_minor: int = 0
 
 
 def asset_value(

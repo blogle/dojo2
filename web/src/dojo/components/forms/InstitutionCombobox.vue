@@ -1,61 +1,62 @@
 <script setup lang="ts">
+import { computed, useId } from "vue";
+
 withDefaults(
   defineProps<{
     modelValue?: string;
+    options?: string[];
     label?: string;
     helper?: string;
     error?: string;
     disabled?: boolean;
     name?: string;
-    max?: string;
+    placeholder?: string;
   }>(),
   {
-    modelValue: undefined,
-    label: undefined,
+    modelValue: "",
+    options: () => [],
+    label: "Institution",
     helper: undefined,
     error: undefined,
     disabled: false,
     name: undefined,
-    max: undefined,
+    placeholder: "Type or choose an institution",
   },
 );
 
 const emit = defineEmits<{
   "update:modelValue": [value: string];
 }>();
+
+const generatedId = useId();
+const listId = computed(() => `institution-options-${generatedId}`);
 </script>
 
 <template>
-  <label class="field" data-cy="date-picker-root">
-    <span v-if="label || $slots.label" class="field__label">
-      <slot name="label">{{ label }}</slot>
-    </span>
-
-    <span class="field__control-shell">
-      <span class="field__prefix" aria-hidden="true">📅</span>
-
-      <input
-        class="field__control field__control--with-prefix"
-        :value="modelValue"
-        :disabled="disabled"
-        type="date"
-        :name="name"
-        :max="max"
-        @input="
-          emit('update:modelValue', ($event.target as HTMLInputElement).value)
-        "
-      />
-    </span>
-
+  <label class="field" data-cy="institution-combobox-root">
+    <span v-if="label" class="field__label">{{ label }}</span>
+    <input
+      class="field__control"
+      type="text"
+      :value="modelValue"
+      :disabled="disabled"
+      :name="name"
+      :placeholder="placeholder"
+      :list="listId"
+      autocomplete="organization"
+      @input="
+        emit('update:modelValue', ($event.target as HTMLInputElement).value)
+      "
+    />
+    <datalist :id="listId">
+      <option v-for="option in options" :key="option" :value="option" />
+    </datalist>
     <span v-if="error" class="field__message field__message--error">{{
       error
     }}</span>
-    <span
-      v-else-if="helper || $slots.helper"
-      class="field__message field__message--helper"
-    >
-      <slot name="helper">{{ helper }}</slot>
-    </span>
+    <span v-else-if="helper" class="field__message field__message--helper">{{
+      helper
+    }}</span>
   </label>
 </template>
 
@@ -75,19 +76,6 @@ const emit = defineEmits<{
   color: var(--color-on-surface-muted);
 }
 
-.field__control-shell {
-  position: relative;
-  display: flex;
-  align-items: center;
-}
-
-.field__prefix {
-  position: absolute;
-  left: 10px;
-  color: var(--color-on-surface-muted);
-  pointer-events: none;
-}
-
 .field__control {
   width: 100%;
   min-height: 36px;
@@ -100,10 +88,6 @@ const emit = defineEmits<{
   font-size: var(--text-body-md-font-size);
   font-weight: var(--text-body-md-font-weight);
   line-height: var(--text-body-md-line-height);
-}
-
-.field__control--with-prefix {
-  padding-left: 28px;
 }
 
 .field__control:disabled {

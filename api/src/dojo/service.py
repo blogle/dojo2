@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 from time import perf_counter
@@ -49,6 +51,7 @@ from dojo.importer import (
     fixture_bundle,
     parse_named_range_workbook,
 )
+from dojo.loan_projection import LoanProjectionTerms, PaymentFrequency, project_loan
 from dojo.scd import (
     batch_insert_versions,
     close_current_version,
@@ -1149,11 +1152,25 @@ class DojoService:
         balances = self._account_balances(today)
         previous_balances = self._account_balances(today - timedelta(days=30))
         values = self._account_values(accounts, balances, previous_balances, today)
+        cutover_relations = self.db.fetch_all(load_sql("queries/tracking_cutover_relations"))
+        retired_predecessors = {
+            str(row["predecessor_account_id"])
+            for row in cutover_relations
+            if row["cutover_date"] <= today
+        }
+        pending_successors = {
+            str(row["successor_account_id"])
+            for row in cutover_relations
+            if row["cutover_date"] > today
+        }
         results = []
         for account in accounts:
-            if account["is_hidden"] and not show_hidden:
+            account_id = str(account["account_id"])
+            effective_active = bool(account["is_active"]) and account_id not in (
+                retired_predecessors | pending_successors
+            )
+            if (account["is_hidden"] or not effective_active) and not show_hidden:
                 continue
-            account_id = account["account_id"]
             account_balances = balances.get(account_id, {"actual": 0, "pending": 0, "cleared": 0})
             display_balance = account_balances["actual"]
             if account.get(
@@ -1164,6 +1181,7 @@ class DojoService:
             results.append(
                 account
                 | {
+                    "is_active": effective_active,
                     "actual_balance_minor": account_balances["actual"],
                     "pending_balance_minor": account_balances["pending"],
                     "cleared_balance_minor": account_balances["cleared"],
@@ -1177,6 +1195,9 @@ class DojoService:
                     "change_30d_minor": value.change_minor,
                     "reconciliation_status": value.reconciliation_status,
                     "provisional_value_minor": value.provisional_minor,
+                    "liability_component_minor": value.liability_minor,
+                    "restricted_asset_component_minor": value.restricted_asset_minor,
+                    "unapplied_credit_component_minor": value.unapplied_credit_minor,
                     # Compatibility aliases for the current frontend while detail
                     # pages migrate to the explicit value contract.
                     "latest_valuation_minor": value.current_value_minor,
@@ -1193,6 +1214,7 @@ class DojoService:
             "CASH": [],
             "INVESTMENTS": [],
             "TANGIBLE_ASSETS": [],
+            "RESTRICTED_ASSETS": [],
             "TRACKING_ASSETS": [],
             "CREDIT": [],
             "LOANS": [],
@@ -1202,6 +1224,7 @@ class DojoService:
             "CASH": 0,
             "INVESTMENTS": 0,
             "TANGIBLE_ASSETS": 0,
+            "RESTRICTED_ASSETS": 0,
             "TRACKING_ASSETS": 0,
             "CREDIT": 0,
             "LOANS": 0,
@@ -1219,7 +1242,11 @@ class DojoService:
             value = account.get("current_value_minor")
             net_worth = int(account.get("net_worth_contribution_minor", 0))
             attention_status = (
-                "MISSING_VALUE" if value is None else account["reconciliation_status"]
+                "AWAITING_STATEMENT"
+                if value is None and account_class == ACCOUNT_CLASS_LOAN
+                else "MISSING_VALUE"
+                if value is None
+                else account["reconciliation_status"]
             )
             if attention_status != "CURRENT":
                 needs_attention += 1
@@ -1259,10 +1286,38 @@ class DojoService:
                     group_totals["TRACKING_ASSETS"] += amount
                     asset_total += max(amount, 0)
             elif account_class == ACCOUNT_CLASS_LOAN:
-                amount = net_worth
-                groups["LOANS"].append(item)
-                group_totals["LOANS"] += amount
-                liability_total += amount
+                liability = int(account.get("liability_component_minor", 0))
+                escrow = int(account.get("restricted_asset_component_minor", 0))
+                unapplied = int(account.get("unapplied_credit_component_minor", 0))
+                groups["LOANS"].append(item | {"value_minor": liability})
+                group_totals["LOANS"] += liability
+                liability_total += liability
+                if escrow:
+                    groups["RESTRICTED_ASSETS"].append(
+                        item
+                        | {
+                            "presentation_id": f"{account['account_id']}:escrow",
+                            "name": f"{account['name']} escrow",
+                            "value_minor": escrow,
+                            "change_30d_minor": None,
+                            "component_kind": "ESCROW",
+                        }
+                    )
+                    group_totals["RESTRICTED_ASSETS"] += escrow
+                    asset_total += escrow
+                if unapplied:
+                    groups["RESTRICTED_ASSETS"].append(
+                        item
+                        | {
+                            "presentation_id": f"{account['account_id']}:unapplied-credit",
+                            "name": f"{account['name']} unapplied credit",
+                            "value_minor": unapplied,
+                            "change_30d_minor": None,
+                            "component_kind": "UNAPPLIED_CREDIT",
+                        }
+                    )
+                    group_totals["RESTRICTED_ASSETS"] += unapplied
+                    asset_total += unapplied
             elif account_class == ACCOUNT_CLASS_TANGIBLE_ASSET:
                 amount = net_worth
                 groups["TANGIBLE_ASSETS"].append(item)
@@ -1613,12 +1668,25 @@ class DojoService:
         month_start, month_end = self._month_bounds(month)
 
         # Precompute account-budget link behavior (unified for all account types)
-        link_behaviors = {
-            row["category_id"]: row
-            for row in self.db.fetch_all(load_sql("queries/current_account_budget_links_all"))
-        }
+        current_account_links = self.db.fetch_all(
+            load_sql("queries/current_account_budget_links_all")
+        )
+        transfer_link_intervals = self.db.fetch_all(
+            load_sql("queries/account_budget_link_effective_intervals")
+        )
+        account_links = [
+            link
+            for link in current_account_links
+            if link["derivation_method"] != DERIVATION_METHOD_TRANSFER_IN_ONLY
+        ] + transfer_link_intervals
+        link_behaviors: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for link in account_links:
+            link_behaviors[str(link["category_id"])].append(link)
         link_derived_by_cat: dict[str, int] = defaultdict(int)
-        for cat_id, link in link_behaviors.items():
+        link_derived_month_by_cat: dict[str, int] = defaultdict(int)
+        link_derived_pre_month_by_cat: dict[str, int] = defaultdict(int)
+        for link in account_links:
+            cat_id = str(link["category_id"])
             account_id = link["account_id"]
             derivation_method = link["derivation_method"]
             if derivation_method == DERIVATION_METHOD_TRANSFER_IN_ONLY:
@@ -1626,7 +1694,13 @@ class DojoService:
                     load_sql("queries/current_transfers_in_by_account_from_date"),
                     (account_id, link["effective_date"]),
                 ):
+                    if link.get("end_date") is not None and t["date"] >= link["end_date"]:
+                        continue
                     link_derived_by_cat[cat_id] += t["amount_minor"]
+                    if month_start <= t["date"] <= month_end:
+                        link_derived_month_by_cat[cat_id] -= t["amount_minor"]
+                    if t["date"] < month_start:
+                        link_derived_pre_month_by_cat[cat_id] -= t["amount_minor"]
             elif derivation_method == DERIVATION_METHOD_CC_SPEND_AND_TRANSFER:
                 # Credit card: sum categorized spending (as negative) plus transfer-in
                 for t in self.db.fetch_all(
@@ -1642,8 +1716,7 @@ class DojoService:
 
         # Precompute linked account ids for categories (used for context links)
         linked_account_id_by_cat: dict[str, str] = {
-            row["category_id"]: row["account_id"]
-            for row in self.db.fetch_all(load_sql("queries/current_account_budget_links_all"))
+            row["category_id"]: row["account_id"] for row in current_account_links
         }
 
         # Precompute transaction sums per category (all-time for available, monthly for activity)
@@ -1685,7 +1758,12 @@ class DojoService:
             cid = category["category_id"]
             bucket_id = self._bucket_id_for_category(cid)
             metadata = cast(dict[str, Any], category.get("metadata") or {})
-            category_link: dict[str, Any] | None = link_behaviors.get(cid)
+            category_links = link_behaviors.get(cid, [])
+            category_link = category_links[0] if category_links else None
+            has_transfer_in_link = any(
+                link["derivation_method"] == DERIVATION_METHOD_TRANSFER_IN_ONLY
+                for link in category_links
+            )
             is_cc = category["category_kind"] == CATEGORY_KIND_CREDIT_CARD_PAYMENT
 
             if (
@@ -1699,10 +1777,7 @@ class DojoService:
                     - alloc_from_bucket.get(bucket_id, 0)
                     + link_derived_by_cat.get(cid, 0)
                 )
-            elif (
-                category_link is not None
-                and category_link["derivation_method"] == DERIVATION_METHOD_TRANSFER_IN_ONLY
-            ):
+            elif has_transfer_in_link:
                 # Linked category (investment/loan): tx + alloc - derived transfer-in
                 available = (
                     tx_by_category.get(cid, 0)
@@ -1718,12 +1793,13 @@ class DojoService:
                     - alloc_from_bucket.get(bucket_id, 0)
                 )
 
-            month_activity = tx_month_activity.get(cid, 0)
+            month_activity = tx_month_activity.get(cid, 0) + link_derived_month_by_cat.get(cid, 0)
             month_budgeted = alloc_month_to.get(bucket_id, 0) - alloc_month_from.get(bucket_id, 0)
             starting_available = (
                 tx_pre_month.get(cid, 0)
                 + alloc_pre_to.get(bucket_id, 0)
                 - alloc_pre_from.get(bucket_id, 0)
+                + link_derived_pre_month_by_cat.get(cid, 0)
             )
 
             monthly_funding = self._compute_monthly_funding(category)
@@ -1750,6 +1826,9 @@ class DojoService:
                 item["name"],
             ),
         )
+
+    def list_category_activity(self) -> list[dict[str, Any]]:
+        return self.db.fetch_all(load_sql("queries/category_activity"))
 
     def get_budget(self, month: str, *, show_hidden: bool) -> dict[str, Any]:
         categories = self.list_categories(month=month, show_hidden=show_hidden)
@@ -1806,6 +1885,45 @@ class DojoService:
                 continue
             amount = int(account["net_worth_contribution_minor"])
             total += amount
+            if account["account_class"] == ACCOUNT_CLASS_LOAN:
+                liability = int(account.get("liability_component_minor", 0))
+                escrow = int(account.get("restricted_asset_component_minor", 0))
+                unapplied = int(account.get("unapplied_credit_component_minor", 0))
+                items.append(
+                    account
+                    | {
+                        "account_name": account["name"],
+                        "net_worth_minor": liability,
+                        "source": account["value_source"],
+                        "component_kind": "LOAN_LIABILITY",
+                        "ignored_import_value": False,
+                        "ignored_reason": None,
+                        "match_candidates": [],
+                    }
+                )
+                for component_kind, component_name, component_amount in (
+                    ("ESCROW", f"{account['name']} escrow", escrow),
+                    (
+                        "UNAPPLIED_CREDIT",
+                        f"{account['name']} unapplied credit",
+                        unapplied,
+                    ),
+                ):
+                    if component_amount:
+                        items.append(
+                            account
+                            | {
+                                "presentation_id": f"{account['account_id']}:{component_kind}",
+                                "account_name": component_name,
+                                "net_worth_minor": component_amount,
+                                "source": account["value_source"],
+                                "component_kind": component_kind,
+                                "ignored_import_value": False,
+                                "ignored_reason": None,
+                                "match_candidates": [],
+                            }
+                        )
+                continue
             items.append(
                 account
                 | {
@@ -1965,6 +2083,7 @@ class DojoService:
                     "status": payload["status"],
                     "memo": payload.get("memo", ""),
                     "entry_order": current["entry_order"],
+                    "record_order": current.get("record_order"),
                     "created_at": current["created_at"],
                     "created_by_user_id": None,
                 },
@@ -2031,6 +2150,7 @@ class DojoService:
                     "status": latest_closed["status"],
                     "memo": latest_closed["memo"],
                     "entry_order": latest_closed["entry_order"],
+                    "record_order": latest_closed.get("record_order"),
                     "valid_from": now,
                     "valid_to": MAX_TS,
                     "created_at": latest_closed["created_at"],
@@ -2111,6 +2231,8 @@ class DojoService:
         self._require_account_class(payload["budget_account_id"], ACCOUNT_CLASS_BUDGET)
         direction = payload["direction"]
         transfer_date = payload["date"]
+        if isinstance(transfer_date, str):
+            transfer_date = date.fromisoformat(transfer_date)
         amount_minor = payload["amount_minor"]
         if direction == "CONTRIBUTION":
             from_account_id = payload["budget_account_id"]
@@ -2119,33 +2241,13 @@ class DojoService:
             from_account_id = investment_account_id
             to_account_id = payload["budget_account_id"]
 
-        links = self.list_account_budget_links(investment_account_id)
-        link = next(
-            (
-                candidate
-                for candidate in links
-                if candidate["link_behavior"] == LINK_BEHAVIOR_INVESTMENT_CONTRIBUTION
-                and candidate["effective_date"] <= transfer_date
-            ),
-            None,
+        link = self._effective_account_budget_link(
+            investment_account_id,
+            LINK_BEHAVIOR_INVESTMENT_CONTRIBUTION,
+            transfer_date,
         )
-        category_id = payload.get("contribution_category_id")
-        if (
-            direction == "CONTRIBUTION"
-            and link is not None
-            and category_id
-            and str(link["category_id"]) != category_id
-        ):
-            link = None
-        if link is None and category_id:
-            if (
-                self.db.fetch_one(load_sql("queries/current_category_by_id"), (category_id,))
-                is None
-            ):
-                raise ValueError("Category not found")
         if direction == "CONTRIBUTION" and link is None:
-            if not category_id:
-                raise ValueError("Investment account needs a contribution category link")
+            raise ValueError("Configure an investment contribution category before contributing")
         if direction == "WITHDRAWAL":
             current_value = self._investment_values(
                 self.db.fetch_all(load_sql("queries/list_accounts")), self.clock.today()
@@ -2156,29 +2258,6 @@ class DojoService:
         funded_minor = 0
         now = self.clock.now()
         with self.db.transaction() as connection:
-            if link is None and category_id:
-                connection.execute(
-                    load_sql("queries/close_account_budget_links_by_account_behavior"),
-                    (
-                        now,
-                        investment_account_id,
-                        LINK_BEHAVIOR_INVESTMENT_CONTRIBUTION,
-                    ),
-                )
-                self._create_account_budget_link(
-                    connection,
-                    investment_account_id,
-                    category_id,
-                    LINK_BEHAVIOR_INVESTMENT_CONTRIBUTION,
-                    DERIVATION_METHOD_TRANSFER_IN_ONLY,
-                    now,
-                    effective_date=transfer_date,
-                )
-                link = {
-                    "category_id": category_id,
-                    "effective_date": transfer_date,
-                    "link_behavior": LINK_BEHAVIOR_INVESTMENT_CONTRIBUTION,
-                }
             if direction == "CONTRIBUTION" and link and payload.get("fund_shortfall", True):
                 available = self.compute_category_available(str(link["category_id"]))
                 funded_minor = max(amount_minor - available, 0)
@@ -2217,6 +2296,33 @@ class DojoService:
 
     def create_account(self, payload: dict[str, Any]) -> dict[str, Any]:
         now = self.clock.now()
+        opening_valuation_date = None
+        if payload.get("opening_valuation_minor") is not None:
+            opening_valuation_date = self._non_future_date(
+                payload.get("opening_valuation_date", now.date()),
+                field_name="Opening valuation date",
+            )
+        opening_loan_date = None
+        if payload.get("current_principal_minor") is not None:
+            opening_loan_date = self._non_future_date(
+                payload["current_principal_as_of"],
+                field_name="Current principal as-of date",
+            )
+        configured_category_id = (
+            payload.get("investment_contribution_category_id")
+            if payload["account_class"] == ACCOUNT_CLASS_INVESTMENT
+            else payload.get("loan_payment_category_id")
+            if payload["account_class"] == ACCOUNT_CLASS_LOAN
+            else None
+        )
+        if (
+            configured_category_id is not None
+            and self.db.fetch_one(
+                load_sql("queries/current_category_by_id"), (configured_category_id,)
+            )
+            is None
+        ):
+            raise ValueError("Category not found")
         account_id = str(uuid4())
         with self.db.transaction() as connection:
             insert_version(
@@ -2299,6 +2405,15 @@ class DojoService:
                         "created_by_user_id": None,
                     },
                 )
+                if configured_category_id is not None:
+                    self._create_account_budget_link(
+                        connection,
+                        account_id,
+                        configured_category_id,
+                        LINK_BEHAVIOR_INVESTMENT_CONTRIBUTION,
+                        DERIVATION_METHOD_TRANSFER_IN_ONLY,
+                        now,
+                    )
             elif payload["account_class"] == ACCOUNT_CLASS_LOAN:
                 insert_version(
                     connection,
@@ -2308,6 +2423,17 @@ class DojoService:
                         "original_amount_minor": payload.get("original_amount_minor"),
                         "origination_date": payload.get("origination_date"),
                         "rate_minor": payload.get("rate_minor"),
+                        "rate_type": payload.get("rate_type"),
+                        "scheduled_principal_interest_minor": payload.get(
+                            "scheduled_principal_interest_minor"
+                        ),
+                        "payment_frequency": payload.get("payment_frequency"),
+                        "next_payment_date": payload.get("next_payment_date"),
+                        "maturity_date": payload.get("maturity_date"),
+                        "remaining_term_months": payload.get("remaining_term_months"),
+                        "recurring_extra_principal_minor": payload.get(
+                            "recurring_extra_principal_minor"
+                        ),
                         "status": payload.get("status", "IN_REPAYMENT"),
                         "valid_from": now,
                         "valid_to": MAX_TS,
@@ -2315,6 +2441,40 @@ class DojoService:
                         "created_by_user_id": None,
                     },
                 )
+                if opening_loan_date is not None:
+                    insert_version(
+                        connection,
+                        "loan_balance_snapshots",
+                        {
+                            "snapshot_id": str(uuid4()),
+                            "account_id": account_id,
+                            "effective_date": opening_loan_date,
+                            "principal_balance_minor": abs(payload["current_principal_minor"]),
+                            "accrued_interest_minor": None,
+                            "escrow_balance_minor": 0,
+                            "unapplied_credit_minor": None,
+                            "ytd_principal_paid_minor": None,
+                            "ytd_interest_paid_minor": None,
+                            "attributed_payment_minor": 0,
+                            "principal_reduction_minor": 0,
+                            "unknown_nonprincipal_minor": 0,
+                            "notes": "Opening current principal",
+                            "valid_from": now,
+                            "valid_to": MAX_TS,
+                            "created_at": now,
+                            "created_by_user_id": None,
+                        },
+                    )
+                if configured_category_id is not None:
+                    self._create_account_budget_link(
+                        connection,
+                        account_id,
+                        configured_category_id,
+                        LINK_BEHAVIOR_LOAN_PAYMENT,
+                        DERIVATION_METHOD_TRANSFER_IN_ONLY,
+                        now,
+                        effective_date=opening_loan_date,
+                    )
             elif payload["account_class"] == ACCOUNT_CLASS_TANGIBLE_ASSET:
                 if payload.get("opening_valuation_minor") is not None:
                     insert_version(
@@ -2323,7 +2483,7 @@ class DojoService:
                         {
                             "valuation_id": str(uuid4()),
                             "account_id": account_id,
-                            "effective_date": payload.get("opening_valuation_date", now.date()),
+                            "effective_date": opening_valuation_date,
                             "amount_minor": payload["opening_valuation_minor"],
                             "source": payload.get("source", "manual"),
                             "notes": "Opening valuation",
@@ -2334,6 +2494,175 @@ class DojoService:
                         },
                     )
         return {"account_id": account_id}
+
+    def create_tracking_cutover(
+        self, predecessor_account_id: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        with self.db.transaction() as connection:
+            return self._create_tracking_cutover_in_transaction(
+                connection, predecessor_account_id, payload
+            )
+
+    def _create_tracking_cutover_in_transaction(
+        self,
+        connection: duckdb.DuckDBPyConnection,
+        predecessor_account_id: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        operation_id = str(payload["operation_id"])
+        fingerprint = hashlib.sha256(
+            json.dumps(payload, sort_keys=True, default=str, separators=(",", ":")).encode()
+        ).hexdigest()
+        existing_cutover = self.db.fetch_one(
+            load_sql("queries/tracking_cutover_by_operation"), (operation_id,)
+        )
+        if existing_cutover is not None:
+            if existing_cutover["request_fingerprint"] != fingerprint:
+                raise ValueError("Cutover operation_id was already used with different content")
+            return self._tracking_cutover_response(existing_cutover)
+
+        predecessor = self.db.fetch_one(
+            load_sql("queries/current_account_by_id"), (predecessor_account_id,)
+        )
+        if predecessor is None or predecessor["account_class"] != ACCOUNT_CLASS_TRACKING:
+            raise ValueError("Cutover predecessor must be a tracking account")
+        if (
+            self.db.fetch_one(
+                load_sql("queries/tracking_cutover_by_predecessor"), (predecessor_account_id,)
+            )
+            is not None
+        ):
+            raise ValueError("Tracking account already has a cutover")
+
+        cutover_date = payload["cutover_date"]
+        if isinstance(cutover_date, str):
+            cutover_date = date.fromisoformat(cutover_date)
+        tracking_details = self.db.fetch_one(
+            load_sql("queries/current_tracking_account_details_by_account"),
+            (predecessor_account_id,),
+        )
+        prior_snapshot = self.db.fetch_one(
+            load_sql("queries/latest_tracking_valuation_for_account_through_date"),
+            (predecessor_account_id, cutover_date),
+        )
+        if tracking_details is None or prior_snapshot is None:
+            raise ValueError("Tracking account needs a snapshot at or before cutover")
+        prior_amount = abs(int(prior_snapshot["amount_minor"]))
+        if prior_amount != int(payload["expected_predecessor_value_minor"]):
+            raise ValueError("Tracking value changed; review the cutover again")
+
+        successor_values: list[int] = []
+        for successor in payload["successors"]:
+            if not str(successor.get("name", "")).strip():
+                raise ValueError("Cutover successor name is required")
+            if successor["account_class"] == ACCOUNT_CLASS_LOAN and not successor.get(
+                "payment_category_id"
+            ):
+                raise ValueError("Loan successor requires a payment category")
+            if successor["account_class"] == ACCOUNT_CLASS_INVESTMENT:
+                tickers = [holding["ticker"].strip().upper() for holding in successor["holdings"]]
+                if len(tickers) != len(set(tickers)):
+                    raise ValueError("Cutover investment holdings must use unique tickers")
+            category_id = successor.get("contribution_category_id") or successor.get(
+                "payment_category_id"
+            )
+            if category_id is not None:
+                category = self.db.fetch_one(
+                    load_sql("queries/current_category_by_id"), (category_id,)
+                )
+                if (
+                    category is None
+                    or not category["is_active"]
+                    or category["category_kind"] != CATEGORY_KIND_STANDARD
+                ):
+                    raise ValueError("Cutover links require an active standard category")
+            successor_values.append(self._cutover_successor_value(successor))
+
+        successor_total = sum(successor_values)
+        predecessor_is_liability = tracking_details["polarity"] == "LIABILITY"
+        if (predecessor_is_liability and successor_total > 0) or (
+            not predecessor_is_liability and successor_total < 0
+        ):
+            raise ValueError("Successor total has the wrong polarity for the tracking account")
+        signed_prior = -prior_amount if predecessor_is_liability else prior_amount
+        variance = successor_total - signed_prior
+        if variance and not payload.get("variance_confirmed", False):
+            raise ValueError("Confirm the cutover variance before applying")
+
+        now = self.clock.now()
+        existing_final = self.db.fetch_one(
+            load_sql("queries/current_tracking_valuation_by_account_date"),
+            (predecessor_account_id, cutover_date),
+        )
+        final_valuation_id = (
+            str(existing_final["valuation_id"])
+            if existing_final is not None
+            else str(uuid5(NAMESPACE_URL, f"dojo:cutover:{operation_id}:predecessor"))
+        )
+        successor_ids = [
+            str(uuid5(NAMESPACE_URL, f"dojo:cutover:{operation_id}:successor:{index}"))
+            for index in range(len(payload["successors"]))
+        ]
+        final_values = {
+            "valuation_id": final_valuation_id,
+            "account_id": predecessor_account_id,
+            "raw_name": existing_final["raw_name"] if existing_final else "",
+            "effective_date": cutover_date,
+            "amount_minor": abs(successor_total),
+            "notes": "Final tracking value at representation cutover",
+            "metadata": json_dumps({"source": "cutover", "operation_id": operation_id}),
+            "created_at": existing_final["created_at"] if existing_final else now,
+            "created_by_user_id": None,
+        }
+        if existing_final is not None:
+            replace_current_version(
+                connection,
+                "net_worth_valuations",
+                "valuation_id",
+                final_valuation_id,
+                {"row_id": str(uuid4())} | final_values,
+                now=now,
+            )
+        else:
+            insert_version(
+                connection,
+                "net_worth_valuations",
+                final_values | {"valid_from": now, "valid_to": MAX_TS},
+            )
+
+        for index, (successor, successor_id, opening_value) in enumerate(
+            zip(payload["successors"], successor_ids, successor_values, strict=True)
+        ):
+            self._insert_cutover_successor(
+                connection,
+                operation_id=operation_id,
+                successor_order=index,
+                successor_id=successor_id,
+                successor=successor,
+                cutover_date=cutover_date,
+                opening_net_worth_minor=opening_value,
+                now=now,
+            )
+
+        connection.execute(
+            load_sql("queries/insert_tracking_cutover"),
+            (
+                operation_id,
+                predecessor_account_id,
+                cutover_date,
+                signed_prior,
+                successor_total,
+                final_valuation_id,
+                fingerprint,
+                now,
+            ),
+        )
+
+        cutover = self.db.fetch_one(
+            load_sql("queries/tracking_cutover_by_operation"), (operation_id,)
+        )
+        assert cutover is not None
+        return self._tracking_cutover_response(cutover)
 
     def update_account(self, account_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         current = self.db.fetch_one(
@@ -2461,6 +2790,27 @@ class DojoService:
                                 "origination_date", loan_current.get("origination_date")
                             ),
                             "rate_minor": payload.get("rate_minor", loan_current.get("rate_minor")),
+                            "rate_type": payload.get("rate_type", loan_current.get("rate_type")),
+                            "scheduled_principal_interest_minor": payload.get(
+                                "scheduled_principal_interest_minor",
+                                loan_current.get("scheduled_principal_interest_minor"),
+                            ),
+                            "payment_frequency": payload.get(
+                                "payment_frequency", loan_current.get("payment_frequency")
+                            ),
+                            "next_payment_date": payload.get(
+                                "next_payment_date", loan_current.get("next_payment_date")
+                            ),
+                            "maturity_date": payload.get(
+                                "maturity_date", loan_current.get("maturity_date")
+                            ),
+                            "remaining_term_months": payload.get(
+                                "remaining_term_months", loan_current.get("remaining_term_months")
+                            ),
+                            "recurring_extra_principal_minor": payload.get(
+                                "recurring_extra_principal_minor",
+                                loan_current.get("recurring_extra_principal_minor"),
+                            ),
                             "status": payload.get("loan_status", loan_current.get("status")),
                             "created_at": loan_current["created_at"],
                             "created_by_user_id": loan_current["created_by_user_id"],
@@ -2473,6 +2823,7 @@ class DojoService:
         self, account_id: str, payload: dict[str, Any]
     ) -> dict[str, Any]:
         self._require_account_class(account_id, ACCOUNT_CLASS_INVESTMENT)
+        effective_date = self._non_future_date(payload["effective_date"])
         now = self.clock.now()
         position_id = str(uuid4())
         with self.db.transaction() as connection:
@@ -2483,7 +2834,7 @@ class DojoService:
                     "position_id": position_id,
                     "account_id": account_id,
                     "ticker": payload["ticker"].strip().upper(),
-                    "effective_date": payload["effective_date"],
+                    "effective_date": effective_date,
                     "quantity_micros": payload["quantity_micros"],
                     "average_basis_minor": payload.get("average_basis_minor"),
                     "valid_from": now,
@@ -2504,17 +2855,20 @@ class DojoService:
         self, account_id: str, payload: dict[str, Any]
     ) -> dict[str, Any]:
         self._require_account_class(account_id, ACCOUNT_CLASS_INVESTMENT)
+        effective_date = self._non_future_date(payload["effective_date"])
         now = self.clock.now()
         snapshot_id = str(uuid4())
         with self.db.transaction() as connection:
+            record_order = self._next_financial_event_order(connection)
             insert_version(
                 connection,
                 "investment_cash_snapshots",
                 {
                     "snapshot_id": snapshot_id,
                     "account_id": account_id,
-                    "effective_date": payload["effective_date"],
+                    "effective_date": effective_date,
                     "cash_balance_minor": payload["cash_balance_minor"],
+                    "record_order": record_order,
                     "notes": payload.get("notes", ""),
                     "valid_from": now,
                     "valid_to": MAX_TS,
@@ -2531,6 +2885,7 @@ class DojoService:
         )
 
     def create_investment_price_snapshot(self, payload: dict[str, Any]) -> dict[str, Any]:
+        effective_date = self._non_future_date(payload["effective_date"])
         now = self.clock.now()
         snapshot_id = str(uuid4())
         with self.db.transaction() as connection:
@@ -2541,7 +2896,7 @@ class DojoService:
                     "snapshot_id": snapshot_id,
                     "account_id": payload.get("account_id"),
                     "ticker": payload["ticker"].strip().upper(),
-                    "effective_date": payload["effective_date"],
+                    "effective_date": effective_date,
                     "price_minor": payload["price_minor"],
                     "source": payload.get("source", "manual"),
                     "valid_from": now,
@@ -2562,7 +2917,7 @@ class DojoService:
         self, account_id: str, payload: dict[str, Any]
     ) -> dict[str, Any]:
         self._require_account_class(account_id, ACCOUNT_CLASS_INVESTMENT)
-        effective_date = payload["effective_date"]
+        effective_date = self._non_future_date(payload["effective_date"])
         now = self.clock.now()
         existing_positions = self.db.fetch_all(
             load_sql("queries/current_investment_positions_by_account_date"),
@@ -2575,6 +2930,7 @@ class DojoService:
         )
 
         with self.db.transaction() as connection:
+            record_order = self._next_financial_event_order(connection)
             for existing_position in existing_positions:
                 close_current_version(
                     connection,
@@ -2632,6 +2988,7 @@ class DojoService:
                     "account_id": account_id,
                     "effective_date": effective_date,
                     "cash_balance_minor": payload["cash_balance_minor"],
+                    "record_order": record_order,
                     "notes": payload.get("notes", ""),
                     "valid_from": now,
                     "valid_to": MAX_TS,
@@ -2682,7 +3039,7 @@ class DojoService:
             )
         transfer_row = self.db.fetch_one(
             load_sql("queries/investment_transfer_delta_after_date"),
-            (account_id, effective_date, as_of),
+            (account_id, effective_date, effective_date, cash["record_order"], as_of),
         )
         provisional = int(transfer_row["transfer_delta_minor"] if transfer_row else 0)
         return {
@@ -2696,17 +3053,18 @@ class DojoService:
 
     def create_tracking_snapshot(self, account_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         self._require_account_class(account_id, ACCOUNT_CLASS_TRACKING)
+        effective_date = self._non_future_date(payload["effective_date"])
         now = self.clock.now()
         existing = self.db.fetch_one(
             load_sql("queries/current_tracking_valuation_by_account_date"),
-            (account_id, payload["effective_date"]),
+            (account_id, effective_date),
         )
         snapshot_id = str(existing["valuation_id"]) if existing else str(uuid4())
         values = {
             "valuation_id": snapshot_id,
             "account_id": account_id,
             "raw_name": existing["raw_name"] if existing else "",
-            "effective_date": payload["effective_date"],
+            "effective_date": effective_date,
             "amount_minor": abs(payload["amount_minor"]),
             "notes": payload.get("notes", ""),
             "metadata": json_dumps({"source": payload.get("source", "manual")}),
@@ -2740,7 +3098,7 @@ class DojoService:
     def create_loan_snapshot(self, account_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         self._require_account_class(account_id, ACCOUNT_CLASS_LOAN)
         now = self.clock.now()
-        effective_date = payload["effective_date"]
+        effective_date = self._non_future_date(payload["effective_date"])
         existing = self.db.fetch_one(
             load_sql("queries/current_loan_balance_by_account_date"),
             (account_id, effective_date),
@@ -2772,7 +3130,21 @@ class DojoService:
                 else None
             ),
             "escrow_balance_minor": abs(payload.get("escrow_balance_minor", 0)),
-            "unapplied_credit_minor": abs(payload.get("unapplied_credit_minor", 0)),
+            "unapplied_credit_minor": (
+                abs(payload["unapplied_credit_minor"])
+                if payload.get("unapplied_credit_minor") is not None
+                else None
+            ),
+            "ytd_principal_paid_minor": (
+                abs(payload["ytd_principal_paid_minor"])
+                if payload.get("ytd_principal_paid_minor") is not None
+                else None
+            ),
+            "ytd_interest_paid_minor": (
+                abs(payload["ytd_interest_paid_minor"])
+                if payload.get("ytd_interest_paid_minor") is not None
+                else None
+            ),
             "attributed_payment_minor": attributed_payment,
             "principal_reduction_minor": principal_reduction,
             "unknown_nonprincipal_minor": unknown_nonprincipal,
@@ -2804,37 +3176,62 @@ class DojoService:
             (account_id,),
         )
 
+    def get_loan_projection(self, account_id: str) -> dict[str, object]:
+        self._require_account_class(account_id, ACCOUNT_CLASS_LOAN)
+        details = self.db.fetch_one(
+            load_sql("queries/current_loan_details_by_account"), (account_id,)
+        )
+        snapshots = self.list_loan_snapshots(account_id)
+        if details is None or not snapshots:
+            return {"available": False, "missing": ["current principal statement"], "rows": []}
+        latest = snapshots[0]
+        return project_loan(
+            LoanProjectionTerms(
+                principal_minor=int(latest["principal_balance_minor"]),
+                principal_as_of=latest["effective_date"],
+                annual_rate_minor=(
+                    int(details["rate_minor"]) if details.get("rate_minor") is not None else None
+                ),
+                rate_type=details.get("rate_type"),
+                scheduled_payment_minor=(
+                    int(details["scheduled_principal_interest_minor"])
+                    if details.get("scheduled_principal_interest_minor") is not None
+                    else None
+                ),
+                payment_frequency=cast(PaymentFrequency | None, details.get("payment_frequency")),
+                next_payment_date=details.get("next_payment_date"),
+                maturity_date=details.get("maturity_date"),
+                remaining_term_months=(
+                    int(details["remaining_term_months"])
+                    if details.get("remaining_term_months") is not None
+                    else None
+                ),
+                recurring_extra_principal_minor=int(
+                    details.get("recurring_extra_principal_minor") or 0
+                ),
+            ),
+            as_of=self.clock.today(),
+        )
+
     def create_loan_payment(self, loan_account_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         self._require_account_class(loan_account_id, ACCOUNT_CLASS_LOAN)
         self._require_account_class(payload["budget_account_id"], ACCOUNT_CLASS_BUDGET)
         payment_date = payload["date"]
         if isinstance(payment_date, str):
             payment_date = date.fromisoformat(payment_date)
-        links = self.list_account_budget_links(loan_account_id)
-        link = next(
-            (
-                candidate
-                for candidate in links
-                if candidate["link_behavior"] == LINK_BEHAVIOR_LOAN_PAYMENT
-                and candidate["effective_date"] <= payment_date
-            ),
-            None,
+        link = self._effective_account_budget_link(
+            loan_account_id,
+            LINK_BEHAVIOR_LOAN_PAYMENT,
+            payment_date,
         )
-        if link is None or str(link["category_id"]) != payload["category_id"]:
-            self.set_account_budget_link(
-                loan_account_id,
-                {
-                    "category_id": payload["category_id"],
-                    "link_behavior": LINK_BEHAVIOR_LOAN_PAYMENT,
-                    "effective_date": payment_date,
-                },
-            )
+        if link is None:
+            raise ValueError("Configure a loan payment category before recording a payment")
         return self.create_transaction(
             {
                 "date": payment_date,
                 "account_id": payload["budget_account_id"],
                 "amount_minor": -abs(payload["amount_minor"]),
-                "category_id": payload["category_id"],
+                "category_id": str(link["category_id"]),
                 "system_category": None,
                 "status": payload["status"],
                 "memo": payload.get("memo", "Loan payment"),
@@ -2853,16 +3250,17 @@ class DojoService:
         self, account_id: str, payload: dict[str, Any]
     ) -> dict[str, Any]:
         self._require_account_class(account_id, ACCOUNT_CLASS_TANGIBLE_ASSET)
+        effective_date = self._non_future_date(payload["effective_date"])
         now = self.clock.now()
         existing = self.db.fetch_one(
             load_sql("queries/current_tangible_valuation_by_account_date"),
-            (account_id, payload["effective_date"]),
+            (account_id, effective_date),
         )
         valuation_id = str(existing["valuation_id"]) if existing else str(uuid4())
         values = {
             "valuation_id": valuation_id,
             "account_id": account_id,
-            "effective_date": payload["effective_date"],
+            "effective_date": effective_date,
             "amount_minor": abs(payload["amount_minor"]),
             "source": payload.get("source", "manual"),
             "notes": payload.get("notes", ""),
@@ -3373,6 +3771,9 @@ class DojoService:
                             else None
                         ),
                         reconciliation_status="CURRENT",
+                        liability_minor=-(loan_current or 0),
+                        restricted_asset_minor=escrow,
+                        unapplied_credit_minor=unapplied,
                     )
             elif account_class == ACCOUNT_CLASS_INVESTMENT:
                 current_input = investment_values.get(account_id)
@@ -3410,6 +3811,34 @@ class DojoService:
         if account["account_class"] != expected_class:
             raise ValueError(f"Account must be {expected_class}")
 
+    def _non_future_date(self, value: date | str, *, field_name: str = "Effective date") -> date:
+        parsed = date.fromisoformat(value) if isinstance(value, str) else value
+        if parsed > self.clock.today():
+            raise ValueError(f"{field_name} cannot be in the future")
+        return parsed
+
+    def _next_financial_event_order(self, connection: Any) -> int:
+        row = connection.execute(load_sql("queries/next_financial_event_order")).fetchone()
+        assert row is not None
+        return int(row[0])
+
+    def _effective_account_budget_link(
+        self, account_id: str, behavior: str, effective_date: date
+    ) -> dict[str, Any] | None:
+        return next(
+            (
+                link
+                for link in self.db.fetch_all(
+                    load_sql("queries/account_budget_link_effective_intervals")
+                )
+                if str(link["account_id"]) == account_id
+                and link["link_behavior"] == behavior
+                and link["effective_date"] <= effective_date
+                and (link.get("end_date") is None or effective_date < link["end_date"])
+            ),
+            None,
+        )
+
     def _require_account(self, account_id: str) -> dict[str, Any]:
         account = self.db.fetch_one(load_sql("queries/current_account_by_id"), (account_id,))
         if account is None:
@@ -3440,6 +3869,7 @@ class DojoService:
         destination_transaction_id = str(uuid4())
         max_row = connection.execute(load_sql("queries/max_entry_order")).fetchone()
         next_order = int(max_row[0]) + 1 if max_row else 1
+        record_order = self._next_financial_event_order(connection)
         for transaction_id, account_id, signed_amount in (
             (source_transaction_id, from_account_id, -amount_minor),
             (destination_transaction_id, to_account_id, amount_minor),
@@ -3458,6 +3888,7 @@ class DojoService:
                     "status": status,
                     "memo": memo,
                     "entry_order": next_order,
+                    "record_order": record_order,
                     "valid_from": now,
                     "valid_to": MAX_TS,
                     "created_at": now,
@@ -3563,7 +3994,7 @@ class DojoService:
                 continue
             transfer_row = self.db.fetch_one(
                 load_sql("queries/investment_transfer_delta_after_date"),
-                (account_id, statement_date, as_of),
+                (account_id, statement_date, statement_date, cash["record_order"], as_of),
             )
             provisional = int(transfer_row["transfer_delta_minor"] if transfer_row else 0)
             amount = int(cash["cash_balance_minor"]) + holdings_value + provisional
@@ -3663,6 +4094,255 @@ class DojoService:
             },
         )
         return category_id
+
+    def _cutover_successor_value(self, successor: dict[str, Any]) -> int:
+        if successor["account_class"] == ACCOUNT_CLASS_INVESTMENT:
+            holdings_value = sum(
+                (int(holding["quantity_micros"]) * int(holding["price_minor"]) + 500_000)
+                // 1_000_000
+                for holding in successor["holdings"]
+            )
+            return int(successor["cash_balance_minor"]) + holdings_value
+        if successor["account_class"] == ACCOUNT_CLASS_LOAN:
+            obligation = int(successor["principal_balance_minor"]) + int(
+                successor.get("accrued_interest_minor") or 0
+            )
+            return (
+                -obligation
+                + int(successor.get("escrow_balance_minor") or 0)
+                + int(successor.get("unapplied_credit_minor") or 0)
+            )
+        return int(successor["opening_value_minor"])
+
+    def _insert_cutover_successor(
+        self,
+        connection: Any,
+        *,
+        operation_id: str,
+        successor_order: int,
+        successor_id: str,
+        successor: dict[str, Any],
+        cutover_date: date,
+        opening_net_worth_minor: int,
+        now: datetime,
+    ) -> None:
+        account_class = successor["account_class"]
+        insert_version(
+            connection,
+            "accounts",
+            {
+                "account_id": successor_id,
+                "account_class": account_class,
+                "name": successor["name"],
+                "institution": successor.get("institution"),
+                "account_number_last4": successor.get("account_number_last4"),
+                "is_hidden": False,
+                "is_active": True,
+                "metadata": json_dumps(
+                    {"cutover_operation_id": operation_id, "successor_order": successor_order}
+                ),
+                "valid_from": now,
+                "valid_to": MAX_TS,
+                "created_at": now,
+                "created_by_user_id": None,
+            },
+        )
+        if account_class == ACCOUNT_CLASS_INVESTMENT:
+            insert_version(
+                connection,
+                "investment_account_details",
+                {
+                    "account_id": successor_id,
+                    "self_managed": successor.get("self_managed", False),
+                    "tax_treatment": successor.get("tax_treatment", "TAXABLE_BROKERAGE"),
+                    "valid_from": now,
+                    "valid_to": MAX_TS,
+                    "created_at": now,
+                    "created_by_user_id": None,
+                },
+            )
+            for holding_index, holding in enumerate(successor["holdings"]):
+                ticker = holding["ticker"].strip().upper()
+                insert_version(
+                    connection,
+                    "investment_positions",
+                    {
+                        "position_id": str(
+                            uuid5(
+                                NAMESPACE_URL,
+                                f"dojo:cutover:{operation_id}:{successor_order}:position:{holding_index}",
+                            )
+                        ),
+                        "account_id": successor_id,
+                        "ticker": ticker,
+                        "effective_date": cutover_date,
+                        "quantity_micros": holding["quantity_micros"],
+                        "average_basis_minor": holding.get("average_basis_minor"),
+                        "valid_from": now,
+                        "valid_to": MAX_TS,
+                        "created_at": now,
+                        "created_by_user_id": None,
+                    },
+                )
+                insert_version(
+                    connection,
+                    "investment_price_snapshots",
+                    {
+                        "snapshot_id": str(
+                            uuid5(
+                                NAMESPACE_URL,
+                                f"dojo:cutover:{operation_id}:{successor_order}:price:{holding_index}",
+                            )
+                        ),
+                        "account_id": successor_id,
+                        "ticker": ticker,
+                        "effective_date": cutover_date,
+                        "price_minor": holding["price_minor"],
+                        "source": "cutover",
+                        "valid_from": now,
+                        "valid_to": MAX_TS,
+                        "created_at": now,
+                        "created_by_user_id": None,
+                    },
+                )
+            record_order = self._next_financial_event_order(connection)
+            insert_version(
+                connection,
+                "investment_cash_snapshots",
+                {
+                    "snapshot_id": str(
+                        uuid5(
+                            NAMESPACE_URL,
+                            f"dojo:cutover:{operation_id}:{successor_order}:cash",
+                        )
+                    ),
+                    "account_id": successor_id,
+                    "effective_date": cutover_date,
+                    "cash_balance_minor": successor["cash_balance_minor"],
+                    "record_order": record_order,
+                    "notes": "Opening value from tracking cutover",
+                    "valid_from": now,
+                    "valid_to": MAX_TS,
+                    "created_at": now,
+                    "created_by_user_id": None,
+                },
+            )
+            if successor.get("contribution_category_id"):
+                self._create_account_budget_link(
+                    connection,
+                    successor_id,
+                    successor["contribution_category_id"],
+                    LINK_BEHAVIOR_INVESTMENT_CONTRIBUTION,
+                    DERIVATION_METHOD_TRANSFER_IN_ONLY,
+                    now,
+                    effective_date=cutover_date,
+                )
+        elif account_class == ACCOUNT_CLASS_LOAN:
+            insert_version(
+                connection,
+                "loan_details",
+                {
+                    "account_id": successor_id,
+                    "original_amount_minor": successor.get("original_amount_minor"),
+                    "origination_date": successor.get("origination_date"),
+                    "rate_minor": successor.get("rate_minor"),
+                    "rate_type": successor.get("rate_type"),
+                    "scheduled_principal_interest_minor": successor.get(
+                        "scheduled_principal_interest_minor"
+                    ),
+                    "payment_frequency": successor.get("payment_frequency"),
+                    "next_payment_date": successor.get("next_payment_date"),
+                    "maturity_date": successor.get("maturity_date"),
+                    "remaining_term_months": successor.get("remaining_term_months"),
+                    "recurring_extra_principal_minor": successor.get(
+                        "recurring_extra_principal_minor"
+                    ),
+                    "status": "IN_REPAYMENT",
+                    "valid_from": now,
+                    "valid_to": MAX_TS,
+                    "created_at": now,
+                    "created_by_user_id": None,
+                },
+            )
+            insert_version(
+                connection,
+                "loan_balance_snapshots",
+                {
+                    "snapshot_id": str(
+                        uuid5(
+                            NAMESPACE_URL,
+                            f"dojo:cutover:{operation_id}:{successor_order}:loan-balance",
+                        )
+                    ),
+                    "account_id": successor_id,
+                    "effective_date": cutover_date,
+                    "principal_balance_minor": successor["principal_balance_minor"],
+                    "accrued_interest_minor": successor.get("accrued_interest_minor"),
+                    "escrow_balance_minor": successor.get("escrow_balance_minor", 0),
+                    "unapplied_credit_minor": successor.get("unapplied_credit_minor"),
+                    "ytd_principal_paid_minor": None,
+                    "ytd_interest_paid_minor": None,
+                    "attributed_payment_minor": 0,
+                    "principal_reduction_minor": 0,
+                    "unknown_nonprincipal_minor": 0,
+                    "notes": "Opening balance from tracking cutover",
+                    "valid_from": now,
+                    "valid_to": MAX_TS,
+                    "created_at": now,
+                    "created_by_user_id": None,
+                },
+            )
+            self._create_account_budget_link(
+                connection,
+                successor_id,
+                successor["payment_category_id"],
+                LINK_BEHAVIOR_LOAN_PAYMENT,
+                DERIVATION_METHOD_TRANSFER_IN_ONLY,
+                now,
+                effective_date=cutover_date,
+            )
+        else:
+            insert_version(
+                connection,
+                "tangible_asset_valuations",
+                {
+                    "valuation_id": str(
+                        uuid5(
+                            NAMESPACE_URL,
+                            f"dojo:cutover:{operation_id}:{successor_order}:valuation",
+                        )
+                    ),
+                    "account_id": successor_id,
+                    "effective_date": cutover_date,
+                    "amount_minor": successor["opening_value_minor"],
+                    "source": "cutover",
+                    "notes": "Opening value from tracking cutover",
+                    "valid_from": now,
+                    "valid_to": MAX_TS,
+                    "created_at": now,
+                    "created_by_user_id": None,
+                },
+            )
+        connection.execute(
+            load_sql("queries/insert_tracking_cutover_successor"),
+            (operation_id, successor_order, successor_id, opening_net_worth_minor),
+        )
+
+    def _tracking_cutover_response(self, cutover: dict[str, Any]) -> dict[str, Any]:
+        successors = self.db.fetch_all(
+            load_sql("queries/tracking_cutover_successors_by_operation"),
+            (cutover["operation_id"],),
+        )
+        return {
+            "operation_id": str(cutover["operation_id"]),
+            "predecessor_account_id": str(cutover["predecessor_account_id"]),
+            "cutover_date": str(cutover["cutover_date"]),
+            "prior_value_minor": int(cutover["prior_value_minor"]),
+            "successor_total_minor": int(cutover["successor_total_minor"]),
+            "variance_minor": int(cutover["successor_total_minor"])
+            - int(cutover["prior_value_minor"]),
+            "successor_account_ids": [str(row["successor_account_id"]) for row in successors],
+        }
 
     def _create_account_budget_link(
         self,

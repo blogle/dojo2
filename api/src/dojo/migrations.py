@@ -11,6 +11,7 @@ def apply_migrations(connection: duckdb.DuckDBPyConnection) -> None:
     connection.execute(load_sql("schema/current"))
     _migrate_legacy_transaction_constraint(connection)
     _migrate_transaction_entry_order(connection)
+    connection.execute(load_sql("schema/migrations/add_rich_account_fields"))
 
 
 def provision_database(path: str) -> None:

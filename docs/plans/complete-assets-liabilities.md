@@ -17,15 +17,17 @@ The observable result is that mocks 01 through 07 are represented by working scr
 - [ ] Milestone 3 (backend and UI implemented; remaining: focused Cypress and statement-correction edge tests): complete investment statement reconciliation and holdings-plus-cash valuation.
 - [ ] Milestone 4 (backend and UI implemented; remaining: focused Cypress and preview refinement): complete investment contribution and withdrawal operations.
 - [ ] Milestone 5 (backend and UI implemented; remaining: focused Cypress, edit-attribution tests, and chart dispatch): complete loan payment attribution and aggregate statement reconciliation.
-- [ ] Milestone 6: complete one-to-many tracking cutover.
+- [x] (2026-08-01) Milestone 6: implemented atomic, idempotent one-to-many tracking cutover with inclusive future activation and signed net-worth neutrality.
 - [ ] Milestone 7: close mock-alignment gaps, remove inert controls, and run full verification.
+- [x] (2026-08-01) Committed the first rich-account implementation checkpoint as `f959bcf` after integration, property, focused Cypress, type, lint, architecture, migration, build, and docs verification.
 - [x] (2026-08-01) Completed product-owner manual validation of tracking, tangible, investment, and loan flows; captured accepted remediation decisions below.
-- [ ] Remediation A: correct Aspire terminology, block future effective dates, and add the shared institution combobox.
-- [ ] Remediation B: move investment/loan category links to account configuration and remove per-operation relationship selection.
-- [ ] Remediation C: fix same-day provisional investment value, derived monthly activity, and category spending history; preserve withdrawal-to-ATB behavior.
-- [ ] Remediation D: support cash-only statements and complete investment edge/Cypress coverage.
-- [ ] Remediation E: require opening current principal, simplify statement inputs, add amortization estimates/YTD checkpoints, and present escrow as a separate restricted asset.
-- [ ] Remediation F: replace tracking reconciliation language with snapshot source/date/freshness.
+- [x] (2026-08-01) Remediation A implemented: corrected Aspire terminology, blocked future effective dates at service/UI boundaries, and added a fixture-driven institution combobox with curated and prior-account suggestions.
+- [x] (2026-08-01) Remediation B implemented: investment/loan category links are created and edited in account configuration; operation payloads no longer select or mutate links.
+- [x] (2026-08-01) Remediation C implemented: same-day provisional ordering uses a monotonic statement/transfer event order; derived contributions feed monthly Activity and category history; withdrawals retain ATB-only behavior.
+- [x] (2026-08-01) Remediation D implemented: empty holding lists are valid in API and UI, with cash-only guidance and focused coverage.
+- [x] (2026-08-01) Remediation E implemented: loan creation records current principal/as-of atomically, statement advanced/YTD fields remain optional, amortization is estimated in a pure domain module, and escrow/unapplied credit are separate balance-sheet components.
+- [x] (2026-08-01) Remediation F implemented: tracking metrics now describe snapshot source/date/freshness without a separate reconciliation state.
+- [ ] Repeat product-owner browser validation for remediated investment, loan, and cutover flows before Dashboard acceptance.
 
 ## Surprises & Discoveries
 
@@ -42,7 +44,7 @@ The observable result is that mocks 01 through 07 are represented by working scr
   Evidence: `api/tests/test_account_values.py` covers holdings-plus-cash, provisional transfer deltas, linked-category funding, withdrawal ATB return, and loan principal/non-principal derivation.
 
 - Observation: A contribution recorded after an investment statement on the same date is excluded from provisional value.
-  Evidence: `investment_transfer_delta_after_date.sql` uses only `date > statement_date`; it needs same-day record-version ordering.
+  Evidence: The original `investment_transfer_delta_after_date.sql` used only `date > statement_date`; the remediation adds same-day monotonic event ordering that remains deterministic when timestamps tie.
 
 - Observation: Linked contribution transfers change all-time category availability but not monthly Activity or category spending history.
   Evidence: `list_categories()` subtracts `link_derived_by_cat` from available while `month_activity_minor` reads only transactions with `category_id`; transfer legs intentionally have only `system_category`.
@@ -52,6 +54,9 @@ The observable result is that mocks 01 through 07 are represented by working scr
 
 - Observation: Current mortgage net worth silently combines principal liability and escrow asset.
   Evidence: Principal `$770,168.00` less escrow `$4,060.83` produced `-$766,107.17`; the arithmetic is correct under the prior policy but the presentation was not understandable.
+
+- Observation: Cypress Electron began exiting with `SIGSEGV` after two tests in the larger account specs, while the same checked-in specs pass under headless Chrome.
+  Evidence: `AddItemWizardPage.cy.ts` and `AccountDetailPage.cy.ts` repeatedly crashed under the canonical Electron runner on 2026-08-01; both completed under `./scripts/run-cypress.sh run --component --browser chrome`.
 
 ## Known Defects From Manual Validation
 
@@ -113,7 +118,7 @@ The observable result is that mocks 01 through 07 are represented by working scr
 
 ## Outcomes & Retrospective
 
-Milestones 1 and 2 are implemented. Investment and loan backend/UI paths are present and pass focused integration/type/lint checks, but manual validation found the known defects listed above. Those defects now precede one-to-many cutover and final mock/browser alignment. Dashboard work remains blocked.
+Milestones 1–6 are implemented. The manually discovered defects have focused backend and Chrome component coverage, and one-to-many cutover now persists atomically with effective-date activation. Product-owner browser acceptance and Milestone 7 final mock/full-check closure remain; Dashboard work remains blocked until those complete.
 
 ## Context and Orientation
 

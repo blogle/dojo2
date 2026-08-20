@@ -7,7 +7,7 @@ import { formatCurrency, formatMonth } from "../utils/currency";
 import {
   fetchBudget,
   fetchAllocations,
-  fetchTransactionsPage,
+  fetchCategoryActivity,
   createCategory,
   updateCategory,
   createCategoryGroup,
@@ -40,7 +40,7 @@ const queryClient = useQueryClient();
 const QUERY_KEYS = {
   budget: ["budget"] as const,
   allocations: ["allocations"] as const,
-  transactions: ["transactions"] as const,
+  categoryActivity: ["category-activity"] as const,
 } as const;
 
 const currentMonth = computed(() => {
@@ -178,9 +178,9 @@ const { data: allocations } = useQuery({
   queryFn: () => fetchAllocations(false),
 });
 
-const { data: txPage } = useQuery({
-  queryKey: QUERY_KEYS.transactions,
-  queryFn: () => fetchTransactionsPage(false, 0, 10_000),
+const { data: categoryActivity } = useQuery({
+  queryKey: QUERY_KEYS.categoryActivity,
+  queryFn: fetchCategoryActivity,
 });
 
 const budget = computed(() => budgetResponse.value ?? null);
@@ -188,7 +188,6 @@ const categoryGroups = computed(() => budget.value?.groups ?? []);
 const categories = computed(
   () => budget.value?.groups.flatMap((g) => g.categories) ?? [],
 );
-const transactions = computed(() => txPage.value?.items ?? []);
 
 // --- Mutations ---
 
@@ -770,7 +769,7 @@ function submitFundGroup(
       "
       :category="selectedDetailCategory"
       :allocations="allocations ?? []"
-      :transactions="transactions"
+      :activity="categoryActivity ?? []"
       :scope-category-ids="selectedDetailScopeCategoryIds"
       :detail-kind="activeModal === 'group-detail' ? 'group' : 'category'"
       @close="closeModal"

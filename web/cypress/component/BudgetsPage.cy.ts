@@ -161,6 +161,31 @@ function stubFetch() {
       body = mockCategories;
     } else if (path.startsWith("/api/category-groups")) {
       body = mockGroups;
+    } else if (path === "/api/category-activity") {
+      body = {
+        items: [
+          {
+            activity_id: mockTransactions[0].transaction_id,
+            category_id: mockTransactions[0].category_id,
+            date: mockTransactions[0].date,
+            account_name: mockTransactions[0].account_name,
+            amount_minor: mockTransactions[0].amount_minor,
+            status: mockTransactions[0].status,
+            memo: mockTransactions[0].memo,
+            is_derived: false,
+          },
+          {
+            activity_id: "derived-investment-contribution",
+            category_id: mockTransactions[0].category_id,
+            date: mockTransactions[0].date,
+            account_name: "Brokerage",
+            amount_minor: -10_000,
+            status: "CLEARED",
+            memo: "Investment contribution",
+            is_derived: true,
+          },
+        ],
+      };
     } else if (path.startsWith("/api/transactions")) {
       body = {
         items: mockTransactions,
@@ -282,6 +307,10 @@ describe("BudgetsPage", () => {
     );
     cy.contains("button", "Spending history").click();
     cy.get("[data-cy=table-shell-root]").should("contain.text", "Market");
+    cy.get("[data-cy=table-shell-root]").should(
+      "contain.text",
+      "Investment contribution",
+    );
   });
 
   it("opens category groups in the detail trouser", () => {

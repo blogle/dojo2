@@ -5,6 +5,7 @@ import type {
   AssetsLiabilitiesResponse,
   BootstrapResponse,
   BudgetResponse,
+  CategoryActivity,
   Category,
   CategoryGroup,
   GoogleOnboardingStatus,
@@ -181,6 +182,13 @@ export async function fetchCategories(
   return request(`/api/categories?${params.toString()}`);
 }
 
+export async function fetchCategoryActivity(): Promise<CategoryActivity[]> {
+  const response = await request<{ items: CategoryActivity[] }>(
+    "/api/category-activity",
+  );
+  return response.items;
+}
+
 export async function fetchNetWorth(): Promise<NetWorthResponse> {
   return request<NetWorthResponse>("/api/net-worth");
 }
@@ -347,6 +355,60 @@ export async function createTrackingSnapshot(
   );
 }
 
+export type TrackingCutoverSuccessor =
+  | {
+      account_class: "INVESTMENT";
+      name: string;
+      institution?: string;
+      contribution_category_id?: string;
+      cash_balance_minor: number;
+      holdings: Array<{
+        ticker: string;
+        quantity_micros: number;
+        price_minor: number;
+      }>;
+    }
+  | {
+      account_class: "LOAN";
+      name: string;
+      institution?: string;
+      payment_category_id: string;
+      principal_balance_minor: number;
+      accrued_interest_minor?: number;
+      escrow_balance_minor: number;
+      unapplied_credit_minor?: number;
+    }
+  | {
+      account_class: "TANGIBLE_ASSET";
+      name: string;
+      institution?: string;
+      opening_value_minor: number;
+    };
+
+export async function createTrackingCutover(
+  accountId: string,
+  payload: {
+    operation_id: string;
+    cutover_date: string;
+    expected_predecessor_value_minor: number;
+    variance_confirmed: boolean;
+    successors: TrackingCutoverSuccessor[];
+  },
+): Promise<{
+  operation_id: string;
+  predecessor_account_id: string;
+  cutover_date: string;
+  prior_value_minor: number;
+  successor_total_minor: number;
+  variance_minor: number;
+  successor_account_ids: string[];
+}> {
+  return request(`/api/accounts/${accountId}/cutovers`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export type TangibleValuation = {
   valuation_id: string;
   account_id: string;
@@ -446,6 +508,20 @@ export async function fetchAccountBudgetLinks(
   return response.items;
 }
 
+export async function setAccountBudgetLink(
+  accountId: string,
+  payload: {
+    category_id: string;
+    link_behavior: "INVESTMENT_CONTRIBUTION" | "LOAN_PAYMENT";
+    effective_date: string;
+  },
+): Promise<void> {
+  await request(`/api/accounts/${accountId}/budget-links`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function createInvestmentTransfer(
   accountId: string,
   payload: {
@@ -456,7 +532,6 @@ export async function createInvestmentTransfer(
     status: "PENDING" | "CLEARED";
     memo: string;
     fund_shortfall: boolean;
-    contribution_category_id?: string;
   },
 ): Promise<{
   transfer_id: string;
@@ -478,11 +553,32 @@ export type LoanSnapshot = {
   principal_balance_minor: number;
   accrued_interest_minor: number | null;
   escrow_balance_minor: number;
-  unapplied_credit_minor: number;
+  unapplied_credit_minor: number | null;
+  ytd_principal_paid_minor: number | null;
+  ytd_interest_paid_minor: number | null;
   attributed_payment_minor: number;
   principal_reduction_minor: number;
   unknown_nonprincipal_minor: number;
   notes: string;
+};
+
+export type LoanProjection = {
+  available: boolean;
+  missing: string[];
+  reason?: string;
+  rate_assumption?: string;
+  estimated_accrued_interest_minor?: number;
+  projected_payoff_date?: string | null;
+  projected_total_interest_minor?: number;
+  remaining_principal_at_horizon_minor?: number;
+  rows: Array<{
+    payment_number: number;
+    payment_date: string;
+    payment_minor: number;
+    principal_minor: number;
+    interest_minor: number;
+    remaining_principal_minor: number;
+  }>;
 };
 
 export async function fetchLoanSnapshots(
@@ -494,6 +590,12 @@ export async function fetchLoanSnapshots(
   return response.items;
 }
 
+export async function fetchLoanProjection(
+  accountId: string,
+): Promise<LoanProjection> {
+  return request<LoanProjection>(`/api/accounts/${accountId}/loan-projection`);
+}
+
 export async function reconcileLoanStatement(
   accountId: string,
   payload: {
@@ -501,7 +603,9 @@ export async function reconcileLoanStatement(
     principal_balance_minor: number;
     accrued_interest_minor?: number;
     escrow_balance_minor: number;
-    unapplied_credit_minor: number;
+    unapplied_credit_minor?: number;
+    ytd_principal_paid_minor?: number;
+    ytd_interest_paid_minor?: number;
     notes?: string;
   },
 ): Promise<{ snapshot_id: string }> {
@@ -517,7 +621,6 @@ export async function createLoanPayment(
     date: string;
     budget_account_id: string;
     amount_minor: number;
-    category_id: string;
     status: "PENDING" | "CLEARED";
     memo: string;
   },

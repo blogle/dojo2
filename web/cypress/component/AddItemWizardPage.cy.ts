@@ -37,6 +37,36 @@ function stubFetch() {
         );
       }
 
+      if (path === "/api/accounts") {
+        return Promise.resolve(
+          new Response(JSON.stringify([]), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
+
+      if (path === "/api/categories") {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              groups: [],
+              items: [
+                {
+                  category_id: "category-1",
+                  name: "Long-term goals",
+                  category_kind: "STANDARD",
+                },
+              ],
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            },
+          ),
+        );
+      }
+
       return Promise.resolve(
         new Response(JSON.stringify({ items: [] }), {
           status: 200,
@@ -105,6 +135,8 @@ describe("AddItemWizardPage", () => {
     cy.get("[data-cy=add-item-continue]").click();
     cy.get('input[name="name"]').type("Mortgage");
     cy.get('input[name="institution"]').type("Local Credit Union");
+    cy.get('select[name="loan-payment-category"]').select("category-1");
+    cy.get('input[name="current-principal"]').type("245000");
     cy.get('input[name="original-amount"]').type("250000");
     cy.get("[data-cy=add-item-continue]").click();
 
@@ -126,6 +158,8 @@ describe("AddItemWizardPage", () => {
         account_class: "LOAN",
         institution: "Local Credit Union",
         status: "IN_REPAYMENT",
+        loan_payment_category_id: "category-1",
+        current_principal_minor: 24500000,
       });
       expect(body.original_amount_minor).to.eq(25000000);
     });
@@ -146,6 +180,9 @@ describe("AddItemWizardPage", () => {
     cy.get('input[name="name"]').type("Schwab Brokerage");
     cy.get('select[name="self-managed"]').select("true");
     cy.get('select[name="tax-treatment"]').select("ROTH_IRA");
+    cy.get('select[name="investment-contribution-category"]').select(
+      "category-1",
+    );
     cy.get("[data-cy=add-item-continue]").click();
 
     cy.get("@fetch").should((fetchStub) => {
@@ -166,6 +203,7 @@ describe("AddItemWizardPage", () => {
         account_class: "INVESTMENT",
         self_managed: true,
         tax_treatment: "ROTH_IRA",
+        investment_contribution_category_id: "category-1",
       });
     });
     cy.wrap(null).then(() => {

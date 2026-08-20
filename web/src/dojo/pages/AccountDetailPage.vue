@@ -11,6 +11,7 @@ import { useRoute, useRouter } from "vue-router";
 import {
   deleteTransaction,
   createTangibleValuation,
+  createTrackingCutover,
   createTrackingSnapshot,
   createInvestmentTransfer,
   createLoanPayment,
@@ -21,13 +22,16 @@ import {
   fetchCategories,
   fetchLatestInvestmentStatement,
   fetchLoanPayments,
+  fetchLoanProjection,
   fetchLoanSnapshots,
   fetchTrackingSnapshots,
   fetchTangibleValuations,
   fetchTransactionsPage,
   reconcileInvestmentStatement,
   reconcileLoanStatement,
+  setAccountBudgetLink,
   type TransactionFilters,
+  type TrackingCutoverSuccessor,
   updateAccount,
   updateTransaction,
 } from "@/dojo/api/client";
@@ -42,14 +46,17 @@ import type { KeyValueItem } from "@/dojo/components/display/KeyValueList.vue";
 import StateBadge from "@/dojo/components/display/StateBadge.vue";
 import CurrencyField from "@/dojo/components/forms/CurrencyField.vue";
 import DatePicker from "@/dojo/components/forms/DatePicker.vue";
+import InstitutionCombobox from "@/dojo/components/forms/InstitutionCombobox.vue";
 import SelectField from "@/dojo/components/forms/SelectField.vue";
 import TextField from "@/dojo/components/forms/TextField.vue";
 import NavigationRail from "@/dojo/components/navigation/NavigationRail.vue";
 import FormModal from "@/dojo/components/overlays/FormModal.vue";
+import TableShell from "@/dojo/components/tables/TableShell.vue";
 import TransactionFilterBar from "@/dojo/components/transactions/TransactionFilterBar.vue";
 import TransactionLedger from "@/dojo/components/transactions/TransactionLedger.vue";
 import type { Transaction, TransactionPayload } from "@/dojo/types";
 import { formatCurrency } from "@/dojo/utils/currency";
+import { institutionSuggestions } from "@/dojo/utils/institutions";
 
 const route = useRoute();
 const router = useRouter();
@@ -98,7 +105,12 @@ const account = computed(() =>
   accounts.value?.find((a) => a.account_id === accountId.value),
 );
 
-const currentMonth = computed(() => new Date().toISOString().slice(0, 7));
+const suggestedInstitutions = computed(() =>
+  institutionSuggestions(accounts.value?.map((item) => item.institution) ?? []),
+);
+
+const currentDate = new Date().toISOString().slice(0, 10);
+const currentMonth = computed(() => currentDate.slice(0, 7));
 const categoryFilter = ref("all");
 const dateFilter = ref("all");
 const amountFilter = ref("all");
@@ -108,6 +120,17 @@ const showConfigurationModal = ref(false);
 const configurationName = ref("");
 const configurationInstitution = ref("");
 const configurationLast4 = ref("");
+const configurationCategoryId = ref("");
+const configurationRatePercent = ref("");
+const configurationRateType = ref<"FIXED" | "VARIABLE">("FIXED");
+const configurationScheduledPayment = ref("");
+const configurationPaymentFrequency = ref<"MONTHLY" | "BIWEEKLY" | "WEEKLY">(
+  "MONTHLY",
+);
+const configurationNextPaymentDate = ref("");
+const configurationMaturityDate = ref("");
+const configurationRemainingTermMonths = ref("");
+const configurationExtraPrincipal = ref("");
 const actionMessage = ref("");
 const showValueModal = ref(false);
 const valueDate = ref(new Date().toISOString().slice(0, 10));
@@ -131,7 +154,6 @@ const investmentTransferDirection = ref<"CONTRIBUTION" | "WITHDRAWAL">(
 );
 const investmentTransferDate = ref(new Date().toISOString().slice(0, 10));
 const investmentTransferBudgetAccountId = ref("");
-const investmentTransferCategoryId = ref("");
 const investmentTransferAmount = ref("");
 const investmentTransferMemo = ref("");
 const investmentTransferStatus = ref<"PENDING" | "CLEARED">("CLEARED");
@@ -139,7 +161,6 @@ const investmentTransferFundShortfall = ref(true);
 const showLoanPaymentModal = ref(false);
 const loanPaymentDate = ref(new Date().toISOString().slice(0, 10));
 const loanPaymentBudgetAccountId = ref("");
-const loanPaymentCategoryId = ref("");
 const loanPaymentAmount = ref("");
 const loanPaymentMemo = ref("Loan payment");
 const showLoanStatementModal = ref(false);
@@ -148,6 +169,9 @@ const loanPrincipal = ref("");
 const loanAccruedInterest = ref("");
 const loanEscrow = ref("");
 const loanUnapplied = ref("");
+const loanYtdPrincipal = ref("");
+const loanYtdInterest = ref("");
+const showLoanAdvancedFields = ref(false);
 
 const { data: categoriesResponse } = useQuery({
   queryKey: computed(() => ["categories", currentMonth.value]),
@@ -288,6 +312,11 @@ const { data: loanPayments } = useQuery({
   queryFn: () => fetchLoanPayments(accountId.value),
   enabled: computed(() => !!accountId.value && isLoanAccount.value),
 });
+const { data: loanProjection } = useQuery({
+  queryKey: computed(() => ["loan-projection", accountId.value]),
+  queryFn: () => fetchLoanProjection(accountId.value),
+  enabled: computed(() => !!accountId.value && isLoanAccount.value),
+});
 const latestLoanSnapshot = computed(() => loanSnapshots.value?.[0]);
 
 const budgetAccountOptions = computed(() =>
@@ -319,10 +348,53 @@ const linkedLoanCategoryId = computed(
       (link) => link.link_behavior === "LOAN_PAYMENT",
     )?.category_id ?? "",
 );
+const configurableCategoryOptions = computed(() =>
+  isInvestmentAccount.value && !linkedContributionCategoryId.value
+    ? [
+        { value: "", label: "Do not link a category yet" },
+        ...contributionCategoryOptions.value,
+      ]
+    : contributionCategoryOptions.value,
+);
 const selectedContributionCategory = computed(() =>
   categories.value.find(
-    (category) => category.category_id === investmentTransferCategoryId.value,
+    (category) => category.category_id === linkedContributionCategoryId.value,
   ),
+);
+const selectedLoanCategory = computed(() =>
+  categories.value.find(
+    (category) => category.category_id === linkedLoanCategoryId.value,
+  ),
+);
+const contributionPreview = computed(() => {
+  const available = selectedContributionCategory.value?.available_minor ?? 0;
+  const amount = parseCurrencyMinor(investmentTransferAmount.value) ?? 0;
+  const fundedShortfall = investmentTransferFundShortfall.value
+    ? Math.max(amount - available, 0)
+    : 0;
+  return {
+    available,
+    amount,
+    fundedShortfall,
+    resultingAvailable: available + fundedShortfall - amount,
+  };
+});
+const loanProjectionColumns = [
+  { key: "date", label: "Payment date" },
+  { key: "payment", label: "Payment", align: "end" as const },
+  { key: "principal", label: "Principal", align: "end" as const },
+  { key: "interest", label: "Interest", align: "end" as const },
+  { key: "balance", label: "Balance", align: "end" as const },
+];
+const loanProjectionRows = computed(() =>
+  (loanProjection.value?.rows ?? []).slice(0, 12).map((row) => ({
+    key: row.payment_number,
+    date: row.payment_date,
+    payment: formatCurrency(row.payment_minor),
+    principal: formatCurrency(row.principal_minor),
+    interest: formatCurrency(row.interest_minor),
+    balance: formatCurrency(row.remaining_principal_minor),
+  })),
 );
 
 const valueHistory = computed(() =>
@@ -332,12 +404,99 @@ const valueHistory = computed(() =>
 );
 
 const showCutoverModal = ref(false);
-const cutoverEntityType = ref("INVESTMENT");
 const cutoverDate = ref(new Date().toISOString().slice(0, 10));
-const cutoverName = ref("");
-const cutoverOpeningValue = ref("");
-const cutoverContributionCategory = ref("create");
 const cutoverRepresentationConfirmed = ref(true);
+const cutoverOperationId = ref("");
+type CutoverHoldingDraft = {
+  ticker: string;
+  quantity: string;
+  price: string;
+};
+type CutoverSuccessorDraft = {
+  id: string;
+  accountClass: "INVESTMENT" | "LOAN" | "TANGIBLE_ASSET";
+  name: string;
+  institution: string;
+  openingValue: string;
+  escrow: string;
+  accruedInterest: string;
+  unappliedCredit: string;
+  categoryId: string;
+  holdings: CutoverHoldingDraft[];
+};
+const cutoverSuccessors = ref<CutoverSuccessorDraft[]>([]);
+
+function newCutoverSuccessor(
+  openingValue = "",
+  name = "New successor",
+): CutoverSuccessorDraft {
+  return {
+    id: crypto.randomUUID(),
+    accountClass: "INVESTMENT",
+    name,
+    institution: account.value?.institution ?? "",
+    openingValue,
+    escrow: "0",
+    accruedInterest: "",
+    unappliedCredit: "",
+    categoryId: "",
+    holdings: [],
+  };
+}
+
+const cutoverSuccessorTotal = computed(() =>
+  cutoverSuccessors.value.reduce((total, successor) => {
+    const opening = parseCurrencyMinor(successor.openingValue) ?? 0;
+    if (successor.accountClass === "LOAN") {
+      return (
+        total -
+        opening -
+        (parseCurrencyMinor(successor.accruedInterest) ?? 0) +
+        (parseCurrencyMinor(successor.escrow) ?? 0) +
+        (parseCurrencyMinor(successor.unappliedCredit) ?? 0)
+      );
+    }
+    if (successor.accountClass === "INVESTMENT") {
+      return (
+        total +
+        opening +
+        successor.holdings.reduce((holdingTotal, holding) => {
+          const quantity = Number(holding.quantity);
+          const price = parseCurrencyMinor(holding.price) ?? 0;
+          return holdingTotal + Math.round(quantity * price);
+        }, 0)
+      );
+    }
+    return total + opening;
+  }, 0),
+);
+const cutoverExpectedSignedValue = computed(() => {
+  const value = accountCurrentValue.value ?? 0;
+  return account.value?.tracking_polarity === "LIABILITY" ? -value : value;
+});
+const cutoverVariance = computed(
+  () => cutoverSuccessorTotal.value - cutoverExpectedSignedValue.value,
+);
+const cutoverCanSave = computed(
+  () =>
+    cutoverRepresentationConfirmed.value &&
+    cutoverSuccessors.value.length > 0 &&
+    cutoverSuccessors.value.every(
+      (successor) =>
+        successor.name.trim().length > 0 &&
+        parseCurrencyMinor(successor.openingValue) !== null &&
+        (successor.accountClass !== "LOAN" ||
+          successor.categoryId.length > 0) &&
+        (successor.accountClass !== "INVESTMENT" ||
+          successor.holdings.every(
+            (holding) =>
+              holding.ticker.trim().length > 0 &&
+              Number.isFinite(Number(holding.quantity)) &&
+              Number(holding.quantity) >= 0 &&
+              (parseCurrencyMinor(holding.price) ?? 0) > 0,
+          )),
+    ),
+);
 
 const pageTitle = computed(
   () => cleanAccountName(account.value?.name) ?? "Account",
@@ -546,11 +705,17 @@ const metricItems = computed((): MetricStripItem[] => {
         auxValue: sourceSub,
       },
       {
-        key: "recon",
-        label: "Reconciliation freshness",
-        value: "Not reconciled",
-        auxValue: "No reconciliation recorded",
-        status: { label: "", variant: "warning" as const },
+        key: "freshness",
+        label: "Snapshot freshness",
+        value: account.value.latest_valuation_date
+          ? "Current"
+          : "Missing snapshot",
+        auxValue: account.value.latest_valuation_date
+          ? `As of ${latestSnapshotDate}`
+          : "Add a snapshot to establish value",
+        status: account.value.latest_valuation_date
+          ? { label: "", variant: "positive" as const }
+          : { label: "", variant: "warning" as const },
       },
     ];
   }
@@ -666,7 +831,7 @@ const trackingSummaryDetails = computed((): KeyValueItem[] => {
 });
 
 const migrationContextDetails = computed((): KeyValueItem[] => [
-  { label: "Imported from", value: "Google Aspire" },
+  { label: "Imported from", value: "Aspire Budgeting" },
   { label: "Imported on", value: "—" },
   { label: "Import type", value: "Net-worth migration" },
 ]);
@@ -768,15 +933,26 @@ const deleteTransactionMutation = useMutation({
 });
 
 const updateAccountMutation = useMutation({
-  mutationFn: ({
+  mutationFn: async ({
     id,
     payload,
+    linkChange,
   }: {
     id: string;
     payload: Record<string, unknown>;
-  }) => updateAccount(id, payload),
+    linkChange?: {
+      action: "set";
+      payload: Parameters<typeof setAccountBudgetLink>[1];
+    };
+  }) => {
+    await updateAccount(id, payload);
+    if (linkChange?.action === "set") {
+      await setAccountBudgetLink(id, linkChange.payload);
+    }
+  },
   onSuccess: () => {
     showConfigurationModal.value = false;
+    queryClient.invalidateQueries({ queryKey: ["account-budget-links"] });
     invalidateAccountDetailQueries();
   },
 });
@@ -794,6 +970,16 @@ const createValueMutation = useMutation({
     showValueModal.value = false;
     queryClient.invalidateQueries({ queryKey: ["tracking-snapshots"] });
     queryClient.invalidateQueries({ queryKey: ["tangible-valuations"] });
+    invalidateAccountDetailQueries();
+  },
+});
+const cutoverMutation = useMutation({
+  mutationFn: (payload: Parameters<typeof createTrackingCutover>[1]) =>
+    createTrackingCutover(accountId.value, payload),
+  onSuccess: () => {
+    showCutoverModal.value = false;
+    actionMessage.value =
+      "Representation cutover recorded. No ledger transactions were created.";
     invalidateAccountDetailQueries();
   },
 });
@@ -858,6 +1044,8 @@ function invalidateAccountDetailQueries() {
   queryClient.invalidateQueries({ queryKey: ["budget"] });
   queryClient.invalidateQueries({ queryKey: ["allocations"] });
   queryClient.invalidateQueries({ queryKey: ["net-worth"] });
+  queryClient.invalidateQueries({ queryKey: ["category-activity"] });
+  queryClient.invalidateQueries({ queryKey: ["loan-projection"] });
 }
 
 function openValueModal() {
@@ -897,7 +1085,6 @@ function openInvestmentStatementModal() {
         ? ""
         : String(holding.average_basis_minor / 100),
   }));
-  if (investmentHoldingRows.value.length === 0) addInvestmentHoldingRow();
   showInvestmentStatementModal.value = true;
 }
 
@@ -938,14 +1125,6 @@ function openInvestmentTransferModal(direction: "CONTRIBUTION" | "WITHDRAWAL") {
   investmentTransferDate.value = new Date().toISOString().slice(0, 10);
   investmentTransferBudgetAccountId.value =
     budgetAccountOptions.value[0]?.value ?? "";
-  investmentTransferCategoryId.value =
-    linkedContributionCategoryId.value ??
-    contributionCategoryOptions.value[0]?.value ??
-    "";
-  if (!investmentTransferCategoryId.value) {
-    investmentTransferCategoryId.value =
-      contributionCategoryOptions.value[0]?.value ?? "";
-  }
   investmentTransferAmount.value = "";
   investmentTransferMemo.value =
     direction === "CONTRIBUTION"
@@ -967,10 +1146,6 @@ function saveInvestmentTransfer() {
     status: investmentTransferStatus.value,
     memo: investmentTransferMemo.value,
     fund_shortfall: investmentTransferFundShortfall.value,
-    ...(investmentTransferDirection.value === "CONTRIBUTION" &&
-    investmentTransferCategoryId.value
-      ? { contribution_category_id: investmentTransferCategoryId.value }
-      : {}),
   });
 }
 
@@ -979,16 +1154,12 @@ const investmentTransferCanSave = computed(
     parseCurrencyMinor(investmentTransferAmount.value) !== null &&
     investmentTransferBudgetAccountId.value.length > 0 &&
     (investmentTransferDirection.value === "WITHDRAWAL" ||
-      investmentTransferCategoryId.value.length > 0),
+      linkedContributionCategoryId.value.length > 0),
 );
 
 function openLoanPaymentModal() {
   loanPaymentDate.value = new Date().toISOString().slice(0, 10);
   loanPaymentBudgetAccountId.value = budgetAccountOptions.value[0]?.value ?? "";
-  loanPaymentCategoryId.value =
-    linkedLoanCategoryId.value ||
-    contributionCategoryOptions.value[0]?.value ||
-    "";
   loanPaymentAmount.value = "";
   loanPaymentMemo.value = "Loan payment";
   showLoanPaymentModal.value = true;
@@ -1001,7 +1172,6 @@ function saveLoanPayment() {
     date: loanPaymentDate.value,
     budget_account_id: loanPaymentBudgetAccountId.value,
     amount_minor: amount,
-    category_id: loanPaymentCategoryId.value,
     status: "CLEARED",
     memo: loanPaymentMemo.value,
   });
@@ -1013,27 +1183,50 @@ function openLoanStatementModal() {
   loanPrincipal.value = snapshot
     ? String(snapshot.principal_balance_minor / 100)
     : "";
-  loanAccruedInterest.value = snapshot?.accrued_interest_minor
-    ? String(snapshot.accrued_interest_minor / 100)
-    : "0";
+  loanAccruedInterest.value =
+    snapshot?.accrued_interest_minor == null
+      ? ""
+      : String(snapshot.accrued_interest_minor / 100);
   loanEscrow.value = snapshot
     ? String(snapshot.escrow_balance_minor / 100)
     : "0";
-  loanUnapplied.value = snapshot
-    ? String(snapshot.unapplied_credit_minor / 100)
-    : "0";
+  loanUnapplied.value =
+    snapshot?.unapplied_credit_minor == null
+      ? ""
+      : String(snapshot.unapplied_credit_minor / 100);
+  loanYtdPrincipal.value =
+    snapshot?.ytd_principal_paid_minor == null
+      ? ""
+      : String(snapshot.ytd_principal_paid_minor / 100);
+  loanYtdInterest.value =
+    snapshot?.ytd_interest_paid_minor == null
+      ? ""
+      : String(snapshot.ytd_interest_paid_minor / 100);
+  showLoanAdvancedFields.value = false;
   showLoanStatementModal.value = true;
 }
 
 function saveLoanStatement() {
   const principal = parseCurrencyMinor(loanPrincipal.value);
   if (principal === null) return;
+  const accruedInterest = parseCurrencyMinor(loanAccruedInterest.value);
+  const unappliedCredit = parseCurrencyMinor(loanUnapplied.value);
+  const ytdPrincipal = parseCurrencyMinor(loanYtdPrincipal.value);
+  const ytdInterest = parseCurrencyMinor(loanYtdInterest.value);
   loanStatementMutation.mutate({
     effective_date: loanStatementDate.value,
     principal_balance_minor: principal,
-    accrued_interest_minor: parseCurrencyMinor(loanAccruedInterest.value) ?? 0,
     escrow_balance_minor: parseCurrencyMinor(loanEscrow.value) ?? 0,
-    unapplied_credit_minor: parseCurrencyMinor(loanUnapplied.value) ?? 0,
+    ...(accruedInterest === null
+      ? {}
+      : { accrued_interest_minor: accruedInterest }),
+    ...(unappliedCredit === null
+      ? {}
+      : { unapplied_credit_minor: unappliedCredit }),
+    ...(ytdPrincipal === null
+      ? {}
+      : { ytd_principal_paid_minor: ytdPrincipal }),
+    ...(ytdInterest === null ? {} : { ytd_interest_paid_minor: ytdInterest }),
   });
 }
 
@@ -1067,18 +1260,99 @@ function openConfigurationModal() {
     cleanAccountName(account.value.name) ?? account.value.name;
   configurationInstitution.value = account.value.institution ?? "";
   configurationLast4.value = account.value.account_number_last4 ?? "";
+  configurationCategoryId.value = isInvestmentAccount.value
+    ? linkedContributionCategoryId.value
+    : isLoanAccount.value
+      ? linkedLoanCategoryId.value
+      : "";
+  configurationRatePercent.value = account.value.loan_rate_minor
+    ? String(account.value.loan_rate_minor / 100)
+    : "";
+  configurationRateType.value = account.value.loan_rate_type ?? "FIXED";
+  configurationScheduledPayment.value =
+    account.value.loan_scheduled_principal_interest_minor == null
+      ? ""
+      : String(account.value.loan_scheduled_principal_interest_minor / 100);
+  configurationPaymentFrequency.value =
+    account.value.loan_payment_frequency ?? "MONTHLY";
+  configurationNextPaymentDate.value =
+    account.value.loan_next_payment_date ?? "";
+  configurationMaturityDate.value = account.value.loan_maturity_date ?? "";
+  configurationRemainingTermMonths.value =
+    account.value.loan_remaining_term_months == null
+      ? ""
+      : String(account.value.loan_remaining_term_months);
+  configurationExtraPrincipal.value =
+    account.value.loan_recurring_extra_principal_minor == null
+      ? ""
+      : String(account.value.loan_recurring_extra_principal_minor / 100);
   showConfigurationModal.value = true;
 }
 
 function saveConfiguration() {
   if (!account.value) return;
+  const linkBehavior = isInvestmentAccount.value
+    ? "INVESTMENT_CONTRIBUTION"
+    : isLoanAccount.value
+      ? "LOAN_PAYMENT"
+      : null;
+  const currentLinkedCategoryId = isInvestmentAccount.value
+    ? linkedContributionCategoryId.value
+    : linkedLoanCategoryId.value;
+  const rateMinor = parsePercentMinor(configurationRatePercent.value);
+  const scheduledPaymentMinor = parseCurrencyMinor(
+    configurationScheduledPayment.value,
+  );
+  const extraPrincipalMinor = parseCurrencyMinor(
+    configurationExtraPrincipal.value,
+  );
   updateAccountMutation.mutate({
     id: account.value.account_id,
     payload: {
       name: configurationName.value,
       institution: configurationInstitution.value || null,
       account_number_last4: configurationLast4.value || null,
+      ...(isLoanAccount.value
+        ? {
+            ...(rateMinor === null ? {} : { rate_minor: rateMinor }),
+            rate_type: configurationRateType.value,
+            ...(scheduledPaymentMinor === null
+              ? {}
+              : { scheduled_principal_interest_minor: scheduledPaymentMinor }),
+            payment_frequency: configurationPaymentFrequency.value,
+            ...(configurationNextPaymentDate.value
+              ? { next_payment_date: configurationNextPaymentDate.value }
+              : {}),
+            ...(configurationMaturityDate.value
+              ? { maturity_date: configurationMaturityDate.value }
+              : {}),
+            ...(configurationRemainingTermMonths.value
+              ? {
+                  remaining_term_months: Number(
+                    configurationRemainingTermMonths.value,
+                  ),
+                }
+              : {}),
+            ...(extraPrincipalMinor === null
+              ? {}
+              : { recurring_extra_principal_minor: extraPrincipalMinor }),
+          }
+        : {}),
     },
+    ...(linkBehavior &&
+    configurationCategoryId.value &&
+    configurationCategoryId.value !== currentLinkedCategoryId
+      ? {
+          linkChange: {
+            action: "set" as const,
+            payload: {
+              category_id: configurationCategoryId.value,
+              link_behavior: linkBehavior,
+              effective_date: currentDate,
+            },
+          },
+        }
+      : {}),
   });
 }
 
@@ -1096,22 +1370,88 @@ function showReconciliationStub() {
 
 function openCutoverModal() {
   if (!account.value) return;
-  const latestValuation = account.value.display_balance_minor;
-  cutoverName.value = cleanAccountName(account.value.name)
-    ? `${cleanAccountName(account.value.name)} (Upgraded)`
-    : `${account.value.name} (Upgraded)`;
-  cutoverOpeningValue.value = String(latestValuation);
+  const latestValuation = accountCurrentValue.value ?? 0;
+  const name = cleanAccountName(account.value.name) ?? account.value.name;
   cutoverDate.value = new Date().toISOString().slice(0, 10);
-  cutoverEntityType.value = "INVESTMENT";
-  cutoverContributionCategory.value = "create";
+  cutoverOperationId.value = crypto.randomUUID();
+  cutoverSuccessors.value = [
+    newCutoverSuccessor(String(latestValuation / 100), `${name} (Upgraded)`),
+  ];
   cutoverRepresentationConfirmed.value = true;
   showCutoverModal.value = true;
 }
 
+function addCutoverSuccessor() {
+  cutoverSuccessors.value.push(newCutoverSuccessor());
+}
+
+function removeCutoverSuccessor(index: number) {
+  cutoverSuccessors.value.splice(index, 1);
+}
+
+function addCutoverHolding(successor: CutoverSuccessorDraft) {
+  successor.holdings.push({ ticker: "", quantity: "", price: "" });
+}
+
+function removeCutoverHolding(successor: CutoverSuccessorDraft, index: number) {
+  successor.holdings.splice(index, 1);
+}
+
 function handleCutoverSubmit() {
-  showCutoverModal.value = false;
-  actionMessage.value =
-    "Account cutover is a representation change, not a ledger transfer. This flow will persist the cutover when the backend endpoint is available.";
+  if (!cutoverCanSave.value || accountCurrentValue.value === null) return;
+  const successors: TrackingCutoverSuccessor[] = cutoverSuccessors.value.map(
+    (successor) => {
+      const institution = successor.institution.trim() || undefined;
+      if (successor.accountClass === "INVESTMENT") {
+        return {
+          account_class: "INVESTMENT",
+          name: successor.name.trim(),
+          ...(institution ? { institution } : {}),
+          ...(successor.categoryId
+            ? { contribution_category_id: successor.categoryId }
+            : {}),
+          cash_balance_minor: parseCurrencyMinor(successor.openingValue) ?? 0,
+          holdings: successor.holdings.map((holding) => ({
+            ticker: holding.ticker.trim().toUpperCase(),
+            quantity_micros: Math.round(Number(holding.quantity) * 1_000_000),
+            price_minor: parseCurrencyMinor(holding.price) ?? 0,
+          })),
+        };
+      }
+      if (successor.accountClass === "LOAN") {
+        const accruedInterest = parseCurrencyMinor(successor.accruedInterest);
+        const unappliedCredit = parseCurrencyMinor(successor.unappliedCredit);
+        return {
+          account_class: "LOAN",
+          name: successor.name.trim(),
+          ...(institution ? { institution } : {}),
+          payment_category_id: successor.categoryId,
+          principal_balance_minor:
+            parseCurrencyMinor(successor.openingValue) ?? 0,
+          escrow_balance_minor: parseCurrencyMinor(successor.escrow) ?? 0,
+          ...(accruedInterest === null
+            ? {}
+            : { accrued_interest_minor: accruedInterest }),
+          ...(unappliedCredit === null
+            ? {}
+            : { unapplied_credit_minor: unappliedCredit }),
+        };
+      }
+      return {
+        account_class: "TANGIBLE_ASSET",
+        name: successor.name.trim(),
+        ...(institution ? { institution } : {}),
+        opening_value_minor: parseCurrencyMinor(successor.openingValue) ?? 0,
+      };
+    },
+  );
+  cutoverMutation.mutate({
+    operation_id: cutoverOperationId.value,
+    cutover_date: cutoverDate.value,
+    expected_predecessor_value_minor: accountCurrentValue.value,
+    variance_confirmed: cutoverRepresentationConfirmed.value,
+    successors,
+  });
 }
 
 function datePresetToFilter(
@@ -1154,6 +1494,13 @@ function parseCurrencyMinor(value: string): number | null {
   const amount = Number(value.replace(/[$,]/g, "").trim());
   if (!Number.isFinite(amount) || amount < 0) return null;
   return Math.round(amount * 100);
+}
+
+function parsePercentMinor(value: string): number | null {
+  const normalized = value.replace(/[%,$]/g, "").trim();
+  if (!normalized) return null;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? Math.round(parsed * 100) : null;
 }
 
 function cleanAccountName(name: string | undefined): string | null {
@@ -1369,8 +1716,8 @@ function formatTaxTreatment(value: string | null | undefined): string {
               stroke-linecap="round"
             />
           </svg>
-          This tracking account was imported from Google Aspire during net-worth
-          migration.
+          This tracking account was imported from Aspire Budgeting during
+          net-worth migration.
         </div>
 
         <div class="account-detail-page__content">
@@ -1521,36 +1868,127 @@ function formatTaxTreatment(value: string | null | undefined): string {
                 data-cy="loan-summary-section"
               >
                 <h2 class="account-detail-page__section-title">
-                  Loan statement summary
+                  Lender actual and balance-derived
                 </h2>
                 <KeyValueList
                   :items="[
                     {
+                      label: 'Principal balance',
+                      value: formatOptionalCurrency(
+                        latestLoanSnapshot?.principal_balance_minor,
+                      ),
+                    },
+                    {
+                      label: 'Accrued interest',
+                      value: formatOptionalCurrency(
+                        latestLoanSnapshot?.accrued_interest_minor,
+                      ),
+                    },
+                    {
                       label: 'Principal reduction',
-                      value: formatCurrency(
-                        latestLoanSnapshot?.principal_reduction_minor ?? 0,
+                      value: latestLoanSnapshot
+                        ? formatCurrency(
+                            latestLoanSnapshot.principal_reduction_minor,
+                          )
+                        : 'Awaiting statement',
+                    },
+                    {
+                      label: 'YTD principal paid',
+                      value: formatOptionalCurrency(
+                        latestLoanSnapshot?.ytd_principal_paid_minor,
+                      ),
+                    },
+                    {
+                      label: 'YTD interest paid',
+                      value: formatOptionalCurrency(
+                        latestLoanSnapshot?.ytd_interest_paid_minor,
                       ),
                     },
                     {
                       label: 'Unknown non-principal',
-                      value: formatCurrency(
-                        latestLoanSnapshot?.unknown_nonprincipal_minor ?? 0,
-                      ),
-                    },
-                    {
-                      label: 'Escrow balance',
-                      value: formatCurrency(
-                        latestLoanSnapshot?.escrow_balance_minor ?? 0,
-                      ),
+                      value: latestLoanSnapshot
+                        ? formatCurrency(
+                            latestLoanSnapshot.unknown_nonprincipal_minor,
+                          )
+                        : 'Awaiting statement',
                     },
                     {
                       label: 'Unapplied credit',
-                      value: formatCurrency(
-                        latestLoanSnapshot?.unapplied_credit_minor ?? 0,
+                      value: formatOptionalCurrency(
+                        latestLoanSnapshot?.unapplied_credit_minor,
                       ),
                     },
                   ]"
                 />
+              </section>
+              <section
+                class="account-detail-page__section account-detail-page__summary"
+                data-cy="loan-escrow-section"
+              >
+                <h2 class="account-detail-page__section-title">
+                  Restricted escrow asset
+                </h2>
+                <KeyValueList
+                  :items="[
+                    {
+                      label: 'Escrow balance',
+                      value: formatOptionalCurrency(
+                        latestLoanSnapshot?.escrow_balance_minor,
+                      ),
+                    },
+                  ]"
+                />
+              </section>
+              <section
+                class="account-detail-page__section account-detail-page__summary"
+                data-cy="loan-estimate-section"
+              >
+                <h2 class="account-detail-page__section-title">
+                  Estimated amortization
+                </h2>
+                <KeyValueList
+                  v-if="loanProjection?.available"
+                  :items="[
+                    {
+                      label: 'Estimated interest accrued',
+                      value: formatOptionalCurrency(
+                        loanProjection.estimated_accrued_interest_minor,
+                      ),
+                    },
+                    {
+                      label: 'Projected payoff date',
+                      value:
+                        loanProjection.projected_payoff_date ??
+                        'Beyond configured horizon',
+                    },
+                    {
+                      label: 'Projected remaining interest',
+                      value: formatOptionalCurrency(
+                        loanProjection.projected_total_interest_minor,
+                      ),
+                    },
+                    {
+                      label: 'Rate assumption',
+                      value: loanProjection.rate_assumption ?? '—',
+                    },
+                  ]"
+                />
+                <template v-if="loanProjection?.available">
+                  <h3 class="account-detail-page__section-title">
+                    Next 12 estimated payments
+                  </h3>
+                  <TableShell
+                    :columns="loanProjectionColumns"
+                    :rows="loanProjectionRows"
+                    empty-text="No projected payments."
+                  />
+                </template>
+                <p v-else class="account-detail-page__config-note">
+                  {{
+                    loanProjection?.reason ??
+                    `Add ${loanProjection?.missing.join(", ") || "loan terms"} in account configuration to generate an estimate.`
+                  }}
+                </p>
               </section>
             </template>
 
@@ -1781,6 +2219,7 @@ function formatTaxTreatment(value: string | null | undefined): string {
           title="Edit account configuration"
           submit-text="Save"
           danger-text="Retire account"
+          :submit-disabled="isLoanAccount && !configurationCategoryId"
           :loading="configurationSaving"
           @submit="saveConfiguration"
           @danger="retireAccount"
@@ -1789,15 +2228,26 @@ function formatTaxTreatment(value: string | null | undefined): string {
         >
           <div class="account-detail-page__config-form">
             <TextField v-model="configurationName" label="Name" name="name" />
-            <TextField
+            <InstitutionCombobox
               v-model="configurationInstitution"
-              label="Institution"
               name="institution"
+              :options="suggestedInstitutions"
             />
             <TextField
               v-model="configurationLast4"
               label="Account number last4"
               name="account-number-last4"
+            />
+            <SelectField
+              v-if="isInvestmentAccount || isLoanAccount"
+              v-model="configurationCategoryId"
+              :label="
+                isInvestmentAccount
+                  ? 'Contribution category'
+                  : 'Payment category'
+              "
+              name="configured-category"
+              :options="configurableCategoryOptions"
             />
             <p class="account-detail-page__config-note">
               Account type and net-worth inclusion are not configurable here.
@@ -1814,7 +2264,7 @@ function formatTaxTreatment(value: string | null | undefined): string {
           :submit-disabled="
             parseCurrencyMinor(loanPaymentAmount) === null ||
             !loanPaymentBudgetAccountId ||
-            !loanPaymentCategoryId
+            !linkedLoanCategoryId
           "
           :loading="loanPaymentMutation.isPending.value"
           @submit="saveLoanPayment"
@@ -1838,20 +2288,17 @@ function formatTaxTreatment(value: string | null | undefined): string {
               label="Amount"
               name="loan-payment-amount"
             />
-            <SelectField
-              v-model="loanPaymentCategoryId"
-              label="Payment category"
-              name="loan-payment-category"
-              :options="contributionCategoryOptions"
-            />
             <TextField
               v-model="loanPaymentMemo"
               label="Memo"
               name="loan-payment-memo"
             />
             <p class="account-detail-page__config-note">
-              Enter the cash payment only. Principal and non-principal amounts
-              are derived when the lender statement is reconciled.
+              Payment category:
+              {{
+                selectedLoanCategory?.name ?? "Configure this account first"
+              }}. Enter the cash payment only. Principal and non-principal
+              amounts are derived when the lender statement is reconciled.
             </p>
           </div>
         </FormModal>
@@ -1871,6 +2318,7 @@ function formatTaxTreatment(value: string | null | undefined): string {
               v-model="loanStatementDate"
               label="Statement date"
               name="loan-statement-date"
+              :max="currentDate"
             />
             <CurrencyField
               v-model="loanPrincipal"
@@ -1878,20 +2326,43 @@ function formatTaxTreatment(value: string | null | undefined): string {
               name="loan-principal"
             />
             <CurrencyField
-              v-model="loanAccruedInterest"
-              label="Accrued interest"
-              name="loan-interest"
-            />
-            <CurrencyField
               v-model="loanEscrow"
               label="Escrow balance"
               name="loan-escrow"
             />
-            <CurrencyField
-              v-model="loanUnapplied"
-              label="Unapplied credit"
-              name="loan-unapplied"
-            />
+            <Button
+              variant="secondary"
+              size="sm"
+              @click="showLoanAdvancedFields = !showLoanAdvancedFields"
+            >
+              {{
+                showLoanAdvancedFields
+                  ? "Hide optional fields"
+                  : "Show optional fields"
+              }}
+            </Button>
+            <template v-if="showLoanAdvancedFields">
+              <CurrencyField
+                v-model="loanAccruedInterest"
+                label="Accrued interest"
+                name="loan-interest"
+              />
+              <CurrencyField
+                v-model="loanUnapplied"
+                label="Unapplied credit"
+                name="loan-unapplied"
+              />
+              <CurrencyField
+                v-model="loanYtdPrincipal"
+                label="YTD principal paid"
+                name="loan-ytd-principal"
+              />
+              <CurrencyField
+                v-model="loanYtdInterest"
+                label="YTD interest paid"
+                name="loan-ytd-interest"
+              />
+            </template>
             <p class="account-detail-page__config-note">
               dojo derives aggregate principal reduction and leaves the
               remaining attributed cash explicitly unknown non-principal.
@@ -1947,13 +2418,6 @@ function formatTaxTreatment(value: string | null | undefined): string {
                 { value: 'PENDING', label: 'Pending' },
               ]"
             />
-            <SelectField
-              v-if="investmentTransferDirection === 'CONTRIBUTION'"
-              v-model="investmentTransferCategoryId"
-              label="Linked contribution category"
-              name="investment-transfer-category"
-              :options="contributionCategoryOptions"
-            />
             <label
               v-if="investmentTransferDirection === 'CONTRIBUTION'"
               class="account-detail-page__cutover-checkbox"
@@ -1974,12 +2438,16 @@ function formatTaxTreatment(value: string | null | undefined): string {
             />
             <div class="account-detail-page__cutover-info">
               <span v-if="investmentTransferDirection === 'CONTRIBUTION'">
-                Category available before contribution:
                 {{
-                  formatCurrency(
-                    selectedContributionCategory?.available_minor ?? 0,
-                  )
-                }}. The transfer creates two ledger legs and does not change net
+                  selectedContributionCategory?.name ??
+                  "No category configured"
+                }}:
+                {{ formatCurrency(contributionPreview.available) }} available −
+                {{ formatCurrency(contributionPreview.amount) }} contribution +
+                {{ formatCurrency(contributionPreview.fundedShortfall) }} from
+                Available to budget =
+                {{ formatCurrency(contributionPreview.resultingAvailable) }}.
+                The transfer creates two ledger legs and does not change net
                 worth or economic spending.
               </span>
               <span v-else>
@@ -2005,6 +2473,7 @@ function formatTaxTreatment(value: string | null | undefined): string {
               v-model="investmentStatementDate"
               label="Statement date"
               name="investment-statement-date"
+              :max="currentDate"
             />
             <CurrencyField
               v-model="investmentStatementCash"
@@ -2022,6 +2491,13 @@ function formatTaxTreatment(value: string | null | undefined): string {
                   Add holding
                 </Button>
               </div>
+              <p
+                v-if="investmentHoldingRows.length === 0"
+                class="account-detail-page__config-note"
+              >
+                No holdings. This statement will record a cash-only investment
+                account.
+              </p>
               <div
                 v-for="(holding, index) in investmentHoldingRows"
                 :key="index"
@@ -2049,7 +2525,6 @@ function formatTaxTreatment(value: string | null | undefined): string {
                   :name="`holding-basis-${index}`"
                 />
                 <Button
-                  v-if="investmentHoldingRows.length > 1"
                   variant="tertiary"
                   size="sm"
                   @click="removeInvestmentHoldingRow(index)"
@@ -2086,6 +2561,7 @@ function formatTaxTreatment(value: string | null | undefined): string {
               v-model="valueDate"
               label="Effective date"
               name="value-date"
+              :max="currentDate"
             />
             <CurrencyField
               v-model="valueAmount"
@@ -2103,115 +2579,171 @@ function formatTaxTreatment(value: string | null | undefined): string {
 
         <FormModal
           :visible="showCutoverModal"
-          title="Create richer account from tracking account"
-          submit-text="Create account"
-          :loading="false"
+          title="Replace tracking account"
+          submit-text="Apply cutover"
+          :submit-disabled="!cutoverCanSave"
+          :loading="cutoverMutation.isPending.value"
           @submit="handleCutoverSubmit"
           @cancel="showCutoverModal = false"
           @close="showCutoverModal = false"
         >
           <p class="account-detail-page__cutover-description">
-            We'll create a new richer entity and retire this
+            We'll create one or more richer entities and retire this
             {{ cleanAccountName(account?.name) ?? account?.name }} tracking
             account effective the cutover date. This is a representation change,
             not a ledger transfer.
           </p>
           <div class="account-detail-page__cutover-form">
-            <div class="account-detail-page__cutover-row">
-              <div class="account-detail-page__cutover-field">
-                <label class="account-detail-page__cutover-label">
-                  New entity type
-                </label>
-                <select
-                  v-model="cutoverEntityType"
-                  class="account-detail-page__cutover-select"
+            <DatePicker
+              v-model="cutoverDate"
+              label="Cutover date"
+              name="cutover-date"
+              helper="Successors become current on this date"
+            />
+            <section
+              v-for="(successor, successorIndex) in cutoverSuccessors"
+              :key="successor.id"
+              class="account-detail-page__section"
+              data-cy="cutover-successor"
+            >
+              <div class="account-detail-page__section-header">
+                <h3 class="account-detail-page__section-title">
+                  Successor {{ successorIndex + 1 }}
+                </h3>
+                <Button
+                  v-if="cutoverSuccessors.length > 1"
+                  variant="tertiary"
+                  size="sm"
+                  @click="removeCutoverSuccessor(successorIndex)"
                 >
-                  <option value="INVESTMENT">Investment account</option>
-                  <option value="LOAN">Loan</option>
-                  <option value="TANGIBLE_ASSET">Tangible asset</option>
-                </select>
+                  Remove
+                </Button>
               </div>
-              <div class="account-detail-page__cutover-field">
-                <label class="account-detail-page__cutover-label">
-                  Cutover date
-                </label>
-                <input
-                  v-model="cutoverDate"
-                  type="date"
-                  class="account-detail-page__cutover-input"
-                />
-              </div>
-            </div>
-            <div class="account-detail-page__cutover-row">
-              <div class="account-detail-page__cutover-field">
-                <label class="account-detail-page__cutover-label">Name</label>
-                <input
-                  v-model="cutoverName"
-                  type="text"
-                  class="account-detail-page__cutover-input"
-                />
-              </div>
-              <div class="account-detail-page__cutover-field">
-                <label class="account-detail-page__cutover-label">
-                  Opening value
-                </label>
-                <input
-                  v-model="cutoverOpeningValue"
-                  type="text"
-                  class="account-detail-page__cutover-input"
-                  readonly
-                />
-                <span class="account-detail-page__cutover-hint">
-                  This value will be recorded on the cutover date.
-                </span>
-              </div>
-            </div>
-            <div class="account-detail-page__cutover-field">
-              <label class="account-detail-page__cutover-label">
-                Contribution category
-              </label>
-              <div class="account-detail-page__cutover-radios">
-                <label class="account-detail-page__cutover-radio">
-                  <input
-                    v-model="cutoverContributionCategory"
-                    type="radio"
-                    value="create"
+              <SelectField
+                v-model="successor.accountClass"
+                label="Entity type"
+                :name="`cutover-type-${successorIndex}`"
+                :options="[
+                  { value: 'INVESTMENT', label: 'Investment account' },
+                  { value: 'LOAN', label: 'Loan' },
+                  { value: 'TANGIBLE_ASSET', label: 'Tangible asset' },
+                ]"
+              />
+              <TextField
+                v-model="successor.name"
+                label="Name"
+                :name="`cutover-name-${successorIndex}`"
+              />
+              <InstitutionCombobox
+                v-model="successor.institution"
+                :name="`cutover-institution-${successorIndex}`"
+                :options="suggestedInstitutions"
+              />
+              <CurrencyField
+                v-model="successor.openingValue"
+                :label="
+                  successor.accountClass === 'LOAN'
+                    ? 'Opening principal'
+                    : successor.accountClass === 'INVESTMENT'
+                      ? 'Opening cash balance'
+                      : 'Opening value'
+                "
+                :name="`cutover-opening-${successorIndex}`"
+              />
+              <SelectField
+                v-if="successor.accountClass === 'INVESTMENT'"
+                v-model="successor.categoryId"
+                label="Contribution category"
+                :name="`cutover-category-${successorIndex}`"
+                :options="[
+                  { value: '', label: 'Do not link a category yet' },
+                  ...contributionCategoryOptions,
+                ]"
+              />
+              <template v-if="successor.accountClass === 'INVESTMENT'">
+                <div class="account-detail-page__section-header">
+                  <h4 class="account-detail-page__section-title">
+                    Opening holdings
+                  </h4>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    @click="addCutoverHolding(successor)"
+                  >
+                    Add holding
+                  </Button>
+                </div>
+                <div
+                  v-for="(holding, holdingIndex) in successor.holdings"
+                  :key="holdingIndex"
+                  class="account-detail-page__statement-holding"
+                >
+                  <TextField
+                    v-model="holding.ticker"
+                    label="Ticker"
+                    :name="`cutover-ticker-${successorIndex}-${holdingIndex}`"
                   />
-                  <span>
-                    <strong>Create new</strong>
-                    Create a new contribution category
-                  </span>
-                </label>
-                <label class="account-detail-page__cutover-radio">
-                  <input
-                    v-model="cutoverContributionCategory"
-                    type="radio"
-                    value="link"
+                  <TextField
+                    v-model="holding.quantity"
+                    label="Quantity"
+                    :name="`cutover-quantity-${successorIndex}-${holdingIndex}`"
+                    inputmode="decimal"
                   />
-                  <span>
-                    <strong>Link existing</strong>
-                    Use an existing contribution category
-                  </span>
-                </label>
-                <label class="account-detail-page__cutover-radio">
-                  <input
-                    v-model="cutoverContributionCategory"
-                    type="radio"
-                    value="none"
+                  <CurrencyField
+                    v-model="holding.price"
+                    label="Price"
+                    :name="`cutover-price-${successorIndex}-${holdingIndex}`"
                   />
-                  <span>
-                    <strong>None</strong>
-                    No contribution category
-                  </span>
-                </label>
-              </div>
+                  <Button
+                    variant="tertiary"
+                    size="sm"
+                    @click="removeCutoverHolding(successor, holdingIndex)"
+                  >
+                    Remove
+                  </Button>
+                </div>
+              </template>
+              <template v-if="successor.accountClass === 'LOAN'">
+                <SelectField
+                  v-model="successor.categoryId"
+                  label="Payment category"
+                  :name="`cutover-category-${successorIndex}`"
+                  :options="contributionCategoryOptions"
+                />
+                <CurrencyField
+                  v-model="successor.escrow"
+                  label="Opening escrow"
+                  :name="`cutover-escrow-${successorIndex}`"
+                />
+                <CurrencyField
+                  v-model="successor.accruedInterest"
+                  label="Accrued interest (optional)"
+                  :name="`cutover-interest-${successorIndex}`"
+                />
+                <CurrencyField
+                  v-model="successor.unappliedCredit"
+                  label="Unapplied credit (optional)"
+                  :name="`cutover-unapplied-${successorIndex}`"
+                />
+              </template>
+            </section>
+            <Button variant="secondary" size="sm" @click="addCutoverSuccessor">
+              Add successor
+            </Button>
+            <div class="account-detail-page__cutover-info">
+              <span>
+                Tracking value:
+                {{ formatCurrency(cutoverExpectedSignedValue) }} · Successor
+                total: {{ formatCurrency(cutoverSuccessorTotal) }} · Variance:
+                {{ formatCurrency(cutoverVariance) }}
+              </span>
             </div>
             <label class="account-detail-page__cutover-checkbox">
               <input v-model="cutoverRepresentationConfirmed" type="checkbox" />
               <span>
                 This is a representation change, not a ledger transfer. No money
                 moves and no transactions are posted. We're replacing a snapshot
-                with a richer account.
+                with the successor entities. I confirm the displayed variance.
               </span>
             </label>
             <div class="account-detail-page__cutover-info">
@@ -2237,7 +2769,7 @@ function formatTaxTreatment(value: string | null | undefined): string {
               <span>
                 Historical as-of views before cutover use
                 {{ cleanAccountName(account?.name) ?? account?.name }}. After
-                the cutover date, as-of views use the new richer account.
+                the cutover date, as-of views use the successor entities.
               </span>
             </div>
           </div>

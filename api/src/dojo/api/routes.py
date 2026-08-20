@@ -27,6 +27,7 @@ from dojo.api.models import (
     LoanPaymentPayload,
     TangibleAssetValuationPayload,
     TrackingAccountSnapshotPayload,
+    TrackingCutoverPayload,
     TransactionPayload,
     TransferPayload,
 )
@@ -478,6 +479,13 @@ def create_tracking_snapshot(
     return get_service(request).create_tracking_snapshot(account_id, payload.model_dump())
 
 
+@router.post("/accounts/{account_id}/cutovers")
+def create_tracking_cutover(
+    request: Request, account_id: str, payload: TrackingCutoverPayload
+) -> dict[str, Any]:
+    return get_service(request).create_tracking_cutover(account_id, payload.model_dump(mode="json"))
+
+
 @router.get("/accounts/{account_id}/tracking-snapshots")
 def list_tracking_snapshots(request: Request, account_id: str) -> dict[str, Any]:
     return {"items": get_service(request).list_tracking_snapshots(account_id)}
@@ -493,6 +501,11 @@ def create_loan_snapshot(
 @router.get("/accounts/{account_id}/loan-snapshots")
 def list_loan_snapshots(request: Request, account_id: str) -> dict[str, Any]:
     return {"items": get_service(request).list_loan_snapshots(account_id)}
+
+
+@router.get("/accounts/{account_id}/loan-projection")
+def loan_projection(request: Request, account_id: str) -> dict[str, object]:
+    return get_service(request).get_loan_projection(account_id)
 
 
 @router.post("/accounts/{account_id}/loan-payments")
@@ -534,6 +547,11 @@ def categories(
         ),
         "items": items,
     }
+
+
+@router.get("/category-activity")
+def category_activity(request: Request) -> dict[str, Any]:
+    return {"items": get_service(request).list_category_activity()}
 
 
 @router.post("/category-groups")

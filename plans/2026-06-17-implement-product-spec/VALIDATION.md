@@ -38,6 +38,42 @@ For each completed work item, record:
 
 ---
 
+## Work Item 6.5: Rich-account values, remediation, and cutover
+
+**Status**: Implementation complete through Milestone 6; product-owner browser acceptance and final Milestone 7 audit remain.
+
+### Commands run
+
+- `just test-unit` — 55 passed, including pure loan projection coverage.
+- `just test-integration` — 47 passed, including cross-surface rich values, future-date guards, prospective linked activity, equal-timestamp investment ordering, loan components, and asset/liability cutovers.
+- `just test-property` — 15 passed.
+- `just typecheck` — Passed.
+- `just lint` — Passed.
+- `just architecture-check` — 8 passed.
+- `just migration-check` — 2 passed against fresh schema provisioning.
+- `just build` — API and web production builds passed.
+- `just docs` — Passed.
+- Focused headless-Chrome Cypress sweep across institution, wizard, budget, and account detail specs — 26 passed.
+- Design-system manifest coverage — 39 fixtures present.
+- Confirmed terminology lint — zero hits.
+
+### Data invariants checked
+
+- Investment contributions and withdrawals remain net-worth neutral.
+- A same-day post-statement contribution is provisional; a later same-day statement correction supersedes it.
+- Derived investment contributions affect monthly category Activity and category history without categorizing transfer legs.
+- Loan principal liability, escrow restricted asset, and unapplied credit sum to the same aggregate net worth exactly once.
+- Loan projections are labeled estimates and reset from the latest actual principal snapshot.
+- One-to-many cutover is idempotent, activates successors inclusively on the cutover date, and preserves signed net worth for asset and liability predecessors.
+
+### Validation gaps
+
+- Product-owner browser revalidation remains required before Dashboard work.
+- Cypress Electron repeatedly exited with `SIGSEGV` after two tests in larger specs; identical specs pass under headless Chrome.
+- The full `just check` remains affected by the Electron issue and unrelated pre-existing formatting drift in `api/tests/test_api_endpoints.py`.
+
+---
+
 ## Work Item 1.1: Token System and Global Stylesheet
 
 *Not yet completed.*

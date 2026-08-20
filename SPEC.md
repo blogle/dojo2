@@ -92,7 +92,7 @@ dojo includes a simple first-run onboarding flow for users who do not yet have a
 The onboarding flow answers one question:
 
 * Start with an empty application
-* Migrate existing records from a Google Aspire sheet
+* Migrate existing records from an Aspire Budgeting spreadsheet in Google Sheets
 
 This is intentionally lightweight. It is not yet a guided setup wizard.
 

@@ -3,5 +3,5 @@ FROM current_transactions
 WHERE account_id = ?
   AND system_category = 'TX_ACCOUNT_TRANSFER'
   AND status = 'CLEARED'
-  AND date > ?
+  AND (date > ? OR (date = ? AND record_order > ?))
   AND date <= ?

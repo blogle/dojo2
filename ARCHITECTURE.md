@@ -18,6 +18,8 @@ The backend persists application state in DuckDB. The frontend treats the backen
 - `api/src/dojo/sql/`: native SQL resources
 - `api/src/dojo/importer.py`: fixture and Google Sheet import parsing
 - `api/src/dojo/aggregate_validation.py`: aggregate correctness checks against imported source data
+- `api/src/dojo/account_values.py`: typed account-class value and net-worth components
+- `api/src/dojo/loan_projection.py`: pure estimated amortization calculations
 
 Routers call `DojoService` through FastAPI request state. Routers do not own DuckDB connection creation or SQL loading.
 
@@ -109,3 +111,9 @@ The most performance-sensitive backend paths are:
 The repository currently persists import bookkeeping in `import_runs` and `import_batches`.
 
 It does not currently persist authoritative financial summary cache tables. Budget totals, account balances, and net-worth rollups are derived from current ledger tables at read time.
+
+Rich-account values are also derived at read time. Investment value combines the latest holdings/cash statement with cleared post-statement transfers, using a monotonic financial-event order to disambiguate same-day statement and transfer writes even when clock timestamps are equal. Category activity projects linked investment contributions without attaching categories to transfer legs. Loan statement balances remain actual evidence; amortization rows are non-persisted estimates regenerated from the latest principal and current contractual terms.
+
+Loan principal liability, restricted escrow, and unapplied lender credit remain explicit components. Assets & Liabilities and net-worth responses present those components separately while preserving one aggregate account contribution for account-level reads.
+
+Tracking cutovers are immutable command records in `tracking_cutovers` plus ordered successor relations in `tracking_cutover_successors`. One transaction writes the final predecessor snapshot, all successor entities/opening values, prospective category links, and the relationship record. `operation_id` plus a canonical request fingerprint makes retries idempotent and conflicting reuse explicit. Account-list shaping applies the inclusive cutover date so future successors remain inactive before the date and predecessors retire on the date without a background scheduler.

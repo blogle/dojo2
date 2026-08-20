@@ -6,6 +6,8 @@ SELECT
     accrued_interest_minor,
     escrow_balance_minor,
     unapplied_credit_minor,
+    ytd_principal_paid_minor,
+    ytd_interest_paid_minor,
     attributed_payment_minor,
     principal_reduction_minor,
     unknown_nonprincipal_minor,

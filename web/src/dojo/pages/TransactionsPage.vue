@@ -34,6 +34,7 @@ const QUERY_KEYS = {
   budget: ["budget"] as const,
   allocations: ["allocations"] as const,
   netWorth: ["net-worth"] as const,
+  categoryActivity: ["category-activity"] as const,
 } as const;
 
 type UndoEntry =
@@ -63,7 +64,8 @@ const { data: txPage } = useQuery({
     amountFilter.value,
     statusFilter.value,
   ]),
-  queryFn: () => fetchTransactionsPage(false, 0, PAGE_SIZE, transactionFilters.value),
+  queryFn: () =>
+    fetchTransactionsPage(false, 0, PAGE_SIZE, transactionFilters.value),
 });
 
 const transactions = computed(() => txPage.value?.items ?? []);
@@ -87,6 +89,7 @@ function invalidateRelatedQueries() {
   queryClient.invalidateQueries({ queryKey: QUERY_KEYS.allocations });
   queryClient.invalidateQueries({ queryKey: QUERY_KEYS.netWorth });
   queryClient.invalidateQueries({ queryKey: QUERY_KEYS.categories });
+  queryClient.invalidateQueries({ queryKey: QUERY_KEYS.categoryActivity });
 }
 
 const createMutation = useMutation({
@@ -131,7 +134,9 @@ const net = computed(() => inflow.value - outflow.value);
 
 const transactionFilters = computed<TransactionFilters>(() => ({
   ...(accountFilter.value !== "all" ? { accountId: accountFilter.value } : {}),
-  ...(categoryFilter.value !== "all" ? { categoryId: categoryFilter.value } : {}),
+  ...(categoryFilter.value !== "all"
+    ? { categoryId: categoryFilter.value }
+    : {}),
   ...(statusFilter.value === "cleared" ? { status: "CLEARED" as const } : {}),
   ...(statusFilter.value === "pending" ? { status: "PENDING" as const } : {}),
   ...datePresetToFilter(dateFilter.value),
@@ -262,10 +267,13 @@ function handleGlobalKeydown(event: KeyboardEvent) {
   }
 }
 
-function datePresetToFilter(value: string): Pick<TransactionFilters, "dateFrom" | "dateTo"> {
+function datePresetToFilter(
+  value: string,
+): Pick<TransactionFilters, "dateFrom" | "dateTo"> {
   const today = new Date();
   const toIso = (date: Date) => date.toISOString().slice(0, 10);
-  if (value === "today") return { dateFrom: toIso(today), dateTo: toIso(today) };
+  if (value === "today")
+    return { dateFrom: toIso(today), dateTo: toIso(today) };
   if (value === "this-week") {
     const start = new Date(today);
     start.setDate(today.getDate() - today.getDay());
@@ -287,8 +295,10 @@ function amountPresetToFilter(
   value: string,
 ): Pick<TransactionFilters, "amountMinMinor" | "amountMaxMinor"> {
   if (value === "0-50") return { amountMinMinor: 0, amountMaxMinor: 5_000 };
-  if (value === "50-100") return { amountMinMinor: 5_000, amountMaxMinor: 10_000 };
-  if (value === "100-500") return { amountMinMinor: 10_000, amountMaxMinor: 50_000 };
+  if (value === "50-100")
+    return { amountMinMinor: 5_000, amountMaxMinor: 10_000 };
+  if (value === "100-500")
+    return { amountMinMinor: 10_000, amountMaxMinor: 50_000 };
   if (value === "500+") return { amountMinMinor: 50_000 };
   return {};
 }

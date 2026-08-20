@@ -390,8 +390,8 @@ const showInvalidSheetId = computed(
         <p class="onboarding__eyebrow">FIRST RUN</p>
         <h1 class="onboarding__headline">Migrate from Aspire</h1>
         <p class="onboarding__copy">
-          Import your budgets, actuals, and related data from a Google Aspire
-          sheet.
+          Import your budgets, actuals, and related data from an Aspire
+          Budgeting spreadsheet in Google Sheets.
         </p>
 
         <Surface

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 
-import type { Allocation, Category, Transaction } from "../../types";
+import type { Allocation, Category, CategoryActivity } from "../../types";
 import { formatCurrency, formatGoalType } from "../../utils/currency";
 
 import Button from "../actions/Button.vue";
@@ -14,7 +14,7 @@ const props = defineProps<{
   visible: boolean;
   category: Category | null;
   allocations: Allocation[];
-  transactions: Transaction[];
+  activity: CategoryActivity[];
   scopeCategoryIds?: string[];
   detailKind?: "category" | "group";
 }>();
@@ -209,19 +209,17 @@ const fundingHistoryRows = computed(() => {
 
 const spendingHistoryRows = computed(() => {
   if (!props.category) return [];
-  return props.transactions
-    .filter(
-      (transaction) =>
-        transaction.category_id != null &&
-        scopedCategoryIds.value.includes(transaction.category_id),
+  return props.activity
+    .filter((activity) =>
+      scopedCategoryIds.value.includes(activity.category_id),
     )
-    .map((transaction) => ({
-      key: transaction.transaction_id,
-      date: formatDate(transaction.date),
-      account: transaction.account_name,
-      amount: formatCurrency(transaction.amount_minor),
-      status: transaction.status,
-      memo: transaction.memo || "\u2014",
+    .map((activity) => ({
+      key: activity.activity_id,
+      date: formatDate(activity.date),
+      account: activity.account_name,
+      amount: formatCurrency(activity.amount_minor),
+      status: activity.status,
+      memo: activity.memo || "\u2014",
     }));
 });
 </script>

@@ -24,6 +24,7 @@ import typographySpecimen from "@/dojo/components/foundations/TypographySpecimen
 import currencyField from "@/dojo/components/forms/CurrencyField.fixtures";
 import datePicker from "@/dojo/components/forms/DatePicker.fixtures";
 import iconPicker from "@/dojo/components/forms/IconPicker.fixtures";
+import institutionCombobox from "@/dojo/components/forms/InstitutionCombobox.fixtures";
 import radioGroup from "@/dojo/components/forms/RadioGroup.fixtures";
 import selectField from "@/dojo/components/forms/SelectField.fixtures";
 import slider from "@/dojo/components/forms/Slider.fixtures";
@@ -65,6 +66,7 @@ export const fixtureRegistry: Record<string, ComponentFixtureSet> = {
   "forms/CurrencyField.fixtures.ts": currencyField,
   "forms/DatePicker.fixtures.ts": datePicker,
   "forms/IconPicker.fixtures.ts": iconPicker,
+  "forms/InstitutionCombobox.fixtures.ts": institutionCombobox,
   "forms/RadioGroup.fixtures.ts": radioGroup,
   "forms/SelectField.fixtures.ts": selectField,
   "forms/Slider.fixtures.ts": slider,

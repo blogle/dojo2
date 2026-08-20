@@ -95,6 +95,7 @@ const groupLabels: Record<string, string> = {
   CASH: "Cash & equivalents",
   INVESTMENTS: "Investments",
   TANGIBLE_ASSETS: "Tangible assets",
+  RESTRICTED_ASSETS: "Restricted assets",
   TRACKING_ASSETS: "Tracking assets",
   CREDIT: "Credit",
   LOANS: "Loans",
@@ -120,6 +121,10 @@ const groupIcons: Record<string, IconPart[]> = {
     { tag: "path", attrs: { d: "M4 11l8-6 8 6" } },
     { tag: "path", attrs: { d: "M6 10v9h12v-9" } },
     { tag: "path", attrs: { d: "M10 19v-5h4v5" } },
+  ],
+  RESTRICTED_ASSETS: [
+    { tag: "rect", attrs: { x: 5, y: 10, width: 14, height: 10, rx: 2 } },
+    { tag: "path", attrs: { d: "M8 10V7a4 4 0 018 0v3" } },
   ],
   TRACKING_ASSETS: [
     { tag: "path", attrs: { d: "M5 7h14M5 12h14M5 17h14" } },
@@ -195,6 +200,9 @@ const attention = (status: string) => {
   }
   if (status === "MISSING_VALUE") {
     return { label: "Missing value", variant: "error" as const };
+  }
+  if (status === "AWAITING_STATEMENT") {
+    return { label: "Awaiting statement", variant: "warning" as const };
   }
   return { label: "Not reconciled", variant: "warning" as const };
 };
@@ -348,7 +356,7 @@ const getSourceLabel = (source: string) => {
 
             <button
               v-for="item in group.items"
-              :key="item.account_id"
+              :key="item.presentation_id ?? item.account_id"
               class="assets-liabilities-page__row"
               @click="handleRowSelect(item.account_id)"
             >
@@ -382,7 +390,11 @@ const getSourceLabel = (source: string) => {
                   'assets-liabilities-page__td--negative': item.value_minor < 0,
                 }"
               >
-                {{ formatCurrency(item.value_minor) }}
+                {{
+                  item.attention_status === "AWAITING_STATEMENT"
+                    ? "Awaiting statement"
+                    : formatCurrency(item.value_minor)
+                }}
               </span>
               <span
                 class="assets-liabilities-page__td assets-liabilities-page__td--change"

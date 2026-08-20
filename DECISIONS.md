@@ -532,7 +532,7 @@ Users enter positive asset and obligation amounts. Entity type or tracking polar
 
 Investment reconciliation is snapshot-based. dojo does not add a parallel trade/dividend/interest ledger. Loan payment entry creates or attributes an ordinary budget transaction without requiring a split; reconciliation derives aggregate principal reduction and leaves the remaining amount explicitly unknown non-principal unless the lender supplies component detail. Escrow and unapplied credit remain separate balances.
 
-Tracking cutover supports one predecessor to many richer successors. It atomically records a final tracking reconciliation equal to the combined successor openings, creates the successors, records replacement links, and makes successors effective on the cutover date without creating a transfer or net-worth change.
+Tracking cutover supports one predecessor to many richer successors. It atomically records a final tracking reconciliation equal to the combined successor openings, creates the successors, records replacement links, and makes successors effective on the cutover date without creating a transfer. Any confirmed variance is attributed to the final source reconciliation rather than the representation change.
 
 ### Consequence
 
@@ -550,7 +550,7 @@ Manual validation found that same-day investment contributions did not update pr
 
 ### Decision
 
-Block future snapshot and statement dates. Configure investment contribution and loan payment category links on the account, not per operation. Resolve same-day investment ordering with financial date plus record-version timestamp. Surface derived contributions in category activity/history while keeping transfer legs account-centric; withdrawals bypass the linked category and return to Available to budget.
+Block future snapshot and statement dates. Configure investment contribution and loan payment category links on the account, not per operation. Resolve same-day investment ordering with financial date plus a monotonic financial-event order shared by statement cash snapshots and transfer legs; timestamps alone are ambiguous when a deterministic clock produces equal instants. Surface derived contributions in category activity/history while keeping transfer legs account-centric; withdrawals bypass the linked category and return to Available to budget.
 
 Treat tracking snapshots as the complete tracking-value workflow until generic reconciliation exists. Present mortgage escrow as a separate restricted asset instead of silently netting it into the loan liability. Require current principal at loan creation, keep accrued interest and unapplied credit optional/advanced, and support estimated amortization from contractual loan terms with optional lender-confirmed YTD principal and interest checkpoints.
 
@@ -558,7 +558,7 @@ Use one shared free-text institution combobox with curated and previously used s
 
 ### Consequence
 
-- Existing rich-account UI is a checkpoint, not accepted behavior; the defects above must be remediated before cutover work.
+- The defects above were remediated before final Assets & Liabilities acceptance; product-owner browser revalidation remains.
 - Actual, derived, estimated, provisional, and unknown values require explicit labels.
 - Cash-only investment statements are valid.
 - The A&L overview needs a visible restricted-assets presentation when escrow contributes to total assets.

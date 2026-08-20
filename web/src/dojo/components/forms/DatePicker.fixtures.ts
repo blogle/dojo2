@@ -31,6 +31,15 @@ export default defineFixtures<DatePickerProps>({
       },
     },
     {
+      name: "limited to today",
+      props: {
+        modelValue: "2026-06-30",
+        label: "Statement date",
+        max: "2026-06-30",
+        helper: "Future statement dates are not allowed",
+      },
+    },
+    {
       name: "with error",
       props: {
         modelValue: "",

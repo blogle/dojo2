@@ -6,7 +6,7 @@ Path: `./plans/2026-06-17-implement-product-spec/PLAN.md`
 
 Current phase: Phase 6.5 — Assets & Liabilities Completion
 
-Current work-item status: **In progress — canonical values and complete rich-entity flows**
+Current work-item status: **In progress — final product-owner acceptance and full quality-gate closure**
 
 ## Product and repository context
 
@@ -92,13 +92,22 @@ Relevant contributor guidance:
   - Added Cypress coverage for tracking account detail rendering and cutover modal open/close (2 new tests, 257 total).
   - Ran visual validation against mock 04 and recorded results in `VALIDATION.md`.
   - Relevant commit: `feat(assets-liabilities): align tracking account detail with mock 04`.
+- (2026-08-01) Rich-account value and remediation milestones 1–6 — Implemented:
+  - Committed the initial tracking/tangible/investment/loan checkpoint as `f959bcf`.
+  - Blocked future financial snapshots/statements while preserving future cutover scheduling.
+  - Added a shared institution free-text combobox with curated and prior-account suggestions.
+  - Moved investment contribution and loan payment categories into account creation/configuration.
+  - Fixed same-day provisional investment ordering and derived contribution Activity/history.
+  - Added cash-only investment statements.
+  - Added required loan current principal/as-of, optional lender YTD checkpoints, pure estimated amortization, and separately presented escrow/unapplied-credit assets.
+  - Added atomic idempotent one-to-many tracking cutover with inclusive effective activation.
 
 ## Current repository state
 
 - **Branch**: `master`
-- **Working tree**: Documentation update in progress; local untracked `tmp/` contains visual-review artifacts and must not be committed.
-- **Last completed implementation task**: Tracking account detail visual shell plus snapshot-based tracking trend and summary dispatch.
-- **Known failing checks**: None confirmed for the current HEAD. The completion plan requires fresh milestone-specific checks and a final `just check`.
+- **Working tree**: Rich-account remediation and cutover implementation are uncommitted; local untracked `tmp/` contains visual-review artifacts and must not be committed.
+- **Last completed implementation task**: Atomic one-to-many tracking cutover plus loan projection/restricted-escrow presentation.
+- **Known failing checks**: Larger Cypress specs repeatedly trigger an Electron `SIGSEGV` in this environment after two tests; the same specs pass in headless Chrome. `just format-check` still encounters pre-existing drift in `api/tests/test_api_endpoints.py` unless that unrelated file is formatted.
 - **Required services**: DuckDB (provisioned by `just api`), Google OAuth (optional)
 - **Feature flags**: None
 - **Aspire data**: Deterministic fixture available at `fixture://default`
@@ -112,14 +121,20 @@ Backend capabilities already exist:
 - `GET /api/transactions` with server-side filtering: `account_id`, `category_id`, `status`, `date_from`/`date_to`, `amount_min_minor`/`amount_max_minor`, plus `status_counts` in response.
 - `GET /api/accounts/{id}/transactions/summary` — windowed aggregate (inflow, outflow, net flow, count, average daily balance) pushed to DuckDB.
 - `GET /api/accounts/{id}/balance-trend` — anchored balance timeseries downsampled per period bucket, pushed to DuckDB.
+- Type-aware current/as-of values for tracking, tangible, investment, and loan accounts.
+- Investment statement reconciliation, configured contribution links, provisional transfer deltas, and derived category activity/history.
+- Loan opening snapshots, configured payment attribution, statement reconciliation, YTD checkpoints, and estimated amortization.
+- Atomic `POST /api/accounts/{tracking_id}/cutovers` one-to-many representation change.
 
 Frontend capabilities now present:
 - Overview page with `/assets-liabilities` route
 - StackedEntityCard shared component
 - Account detail page at `/assets-liabilities/:id` with budget, investment, loan, tracking, and tangible-asset type handling
 - Budget-account detail page now exposes mock-03-aligned header actions, metrics, scoped transaction table, chart/summary area, reconciliation/history/configuration affordances, and responsive narrow rendering.
-- Tracking-account detail page now exposes mock-04-aligned header actions (Add snapshot, Create richer account), 5-metric strip (Current value, Polarity, Latest snapshot, Source/migration, Reconciliation freshness), import info banner, snapshot history table, balance trend chart, valuation history with summary stats, and sidebar sections (Account details, Migration/import context, History/configuration).
-- Cutover modal for tracking-to-richer-entity upgrade with entity type, cutover date, name, opening value, contribution category, and representation change confirmation.
+- Tracking-account detail page exposes snapshot source/date/freshness without a premature reconciliation state.
+- Cutover modal supports multiple investment, loan, and tangible successors, opening components, institutions, category links, combined-value variance, and persisted representation change.
+- Investment detail supports cash-only/holdings statements, contribution/withdrawal behavior, category balance preview, and same-day provisional value.
+- Loan detail separates lender actual, balance-derived, estimated, unknown, liability, and restricted-asset information.
 - Transaction filter bar with account/date/category/amount/status filters; account filter can be locked to the current account on the detail page.
 - `TransactionLedger` virtualized table with running-balance column, infinite-scroll load-more, edit/delete mutations, and locked-account support.
 - `BalanceTrendChart` SVG component with period selector, hover crosshair, drag-measurement tooltip, and server-side-downsampled data.
@@ -131,18 +146,16 @@ Frontend capabilities now present:
 - Budget page route loading is resilient to `vue-draggable-plus` optimized dependency load issues because draggable behavior is loaded only when reorder mode is enabled.
 
 Frontend capabilities still planned:
-- Richer investment, loan, tracking, and tangible-asset flows beyond the current shared page shell (e.g. snapshot creation form, cutover persistence, investment contribution/withdrawal flows).
-- Snapshot creation form for tracking accounts.
+- Product-owner browser revalidation of the remediated investment, loan, and cutover flows.
+- Final mock-alignment/inert-control audit before Dashboard work.
 
 ## Next work item
 
-**Phase 6.5: canonical type-aware as-of values**
+**Phase 6.5: final Assets & Liabilities acceptance**
 
 Dashboard work is blocked until Assets & Liabilities is financially correct and its proposed flows are complete. The authoritative living plan is `docs/plans/complete-assets-liabilities.md`.
 
-The first milestone replaces fragmented ledger/legacy-valuation fallbacks with one type-aware effective-date read model used by accounts, Assets & Liabilities, net worth, detail metrics, and trends. It also removes fabricated change, date, attention, and reconciliation states.
-
-Subsequent milestones complete tracking snapshot correction, tangible valuation, investment statement reconciliation and transfers, loan attribution and aggregate statement reconciliation, and one-to-many tracking cutover.
+Milestones 1–6 are implemented. The remaining work is product-owner browser acceptance, final mock/inert-control review, and the broadest repository check that the environment permits.
 
 ### Definition of done
 
@@ -163,8 +176,7 @@ None for the planned scope. Product decisions made on 2026-07-31 are recorded in
 - `vue-draggable-plus` is now a lazy dependency of `HierarchicalCategoryTable.vue`; tests that mount reorder mode may need Vite optimized-dependency prewarming, which is handled by `web/vite.config.ts`.
 - The balance trend chart's `BalanceTrendPoint` type (`date` + `valueMinor`) differs from the API response type (`date` + `balance_minor`); the mapping is explicit in `AccountDetailPage.vue`. Both should be kept aligned if the chart component is reused elsewhere.
 - The `_account_display_balance` helper loads all accounts to find one; acceptable for the small account set, but could be replaced with a direct query if performance becomes a concern.
-- Cutover modal is UI-only; no backend persistence exists for tracking-to-richer-entity upgrades yet.
-- Tracking account `display_balance_minor` is 0 for imported Aspire accounts because tracking accounts use snapshots as their source of truth, not ledger balances. The metric strip correctly shows the latest valuation via `latest_valuation_minor` but the sidebar "Current balance" shows `display_balance_minor` which is 0.
+- The canonical Cypress recipe uses Electron, which is unstable for the larger account specs in the current environment; headless Chrome is the successful fallback evidence.
 
 ## Handoff instruction
 

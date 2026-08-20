@@ -21,6 +21,8 @@ CREATE TABLE IF NOT EXISTS import_batches (
     summary JSON
 );
 
+CREATE SEQUENCE IF NOT EXISTS financial_event_order START 1;
+
 CREATE TABLE IF NOT EXISTS import_drafts (
     draft_id UUID PRIMARY KEY,
     created_at TIMESTAMPTZ NOT NULL,
@@ -89,6 +91,13 @@ CREATE TABLE IF NOT EXISTS loan_details (
     original_amount_minor BIGINT,
     origination_date DATE,
     rate_minor BIGINT,
+    rate_type TEXT,
+    scheduled_principal_interest_minor BIGINT,
+    payment_frequency TEXT,
+    next_payment_date DATE,
+    maturity_date DATE,
+    remaining_term_months INTEGER,
+    recurring_extra_principal_minor BIGINT,
     status TEXT DEFAULT 'IN_REPAYMENT',
     valid_from TIMESTAMPTZ NOT NULL,
     valid_to TIMESTAMPTZ NOT NULL DEFAULT TIMESTAMPTZ '9999-12-31 23:59:59+00',
@@ -104,7 +113,9 @@ CREATE TABLE IF NOT EXISTS loan_balance_snapshots (
     principal_balance_minor BIGINT NOT NULL,
     accrued_interest_minor BIGINT,
     escrow_balance_minor BIGINT NOT NULL DEFAULT 0,
-    unapplied_credit_minor BIGINT NOT NULL DEFAULT 0,
+    unapplied_credit_minor BIGINT,
+    ytd_principal_paid_minor BIGINT,
+    ytd_interest_paid_minor BIGINT,
     attributed_payment_minor BIGINT NOT NULL DEFAULT 0,
     principal_reduction_minor BIGINT NOT NULL DEFAULT 0,
     unknown_nonprincipal_minor BIGINT NOT NULL DEFAULT 0,
@@ -140,6 +151,25 @@ CREATE TABLE IF NOT EXISTS tangible_asset_valuations (
     created_by_user_id UUID
 );
 
+CREATE TABLE IF NOT EXISTS tracking_cutovers (
+    operation_id UUID PRIMARY KEY,
+    predecessor_account_id UUID NOT NULL UNIQUE,
+    cutover_date DATE NOT NULL,
+    prior_value_minor BIGINT NOT NULL,
+    successor_total_minor BIGINT NOT NULL,
+    final_predecessor_valuation_id UUID NOT NULL,
+    request_fingerprint TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS tracking_cutover_successors (
+    operation_id UUID NOT NULL,
+    successor_order INTEGER NOT NULL,
+    successor_account_id UUID NOT NULL UNIQUE,
+    opening_net_worth_minor BIGINT NOT NULL,
+    PRIMARY KEY (operation_id, successor_order)
+);
+
 CREATE TABLE IF NOT EXISTS account_budget_links (
     row_id UUID PRIMARY KEY,
     account_id UUID NOT NULL,
@@ -173,6 +203,7 @@ CREATE TABLE IF NOT EXISTS investment_cash_snapshots (
     account_id UUID NOT NULL,
     effective_date DATE NOT NULL,
     cash_balance_minor BIGINT NOT NULL,
+    record_order BIGINT,
     notes TEXT,
     valid_from TIMESTAMPTZ NOT NULL,
     valid_to TIMESTAMPTZ NOT NULL DEFAULT TIMESTAMPTZ '9999-12-31 23:59:59+00',
@@ -255,6 +286,7 @@ CREATE TABLE IF NOT EXISTS transactions (
     status TEXT NOT NULL,
     memo TEXT,
     entry_order INTEGER NOT NULL,
+    record_order BIGINT,
     valid_from TIMESTAMPTZ NOT NULL,
     valid_to TIMESTAMPTZ NOT NULL DEFAULT TIMESTAMPTZ '9999-12-31 23:59:59+00',
     created_at TIMESTAMPTZ NOT NULL,

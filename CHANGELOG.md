@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added type-aware tracking, tangible, investment, and loan value flows; account-configured contribution/payment categories; same-day provisional investment ordering; derived category activity/history; cash-only investment statements; future-date guards; opening loan principal; lender YTD checkpoints; estimated amortization; separately presented restricted escrow; and atomic one-to-many tracking cutover.
 - Added the Assets & Liabilities Add item wizard with an explicit `/assets-liabilities/add` route, entity-type selection, minimal type-specific account forms, and Cypress coverage for route safety and account creation payloads.
 - Added `POST /api/transactions/{transaction_id}/restore` endpoint for SCD-correct undo of deleted transactions, preserving the same `transaction_id` across delete/restore cycles with full audit history.
 - Added pure SCD algebra/model with Hypothesis property-based testing to validate SCD invariants (no overlapping intervals, single current version, as-of stability) before shipping the restore endpoint.

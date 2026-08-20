@@ -14,3 +14,8 @@ banned_phrases:
     reason: >
       Do not relabel the transaction Status column or badges with
       reconciliation vocabulary. Status values are Cleared/Pending.
+
+  - phrase: "Google Aspire"
+    reason: >
+      The product is Aspire Budgeting, not a Google product. When relevant,
+      describe Google Sheets as the spreadsheet storage platform separately.

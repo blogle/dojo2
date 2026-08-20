@@ -21,6 +21,17 @@ export type Transaction = {
   is_hidden_entity: boolean;
 };
 
+export type CategoryActivity = {
+  activity_id: string;
+  category_id: string;
+  date: string;
+  account_name: string;
+  amount_minor: number;
+  status: "PENDING" | "CLEARED";
+  memo: string;
+  is_derived: boolean;
+};
+
 export type Allocation = {
   allocation_id: string;
   date: string;
@@ -64,6 +75,13 @@ export type Account = {
   loan_original_amount_minor?: number | null;
   loan_origination_date?: string | null;
   loan_rate_minor?: number | null;
+  loan_rate_type?: "FIXED" | "VARIABLE" | null;
+  loan_scheduled_principal_interest_minor?: number | null;
+  loan_payment_frequency?: "MONTHLY" | "BIWEEKLY" | "WEEKLY" | null;
+  loan_next_payment_date?: string | null;
+  loan_maturity_date?: string | null;
+  loan_remaining_term_months?: number | null;
+  loan_recurring_extra_principal_minor?: number | null;
   loan_status?: string | null;
   created_at?: string;
   metadata?: string | null;
@@ -131,6 +149,8 @@ export type BootstrapResponse = {
 };
 
 export type NetWorthItem = {
+  presentation_id?: string;
+  component_kind?: "LOAN_LIABILITY" | "ESCROW" | "UNAPPLIED_CREDIT";
   account_name: string;
   net_worth_minor: number;
   source: string;
@@ -249,9 +269,15 @@ export type TransactionPayload = {
 };
 
 export type AssetsLiabilitiesItem = Account & {
+  presentation_id?: string;
+  component_kind?: "ESCROW" | "UNAPPLIED_CREDIT";
   value_minor: number;
   source_of_truth: string;
-  attention_status: "CURRENT" | "NOT_RECONCILED" | "MISSING_VALUE";
+  attention_status:
+    | "CURRENT"
+    | "NOT_RECONCILED"
+    | "MISSING_VALUE"
+    | "AWAITING_STATEMENT";
 };
 
 export type AssetsLiabilitiesGroup = {

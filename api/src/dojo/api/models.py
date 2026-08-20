@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import Literal
+from typing import Annotated, Literal
+from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -109,7 +110,6 @@ class InvestmentTransferPayload(BaseModel):
     status: TransactionStatus
     memo: str = ""
     fund_shortfall: bool = True
-    contribution_category_id: str | None = None
 
 
 class AccountPayload(BaseModel):
@@ -128,10 +128,35 @@ class AccountPayload(BaseModel):
     tax_treatment: InvestmentTaxTreatment | None = None
     original_amount_minor: int | None = None
     origination_date: str | None = None
-    rate_minor: int | None = None
+    rate_minor: int | None = Field(default=None, ge=0)
     status: str | None = None
     opening_valuation_minor: int | None = None
     opening_valuation_date: str | None = None
+    investment_contribution_category_id: str | None = None
+    loan_payment_category_id: str | None = None
+    current_principal_minor: int | None = Field(default=None, ge=0)
+    current_principal_as_of: date | None = None
+    rate_type: Literal["FIXED", "VARIABLE"] | None = None
+    scheduled_principal_interest_minor: int | None = Field(default=None, gt=0)
+    payment_frequency: Literal["MONTHLY", "BIWEEKLY", "WEEKLY"] | None = None
+    next_payment_date: date | None = None
+    maturity_date: date | None = None
+    remaining_term_months: int | None = Field(default=None, gt=0)
+    recurring_extra_principal_minor: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def validate_loan_opening_value(self) -> "AccountPayload":
+        if self.account_class != "LOAN":
+            return self
+        required = {
+            "current_principal_minor": self.current_principal_minor,
+            "current_principal_as_of": self.current_principal_as_of,
+            "loan_payment_category_id": self.loan_payment_category_id,
+        }
+        missing = [name for name, value in required.items() if value is None or value == ""]
+        if missing:
+            raise ValueError(f"Loan creation requires {', '.join(missing)}")
+        return self
 
 
 class AccountUpdatePayload(BaseModel):
@@ -147,8 +172,15 @@ class AccountUpdatePayload(BaseModel):
     tax_treatment: InvestmentTaxTreatment | None = None
     original_amount_minor: int | None = None
     origination_date: str | None = None
-    rate_minor: int | None = None
+    rate_minor: int | None = Field(default=None, ge=0)
     loan_status: str | None = None
+    rate_type: Literal["FIXED", "VARIABLE"] | None = None
+    scheduled_principal_interest_minor: int | None = Field(default=None, gt=0)
+    payment_frequency: Literal["MONTHLY", "BIWEEKLY", "WEEKLY"] | None = None
+    next_payment_date: date | None = None
+    maturity_date: date | None = None
+    remaining_term_months: int | None = Field(default=None, gt=0)
+    recurring_extra_principal_minor: int | None = Field(default=None, ge=0)
 
 
 class CategoryGroupPayload(BaseModel):
@@ -213,7 +245,9 @@ class LoanBalanceSnapshotPayload(BaseModel):
     principal_balance_minor: int = Field(ge=0)
     accrued_interest_minor: int | None = Field(default=None, ge=0)
     escrow_balance_minor: int = Field(default=0, ge=0)
-    unapplied_credit_minor: int = Field(default=0, ge=0)
+    unapplied_credit_minor: int | None = Field(default=None, ge=0)
+    ytd_principal_paid_minor: int | None = Field(default=None, ge=0)
+    ytd_interest_paid_minor: int | None = Field(default=None, ge=0)
     notes: str = ""
 
 
@@ -221,7 +255,6 @@ class LoanPaymentPayload(BaseModel):
     date: date
     budget_account_id: str
     amount_minor: int = Field(gt=0)
-    category_id: str
     status: TransactionStatus
     memo: str = "Loan payment"
 
@@ -272,3 +305,61 @@ class InvestmentPriceSnapshotPayload(BaseModel):
     effective_date: date
     price_minor: int = Field(gt=0)
     source: str = "manual"
+
+
+class InvestmentCutoverSuccessorPayload(BaseModel):
+    account_class: Literal["INVESTMENT"]
+    name: str = Field(min_length=1)
+    institution: str | None = None
+    account_number_last4: str | None = None
+    self_managed: bool = False
+    tax_treatment: InvestmentTaxTreatment = "TAXABLE_BROKERAGE"
+    contribution_category_id: str | None = None
+    cash_balance_minor: int = Field(ge=0)
+    holdings: list[InvestmentStatementHoldingPayload] = Field(default_factory=list)
+
+
+class LoanCutoverSuccessorPayload(BaseModel):
+    account_class: Literal["LOAN"]
+    name: str = Field(min_length=1)
+    institution: str | None = None
+    account_number_last4: str | None = None
+    payment_category_id: str
+    principal_balance_minor: int = Field(ge=0)
+    accrued_interest_minor: int | None = Field(default=None, ge=0)
+    escrow_balance_minor: int = Field(default=0, ge=0)
+    unapplied_credit_minor: int | None = Field(default=None, ge=0)
+    original_amount_minor: int | None = Field(default=None, ge=0)
+    origination_date: date | None = None
+    rate_minor: int | None = Field(default=None, ge=0)
+    rate_type: Literal["FIXED", "VARIABLE"] | None = None
+    scheduled_principal_interest_minor: int | None = Field(default=None, gt=0)
+    payment_frequency: Literal["MONTHLY", "BIWEEKLY", "WEEKLY"] | None = None
+    next_payment_date: date | None = None
+    maturity_date: date | None = None
+    remaining_term_months: int | None = Field(default=None, gt=0)
+    recurring_extra_principal_minor: int | None = Field(default=None, ge=0)
+
+
+class TangibleCutoverSuccessorPayload(BaseModel):
+    account_class: Literal["TANGIBLE_ASSET"]
+    name: str = Field(min_length=1)
+    institution: str | None = None
+    account_number_last4: str | None = None
+    opening_value_minor: int = Field(ge=0)
+
+
+CutoverSuccessorPayload = Annotated[
+    InvestmentCutoverSuccessorPayload
+    | LoanCutoverSuccessorPayload
+    | TangibleCutoverSuccessorPayload,
+    Field(discriminator="account_class"),
+]
+
+
+class TrackingCutoverPayload(BaseModel):
+    operation_id: UUID
+    cutover_date: date
+    expected_predecessor_value_minor: int = Field(ge=0)
+    variance_confirmed: bool = False
+    successors: list[CutoverSuccessorPayload] = Field(min_length=1)
