@@ -236,7 +236,9 @@ const getSourceLabel = (source: string) => {
     <main class="assets-liabilities-page__main">
       <PageHeader title="Assets & Liabilities" :primary-actions="true">
         <template #actions>
-          <Button @click="handleAdd">Add item</Button>
+          <Button data-cy="assets-liabilities-add-item" @click="handleAdd">
+            Add item
+          </Button>
         </template>
       </PageHeader>
 

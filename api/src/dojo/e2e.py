@@ -8,19 +8,21 @@ from argparse import ArgumentParser
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import StrEnum
+from importlib.metadata import version
 from pathlib import Path
 from time import perf_counter
 
 from dojo.clock import FrozenClock
 from dojo.database import Database
 from dojo.migrations import apply_migrations
-from dojo.sql import load_sql
+from dojo.sql import SQL_ROOT, load_sql
 
 E2E_FIXED_TIME = datetime(2026, 2, 15, 12, 0, tzinfo=timezone.utc)
 
 
 class E2EScenario(StrEnum):
     ASSETS_LIABILITIES_OVERVIEW = "assets-liabilities-overview"
+    TANGIBLE_ASSET_CREATION = "tangible-asset-creation"
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,14 +48,23 @@ def fixed_e2e_clock() -> FrozenClock:
 
 def fixture_sql(scenario: E2EScenario) -> tuple[str, ...]:
     scenario_sql = {
-        E2EScenario.ASSETS_LIABILITIES_OVERVIEW: "tests/e2e/scenarios/al_01_overview",
+        E2EScenario.ASSETS_LIABILITIES_OVERVIEW: ("tests/e2e/scenarios/al_01_overview",),
+        E2EScenario.TANGIBLE_ASSET_CREATION: ("tests/e2e/scenarios/al_02_tangible_creation",),
     }
-    return ("tests/e2e/core", scenario_sql[scenario])
+    return ("tests/e2e/core", *scenario_sql[scenario])
 
 
 def fixture_fingerprint(scenario: E2EScenario) -> str:
-    sql_text = "\n".join(load_sql(name) for name in ("schema/current", *fixture_sql(scenario)))
-    return hashlib.sha256(sql_text.encode("utf-8")).hexdigest()
+    fingerprint = hashlib.sha256()
+    fingerprint.update(version("duckdb").encode("utf-8"))
+    fingerprint.update(Path(__file__).with_name("migrations.py").read_bytes())
+    for path in sorted((SQL_ROOT / "schema").rglob("*.sql")):
+        fingerprint.update(str(path.relative_to(SQL_ROOT)).encode("utf-8"))
+        fingerprint.update(path.read_bytes())
+    for sql_name in fixture_sql(scenario):
+        fingerprint.update(sql_name.encode("utf-8"))
+        fingerprint.update(load_sql(sql_name).encode("utf-8"))
+    return fingerprint.hexdigest()
 
 
 def build_baseline(scenario: E2EScenario, output_path: str | Path) -> E2EFixture:
@@ -98,21 +109,28 @@ def main() -> int:
     args = parser.parse_args()
 
     scenario = E2EScenario(args.scenario)
+    output = Path(args.output_path)
+    metadata_path = output.with_suffix(f"{output.suffix}.json")
+    fingerprint = fixture_fingerprint(scenario)
     started = perf_counter()
-    fixture = build_baseline(scenario, args.output_path)
-    duration_ms = (perf_counter() - started) * 1000
-    print(
-        json.dumps(
-            {
-                "scenario": fixture.scenario.value,
-                "fixture_fingerprint": fixture.fingerprint,
-                "path": str(fixture.path),
-                "db_bytes": fixture.path.stat().st_size,
-                "generation_ms": duration_ms,
-            },
-            sort_keys=True,
-        )
+    cache_hit = False
+    if output.is_file() and metadata_path.is_file():
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        cache_hit = metadata.get("fixture_fingerprint") == fingerprint
+    fixture = (
+        E2EFixture(scenario, fingerprint, output) if cache_hit else build_baseline(scenario, output)
     )
+    duration_ms = (perf_counter() - started) * 1000
+    result = {
+        "scenario": fixture.scenario.value,
+        "fixture_fingerprint": fixture.fingerprint,
+        "path": str(fixture.path),
+        "db_bytes": fixture.path.stat().st_size,
+        "generation_ms": duration_ms,
+        "cache_hit": cache_hit,
+    }
+    metadata_path.write_text(json.dumps(result, sort_keys=True), encoding="utf-8")
+    print(json.dumps(result, sort_keys=True))
     return 0
 
 

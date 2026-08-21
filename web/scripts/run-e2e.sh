@@ -7,8 +7,8 @@ baseline_dir="${cache_root}/baselines"
 run_id=$(date -u +%Y%m%dT%H%M%S)-$$
 run_dir="${cache_root}/runs/${run_id}"
 active_database="${run_dir}/worker.duckdb"
-scenario="assets-liabilities-overview"
-baseline="${baseline_dir}/${scenario}.duckdb"
+scenarios=("assets-liabilities-overview" "tangible-asset-creation")
+initial_baseline="${baseline_dir}/${scenarios[0]}.duckdb"
 allocate_port() {
   node -e 'const server=require("node:net").createServer(); server.listen(0,"127.0.0.1",()=>{console.log(server.address().port);server.close();});'
 }
@@ -61,12 +61,17 @@ wait_for_url() {
 }
 
 baseline_started=$(date +%s%N)
-(
-  cd "$repo_root/api"
-  uv run python -m dojo.e2e "$scenario" "$baseline"
-) >"$run_dir/baseline.json"
+baseline_bytes=0
+for scenario in "${scenarios[@]}"; do
+  baseline="${baseline_dir}/${scenario}.duckdb"
+  (
+    cd "$repo_root/api"
+    uv run python -m dojo.e2e "$scenario" "$baseline"
+  ) >"$run_dir/baseline-${scenario}.json"
+  baseline_bytes=$((baseline_bytes + $(stat -c %s "$baseline")))
+done
 baseline_ms=$(( ($(date +%s%N) - baseline_started) / 1000000 ))
-cp "$baseline" "$active_database"
+cp "$initial_baseline" "$active_database"
 
 api_started=$(date +%s%N)
 (
@@ -94,10 +99,10 @@ web_pid=$!
 wait_for_url "$web_url" "Vite"
 web_startup_ms=$(( ($(date +%s%N) - web_started) / 1000000 ))
 
-node - "$run_dir/harness.json" "$baseline_ms" "$api_startup_ms" "$web_startup_ms" "$baseline" <<'NODE'
-import { statSync, writeFileSync } from "node:fs";
+node - "$run_dir/harness.json" "$baseline_ms" "$api_startup_ms" "$web_startup_ms" "$baseline_bytes" <<'NODE'
+import { writeFileSync } from "node:fs";
 
-const [output, baselineMs, apiMs, webMs, baseline] = process.argv.slice(2);
+const [output, baselineMs, apiMs, webMs, baselineBytes] = process.argv.slice(2);
 writeFileSync(
   output,
   JSON.stringify(
@@ -105,7 +110,7 @@ writeFileSync(
       baselineGenerationMs: Number(baselineMs),
       apiStartupMs: Number(apiMs),
       webStartupMs: Number(webMs),
-      baselineBytes: statSync(baseline).size,
+      baselineBytes: Number(baselineBytes),
     },
     null,
     2,

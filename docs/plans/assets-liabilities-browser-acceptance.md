@@ -13,7 +13,7 @@ The suite is intentionally small. It proves the integration seams and user-visib
 - [x] (2026-08-20) Agreed on the E2E architecture, fixture boundaries, selector policy, performance policy, and initial seven scenarios.
 - [x] (2026-08-20) Committed the prerequisite rich-account remediation as `24e1b1e`.
 - [x] (2026-08-20) Implemented the deterministic scenario builder, E2E-only reset boundary, Chromium orchestration, metrics collection, and AL-01.
-- [ ] Implement and commit AL-02 independently.
+- [x] (2026-08-20) Implemented AL-02 tangible asset creation and verified persistence across detail, reload, overview, and net worth.
 - [ ] Implement and commit AL-03 independently.
 - [ ] Implement and commit AL-04 independently.
 - [ ] Implement and commit AL-05 independently.
@@ -37,6 +37,9 @@ The suite is intentionally small. It proves the integration seams and user-visib
 
 - Observation: dojo2 has no dedicated Net Worth browser route.
   Evidence: `web/src/dojo/router.ts` exposes budgets, transactions, Assets & Liabilities, creation, and account detail routes. AL-01 therefore verifies the independent real `/api/net-worth` read rather than inventing an unapproved page.
+
+- Observation: Fingerprint-keyed XDG baseline reuse keeps multi-scenario setup bounded.
+  Evidence: The first two-scenario build generated 11.52 MiB in 1.17 seconds; the next run reused both baselines and completed baseline validation in 271 ms.
 
 ## Decision Log
 
@@ -90,7 +93,7 @@ The suite is intentionally small. It proves the integration seams and user-visib
 
 ## Outcomes & Retrospective
 
-The first milestone is working end to end. AL-01 starts real API and Vite processes, resets an API-owned worker database, verifies grouped values and detail routing in Chromium, and independently verifies net worth. Two clean consecutive runs passed without retries and without leaking child processes. The current suite has one test, uses 13 API requests, resets in under 92 ms, and completes Cypress execution in under two seconds. AL-02 through AL-07 remain.
+The first two scenarios are working end to end. AL-01 starts real API and Vite processes, resets an API-owned worker database, verifies grouped values and detail routing in Chromium, and independently verifies net worth. AL-02 creates a tangible asset through the real wizard, reloads its generated detail route, and verifies overview and net-worth persistence. The accumulated suite has two tests, uses 44 browser API requests, and completes Cypress execution in 3.89 seconds with cached baselines. AL-03 through AL-07 remain.
 
 The first three-run profile recorded medians of 524 ms baseline generation, 847 ms API startup, 582 ms web startup, 75.19 ms reset, and 1,901 ms Cypress suite time. The corresponding p95 values were 527 ms, 848 ms, 589 ms, 81.74 ms, and 1,914 ms. These are observations, not failure thresholds; timing budgets remain deferred until the seven-scenario suite has representative CI evidence.
 
