@@ -58,6 +58,26 @@ def test_al_03_fixture_contract_has_one_effective_tracking_snapshot(tmp_path) ->
         service.close()
 
 
+def test_al_04_fixture_contract_has_an_unreconciled_investment(tmp_path) -> None:
+    baseline = tmp_path / "cash-only-investment.duckdb"
+    fixture = build_baseline(E2EScenario.CASH_ONLY_INVESTMENT, baseline)
+
+    service = DojoService(str(fixture.path), clock=fixed_e2e_clock())
+    try:
+        investment = next(
+            account
+            for account in service.list_accounts(show_hidden=False)
+            if account["name"] == "Cash brokerage"
+        )
+        assert investment["current_value_minor"] is None
+        assert (
+            service.latest_investment_statement(investment["account_id"])["effective_date"] is None
+        )
+        assert service.get_net_worth()["current_net_worth_minor"] == 2_000_000
+    finally:
+        service.close()
+
+
 def test_e2e_reset_route_is_absent_outside_e2e(tmp_path) -> None:
     database_path = tmp_path / "development.duckdb"
     build_baseline(E2EScenario.ASSETS_LIABILITIES_OVERVIEW, database_path)

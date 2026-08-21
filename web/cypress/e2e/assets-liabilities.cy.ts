@@ -154,3 +154,50 @@ describe("Tracking snapshot correction", () => {
     cy.get('[data-cy="metric-net-worth"]').should("contain", "$530,000");
   });
 });
+
+describe("Cash-only investment reconciliation", () => {
+  beforeEach(() => {
+    cy.resetScenario("cash-only-investment");
+    cy.visit("/assets-liabilities/00000000-0000-0000-0000-000000000401");
+    cy.get('[data-cy="account-detail-page"]').should("be.visible");
+  });
+
+  it("AL-04 reconciles an investment statement without holdings", () => {
+    cy.get('[data-cy="holdings-summary-section"]').should(
+      "contain",
+      "No statement recorded.",
+    );
+    cy.get('[data-cy="account-detail-reconcile-investment"]').click();
+    cy.get('input[name="investment-statement-date"]').should(
+      "have.value",
+      "2026-02-15",
+    );
+    cy.get('input[name="investment-statement-cash"]').type("12000");
+    cy.get('[data-cy="form-modal-root"]')
+      .should("contain", "No holdings")
+      .find('input[name^="holding-ticker-"]')
+      .should("not.exist");
+
+    cy.intercept("POST", "**/investment-statements").as("reconcileInvestment");
+    cy.get('[data-cy="form-modal-root"]')
+      .contains("button", "Apply statement")
+      .click();
+    cy.wait("@reconcileInvestment")
+      .its("response.statusCode")
+      .should("equal", 200);
+
+    cy.get('[data-cy="metric-value"]').should("contain", "$12,000");
+    cy.get('[data-cy="holdings-summary-section"]').should(
+      "contain",
+      "No holdings in latest statement.",
+    );
+
+    cy.visit("/assets-liabilities");
+    cy.get('[data-cy="assets-liabilities-group"][data-group-key="investments"]')
+      .find('[data-cy="assets-liabilities-row"]')
+      .should("have.length", 1)
+      .and("contain", "Cash brokerage")
+      .and("contain", "$12,000");
+    cy.get('[data-cy="metric-net-worth"]').should("contain", "$32,000");
+  });
+});

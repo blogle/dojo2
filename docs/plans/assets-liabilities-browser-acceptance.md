@@ -15,7 +15,7 @@ The suite is intentionally small. It proves the integration seams and user-visib
 - [x] (2026-08-20) Implemented the deterministic scenario builder, E2E-only reset boundary, Chromium orchestration, metrics collection, and AL-01.
 - [x] (2026-08-20) Implemented AL-02 tangible asset creation and verified persistence across detail, reload, overview, and net worth.
 - [x] (2026-08-20) Implemented AL-03 same-date tracking correction across detail, history, reload, overview, and net worth.
-- [ ] Implement and commit AL-04 independently.
+- [x] (2026-08-20) Implemented AL-04 cash-only investment reconciliation and corrected the empty-holdings state to distinguish a cash-only statement from no statement.
 - [ ] Implement and commit AL-05 independently.
 - [ ] Implement and commit AL-06 independently.
 - [ ] Implement and commit AL-07 independently.
@@ -93,7 +93,7 @@ The suite is intentionally small. It proves the integration seams and user-visib
 
 ## Outcomes & Retrospective
 
-The first three scenarios are working end to end. AL-01 verifies grouped values, detail routing, and the independent net-worth read. AL-02 creates a tangible asset through the real wizard and verifies persistence. AL-03 corrects a same-date tracking snapshot and proves one effective history row across reload and aggregate views. The accumulated suite has three tests, uses 83 browser API requests, and completes Cypress execution in 6.09 seconds. AL-04 through AL-07 remain.
+The first four scenarios are working end to end. AL-01 verifies grouped values, detail routing, and the independent net-worth read. AL-02 creates a tangible asset through the real wizard and verifies persistence. AL-03 corrects a same-date tracking snapshot and proves one effective history row. AL-04 records a cash-only investment statement without fabricating a holding and keeps the empty-holdings copy truthful. The accumulated suite has four tests, uses 105 browser API requests, and completes Cypress execution in 7.31 seconds. AL-05 through AL-07 remain.
 
 The first three-run profile recorded medians of 524 ms baseline generation, 847 ms API startup, 582 ms web startup, 75.19 ms reset, and 1,901 ms Cypress suite time. The corresponding p95 values were 527 ms, 848 ms, 589 ms, 81.74 ms, and 1,914 ms. These are observations, not failure thresholds; timing budgets remain deferred until the seven-scenario suite has representative CI evidence.
 

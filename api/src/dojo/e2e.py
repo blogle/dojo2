@@ -24,6 +24,7 @@ class E2EScenario(StrEnum):
     ASSETS_LIABILITIES_OVERVIEW = "assets-liabilities-overview"
     TANGIBLE_ASSET_CREATION = "tangible-asset-creation"
     TRACKING_SNAPSHOT_CORRECTION = "tracking-snapshot-correction"
+    CASH_ONLY_INVESTMENT = "cash-only-investment"
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,6 +55,7 @@ def fixture_sql(scenario: E2EScenario) -> tuple[str, ...]:
         E2EScenario.TRACKING_SNAPSHOT_CORRECTION: (
             "tests/e2e/scenarios/al_03_tracking_correction",
         ),
+        E2EScenario.CASH_ONLY_INVESTMENT: ("tests/e2e/scenarios/al_04_cash_only_investment",),
     }
     return ("tests/e2e/core", *scenario_sql[scenario])
 

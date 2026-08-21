@@ -2137,7 +2137,11 @@ function formatTaxTreatment(value: string | null | undefined): string {
                   </div>
                 </div>
                 <p v-else class="account-detail-page__empty">
-                  No statement recorded.
+                  {{
+                    investmentStatement?.effective_date
+                      ? "No holdings in latest statement."
+                      : "No statement recorded."
+                  }}
                 </p>
               </section>
             </template>

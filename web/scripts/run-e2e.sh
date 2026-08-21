@@ -11,6 +11,7 @@ scenarios=(
   "assets-liabilities-overview"
   "tangible-asset-creation"
   "tracking-snapshot-correction"
+  "cash-only-investment"
 )
 initial_baseline="${baseline_dir}/${scenarios[0]}.duckdb"
 allocate_port() {
