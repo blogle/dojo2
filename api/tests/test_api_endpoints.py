@@ -211,9 +211,7 @@ def test_transactions_endpoint_filters_by_account_with_status_counts(monkeypatch
         assert {item["account_id"] for item in payload["items"]} == {checking["account_id"]}
 
 
-def test_account_transaction_summary_is_aggregated_server_side(
-    monkeypatch, tmp_path
-) -> None:
+def test_account_transaction_summary_is_aggregated_server_side(monkeypatch, tmp_path) -> None:
     import datetime
     from collections import defaultdict
 

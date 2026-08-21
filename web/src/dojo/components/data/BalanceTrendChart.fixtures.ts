@@ -21,7 +21,8 @@ const points: BalanceTrendPoint[] = [
 export default defineFixtures<BalanceTrendChartProps>({
   component: BalanceTrendChart,
   title: "BalanceTrendChart",
-  description: "Interactive balance chart with period selection, axes, hover, and drag measurement.",
+  description:
+    "Interactive balance chart with period selection, axes, hover, and drag measurement.",
   presentation: { container: "full-width" },
   scenarios: [
     {

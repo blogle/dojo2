@@ -67,7 +67,9 @@ const valueExtent = computed(() => {
 
 const plottedPoints = computed(() =>
   visiblePoints.value.map((point, index, all) => {
-    const x = pad.left + (all.length === 1 ? 0 : (index / (all.length - 1)) * plotWidth);
+    const x =
+      pad.left +
+      (all.length === 1 ? 0 : (index / (all.length - 1)) * plotWidth);
     const valueRange = valueExtent.value.max - valueExtent.value.min;
     const y =
       pad.top +
@@ -104,7 +106,11 @@ const yTicks = computed(() => {
 const xTicks = computed(() => {
   const points = plottedPoints.value;
   if (points.length === 0) return [];
-  const candidates = [points[0], points[Math.floor(points.length / 2)], points[points.length - 1]];
+  const candidates = [
+    points[0],
+    points[Math.floor(points.length / 2)],
+    points[points.length - 1],
+  ];
   return candidates.filter(Boolean);
 });
 
@@ -141,7 +147,10 @@ const tooltipText = computed(() => {
 const tooltipPosition = computed(() => {
   const point = activePoint.value;
   if (!point) return { x: 0, y: 0 };
-  return { x: Math.min(point.x + 10, width - 260), y: Math.max(point.y - 44, 8) };
+  return {
+    x: Math.min(point.x + 10, width - 260),
+    y: Math.max(point.y - 44, 8),
+  };
 });
 
 function nearestIndex(event: PointerEvent): number | null {
@@ -205,7 +214,10 @@ function formatDate(date: string): string {
       <div>
         <h2 class="balance-chart__title">Balance over time</h2>
         <p v-if="visiblePoints.length" class="balance-chart__subtitle">
-          {{ formatCurrency(visiblePoints[visiblePoints.length - 1].valueMinor) }} as of
+          {{
+            formatCurrency(visiblePoints[visiblePoints.length - 1].valueMinor)
+          }}
+          as of
           {{ formatDate(visiblePoints[visiblePoints.length - 1].date) }}
         </p>
       </div>
@@ -260,7 +272,12 @@ function formatDate(date: string): string {
           :y1="pad.top"
           :y2="pad.top + plotHeight"
         />
-        <circle class="balance-chart__dot" :cx="activePoint.x" :cy="activePoint.y" r="4" />
+        <circle
+          class="balance-chart__dot"
+          :cx="activePoint.x"
+          :cy="activePoint.y"
+          r="4"
+        />
       </template>
       <template v-if="measurement">
         <rect

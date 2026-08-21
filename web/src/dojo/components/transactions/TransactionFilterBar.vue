@@ -29,7 +29,8 @@ const accountOptions = computed(() => [
 ]);
 
 const lockedAccountName = computed(
-  () => props.accounts.find((a) => a.account_id === props.lockedAccountId)?.name,
+  () =>
+    props.accounts.find((a) => a.account_id === props.lockedAccountId)?.name,
 );
 
 const dateOptions = [
