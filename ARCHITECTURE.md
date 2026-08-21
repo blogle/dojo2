@@ -87,6 +87,7 @@ Core read-path SQL such as account listing, transaction paging, account balances
 - `api/src/dojo/e2e.py` builds allowlisted scenario baselines from canonical migrations plus data-only SQL under `api/src/dojo/sql/tests/e2e/`.
 - The E2E-only reset route is absent outside `APP_ENV=e2e`; it restores an API-owned worker database and recreates process-local service state before each test.
 - Generated baselines, logs, failure databases, and timing reports live under `${XDG_CACHE_HOME:-$HOME/.cache}/dojo/e2e/`, never in the repository or developer database.
+- `web/cypress/e2e/performance-budgets.json` contains generous reviewed ceilings for setup, reset, test, suite, and request-count regressions; `just profile-e2e` produces median and p95 evidence used to ratchet them downward.
 
 ## Import Architecture
 

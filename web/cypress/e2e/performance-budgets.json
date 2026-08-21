@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "ceilings": {
+    "baselineGenerationMs": 3000,
+    "apiStartupMs": 2000,
+    "webStartupMs": 2000,
+    "resetMs": 500,
+    "testMs": 10000,
+    "suiteMs": 45000,
+    "apiRequests": 350,
+    "failedApiRequests": 0
+  }
+}

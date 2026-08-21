@@ -145,6 +145,11 @@ set -e
 if [[ -f "$run_dir/cypress/run.json" ]]; then
   node "$repo_root/web/scripts/summarize-e2e.mjs" "$run_dir"
 fi
+if [[ "$cypress_status" -eq 0 ]]; then
+  node "$repo_root/web/scripts/check-e2e-budget.mjs" \
+    "$run_dir" \
+    "$repo_root/web/cypress/e2e/performance-budgets.json"
+fi
 if [[ -n "${DOJO_E2E_PROFILE_MANIFEST:-}" ]]; then
   printf '%s\n' "$run_dir" >>"$DOJO_E2E_PROFILE_MANIFEST"
 fi
