@@ -40,7 +40,7 @@ For each completed work item, record:
 
 ## Work Item 6.5: Rich-account values, remediation, and cutover
 
-**Status**: Implementation complete through Milestone 6; product-owner browser acceptance and final Milestone 7 audit remain.
+**Status**: Implementation complete through Milestone 6; deterministic browser acceptance and the full quality gate pass. Final Milestone 7 mock/inert-control audit remains.
 
 ### Commands run
 
@@ -56,6 +56,9 @@ For each completed work item, record:
 - Focused headless-Chrome Cypress sweep across institution, wizard, budget, and account detail specs — 26 passed.
 - Design-system manifest coverage — 39 fixtures present.
 - Confirmed terminology lint — zero hits.
+- `just test-e2e` — seven real-browser scenarios passed against isolated FastAPI and DuckDB workers with zero retries and zero failed API requests.
+- `just profile-e2e` — complete-suite p95: 964 ms baseline generation, 851 ms API startup, 581 ms web startup, 95.25 ms reset, and 21,975 ms Cypress duration.
+- `just check` — Passed after moving the canonical component runner to Nix-provided Chromium and closing pre-existing formatting/App-test drift.
 
 ### Data invariants checked
 
@@ -68,10 +71,7 @@ For each completed work item, record:
 
 ### Validation gaps
 
-- Product-owner browser revalidation remains required before Dashboard work.
-- Cypress Electron repeatedly exited with `SIGSEGV` after two tests in larger specs; identical specs pass under headless Chrome.
-- The full `just check` remains affected by the Electron issue and unrelated pre-existing formatting drift in `api/tests/test_api_endpoints.py`.
-- (2026-08-20) Closure: the canonical component runner now uses Nix-provided Chromium, the App tests avoid product bootstrap on `/dev/test`, and the unrelated formatting drift was committed separately. Revalidate with `just test-web` and `just check`.
+- Subjective final mock alignment and inert-control review remain Milestone 7 work; repeated financial workflow validation no longer requires a manual walkthrough.
 
 ---
 

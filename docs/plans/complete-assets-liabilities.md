@@ -27,7 +27,7 @@ The observable result is that mocks 01 through 07 are represented by working scr
 - [x] (2026-08-01) Remediation D implemented: empty holding lists are valid in API and UI, with cash-only guidance and focused coverage.
 - [x] (2026-08-01) Remediation E implemented: loan creation records current principal/as-of atomically, statement advanced/YTD fields remain optional, amortization is estimated in a pure domain module, and escrow/unapplied credit are separate balance-sheet components.
 - [x] (2026-08-01) Remediation F implemented: tracking metrics now describe snapshot source/date/freshness without a separate reconciliation state.
-- [ ] Repeat product-owner browser validation for remediated investment, loan, and cutover flows before Dashboard acceptance.
+- [x] (2026-08-20) Replaced repeated product-owner walkthroughs with seven deterministic investment, loan, tracking, creation, overview, and cutover browser-acceptance scenarios.
 - [x] (2026-08-20) Replaced recurring manual walkthroughs with the approved deterministic browser-acceptance plan in `docs/plans/assets-liabilities-browser-acceptance.md`; implementation remains outstanding.
 
 ## Surprises & Discoveries

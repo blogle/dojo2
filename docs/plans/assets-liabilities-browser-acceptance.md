@@ -19,7 +19,7 @@ The suite is intentionally small. It proves the integration seams and user-visib
 - [x] (2026-08-20) Implemented AL-05 contribution provenance across investment detail, both transaction legs, one derived budget activity row, same-day statement correction, and net-worth neutrality.
 - [x] (2026-08-20) Implemented AL-06 linked Mortgage payment visibility across Transactions, Budget Spending history, and Chase Mortgage detail, followed by truthful statement-derived components.
 - [x] (2026-08-20) Implemented AL-07 one-to-many tracking cutover with three signed successors, unchanged net worth, no ledger activity, and reload persistence.
-- [x] (2026-08-20) Established initial generous performance budgets from a three-run complete-suite profile; broad repository quality-gate closure remains.
+- [x] (2026-08-20) Established initial generous performance budgets from a three-run complete-suite profile and completed the broad `just check` repository quality gate.
 
 ## Surprises & Discoveries
 
@@ -103,6 +103,8 @@ The suite is intentionally small. It proves the integration seams and user-visib
 All seven scenarios are working end to end. AL-07 replaces one `$500,000` tracking asset with a `$200,000` investment, `$350,000` tangible asset, and `$50,000` loan liability while preserving `$520,000` total net worth including Checking. It proves that no transaction or allocation is created and that reload does not duplicate successors. The complete suite uses 250 browser API requests and completes Cypress execution in 21.73 seconds; AL-06 is currently the slowest scenario at 5.55 seconds.
 
 The final three-run profile measured p95 values of 964 ms baseline generation, 851 ms API startup, 581 ms web startup, 95.25 ms reset, and 21,975 ms suite duration. API request count ranged from 251 to 252. These measurements established the first checked-in ceilings; every functional E2E run now reports and enforces them.
+
+The plan is complete. `just check` passes with the canonical component runner moved from unstable Electron to Nix-provided Chromium. The suite exposed and closed three integration gaps while being built: cash-only statements were mislabeled as no statement, investment transfer provenance was absent from detail, and loan reconciliation could open before its source snapshot loaded. Recurring financial-flow validation is now programmatic; future scenarios should be added only when product use reveals a meaningful uncovered regression risk.
 
 The first three-run profile recorded medians of 524 ms baseline generation, 847 ms API startup, 582 ms web startup, 75.19 ms reset, and 1,901 ms Cypress suite time. The corresponding p95 values were 527 ms, 848 ms, 589 ms, 81.74 ms, and 1,914 ms. These are observations, not failure thresholds; timing budgets remain deferred until the seven-scenario suite has representative CI evidence.
 

@@ -6,7 +6,7 @@ Path: `./plans/2026-06-17-implement-product-spec/PLAN.md`
 
 Current phase: Phase 6.5 — Assets & Liabilities Completion
 
-Current work-item status: **In progress — final product-owner acceptance and full quality-gate closure**
+Current work-item status: **In progress — final mock-alignment and inert-control audit**
 
 ## Product and repository context
 
@@ -105,9 +105,9 @@ Relevant contributor guidance:
 ## Current repository state
 
 - **Branch**: `master`
-- **Working tree**: Rich-account remediation and cutover implementation are uncommitted; local untracked `tmp/` contains visual-review artifacts and must not be committed.
-- **Last completed implementation task**: Atomic one-to-many tracking cutover plus loan projection/restricted-escrow presentation.
-- **Known failing checks**: Larger Cypress specs repeatedly trigger an Electron `SIGSEGV` in this environment after two tests; the same specs pass in headless Chrome. `just format-check` still encounters pre-existing drift in `api/tests/test_api_endpoints.py` unless that unrelated file is formatted.
+- **Working tree**: Rich-account remediation and deterministic browser acceptance are committed; local untracked `tmp/` contains visual-review artifacts and must not be committed.
+- **Last completed implementation task**: Seven-scenario deterministic browser acceptance with measured performance budgets.
+- **Known failing checks**: None. `just check` and `just test-e2e` pass with Nix-provided Chromium.
 - **Required services**: DuckDB (provisioned by `just api`), Google OAuth (optional)
 - **Feature flags**: None
 - **Aspire data**: Deterministic fixture available at `fixture://default`
@@ -146,7 +146,6 @@ Frontend capabilities now present:
 - Budget page route loading is resilient to `vue-draggable-plus` optimized dependency load issues because draggable behavior is loaded only when reorder mode is enabled.
 
 Frontend capabilities still planned:
-- Product-owner browser revalidation of the remediated investment, loan, and cutover flows.
 - Final mock-alignment/inert-control audit before Dashboard work.
 
 ## Next work item
@@ -155,14 +154,14 @@ Frontend capabilities still planned:
 
 Dashboard work is blocked until Assets & Liabilities is financially correct and its proposed flows are complete. The authoritative living plan is `docs/plans/complete-assets-liabilities.md`.
 
-Milestones 1–6 are implemented. The remaining work is product-owner browser acceptance, final mock/inert-control review, and the broadest repository check that the environment permits.
+Milestones 1–6 and deterministic browser acceptance are implemented. The remaining work is the final mock/inert-control review.
 
 ### Definition of done
 
 1. Type-specific values agree across account detail, Assets & Liabilities, and net worth for any effective date.
 2. Every visible action in mocks 01–07 either works or is removed; no fabricated financial state remains.
-3. Tracking, tangible, investment, loan, and one-to-many cutover acceptance scenarios pass.
-4. `just check` passes and visual validation is recorded in `VALIDATION.md`.
+3. Tracking, tangible, investment, loan, and one-to-many cutover acceptance scenarios pass. Complete.
+4. `just check` passes and visual validation is recorded in `VALIDATION.md`. Quality gate complete; subjective final visual audit remains.
 
 ## Human decisions required
 
