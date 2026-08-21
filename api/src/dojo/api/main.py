@@ -1,6 +1,7 @@
 from asyncio import Lock
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -23,6 +24,8 @@ def create_app(app_settings: Settings | None = None) -> FastAPI:
         app.state.settings = settings
         clock = fixed_e2e_clock() if settings.app_env == "e2e" else None
         app.state.dojo_service = DojoService(settings.duckdb_path, clock=clock)
+        if settings.app_env == "e2e":
+            app.state.e2e_active_database = Path(settings.duckdb_path).resolve()
         app.state.oauth_token_store = OAuthTokenStore()
         if settings.app_env == "e2e":
             app.state.e2e_reset_lock = Lock()

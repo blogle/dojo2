@@ -5,12 +5,15 @@ import json
 import os
 import shutil
 from argparse import ArgumentParser
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import StrEnum
+from fcntl import LOCK_EX, flock
 from importlib.metadata import version
 from pathlib import Path
 from time import perf_counter
+from typing import Iterator
 
 from dojo.clock import FrozenClock
 from dojo.database import Database
@@ -96,6 +99,15 @@ def build_baseline(scenario: E2EScenario, output_path: str | Path) -> E2EFixture
     return E2EFixture(scenario, fingerprint, output)
 
 
+@contextmanager
+def baseline_build_lock(output: Path) -> Iterator[None]:
+    lock_path = output.with_suffix(f"{output.suffix}.lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("w", encoding="utf-8") as lock_file:
+        flock(lock_file, LOCK_EX)
+        yield
+
+
 def stage_baseline(baseline: Path, database_path: Path) -> Path:
     if baseline.resolve() == database_path.resolve():
         raise ValueError("E2E baseline and active database paths must differ")
@@ -123,25 +135,40 @@ def main() -> int:
     scenario = E2EScenario(args.scenario)
     output = Path(args.output_path)
     metadata_path = output.with_suffix(f"{output.suffix}.json")
-    fingerprint = fixture_fingerprint(scenario)
-    started = perf_counter()
-    cache_hit = False
-    if output.is_file() and metadata_path.is_file():
-        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-        cache_hit = metadata.get("fixture_fingerprint") == fingerprint
-    fixture = (
-        E2EFixture(scenario, fingerprint, output) if cache_hit else build_baseline(scenario, output)
-    )
-    duration_ms = (perf_counter() - started) * 1000
-    result = {
-        "scenario": fixture.scenario.value,
-        "fixture_fingerprint": fixture.fingerprint,
-        "path": str(fixture.path),
-        "db_bytes": fixture.path.stat().st_size,
-        "generation_ms": duration_ms,
-        "cache_hit": cache_hit,
-    }
-    metadata_path.write_text(json.dumps(result, sort_keys=True), encoding="utf-8")
+    with baseline_build_lock(output):
+        fingerprint = fixture_fingerprint(scenario)
+        started = perf_counter()
+        cache_hit = False
+        if output.is_file() and metadata_path.is_file():
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            cache_hit = metadata.get("fixture_fingerprint") == fingerprint
+        if cache_hit:
+            fixture = E2EFixture(scenario, fingerprint, output)
+        else:
+            temporary_output = output.with_name(f".{output.name}.{os.getpid()}.building")
+            temporary_metadata = metadata_path.with_name(
+                f".{metadata_path.name}.{os.getpid()}.building"
+            )
+            try:
+                built_fixture = build_baseline(scenario, temporary_output)
+                os.replace(temporary_output, output)
+            except Exception:
+                temporary_output.unlink(missing_ok=True)
+                temporary_metadata.unlink(missing_ok=True)
+                raise
+            fixture = E2EFixture(scenario, built_fixture.fingerprint, output)
+        duration_ms = (perf_counter() - started) * 1000
+        result = {
+            "scenario": fixture.scenario.value,
+            "fixture_fingerprint": fixture.fingerprint,
+            "path": str(fixture.path),
+            "db_bytes": fixture.path.stat().st_size,
+            "generation_ms": duration_ms,
+            "cache_hit": cache_hit,
+        }
+        if not cache_hit:
+            temporary_metadata.write_text(json.dumps(result, sort_keys=True), encoding="utf-8")
+            os.replace(temporary_metadata, metadata_path)
     print(json.dumps(result, sort_keys=True))
     return 0
 

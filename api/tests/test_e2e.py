@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import shutil
+import subprocess
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 
@@ -10,6 +12,31 @@ from dojo.api.main import create_app
 from dojo.api.settings import Settings
 from dojo.e2e import E2EScenario, build_baseline, fixed_e2e_clock
 from dojo.service import DojoService
+
+
+def test_baseline_publication_is_safe_under_concurrent_builders(tmp_path) -> None:
+    output = tmp_path / "shared.duckdb"
+    command = [
+        sys.executable,
+        "-m",
+        "dojo.e2e",
+        E2EScenario.ASSETS_LIABILITIES_OVERVIEW.value,
+        str(output),
+    ]
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = [
+            executor.submit(subprocess.run, command, capture_output=True, text=True)
+            for _ in range(2)
+        ]
+        completed = [result.result() for result in results]
+
+    assert [result.returncode for result in completed] == [0, 0]
+    service = DojoService(str(output), clock=fixed_e2e_clock())
+    try:
+        assert service.get_net_worth()["current_net_worth_minor"] == 36_100_000
+    finally:
+        service.close()
 
 
 def test_al_01_fixture_contract(tmp_path) -> None:
@@ -258,3 +285,44 @@ def test_e2e_reset_rejects_a_database_outside_the_worker_directory(tmp_path) -> 
 
     assert response.status_code == 409
     assert response.json()["detail"] == "Unsafe E2E worker database configuration"
+
+
+def test_e2e_reset_keeps_current_service_when_replacement_cannot_open(
+    monkeypatch, tmp_path
+) -> None:
+    baseline_dir = tmp_path / "baselines"
+    baseline = baseline_dir / "assets-liabilities-overview.duckdb"
+    active_database = tmp_path / "worker.duckdb"
+    build_baseline(E2EScenario.ASSETS_LIABILITIES_OVERVIEW, baseline)
+    shutil.copyfile(baseline, active_database)
+    (tmp_path / ".dojo-e2e-worker").write_text("acceptance-secret", encoding="utf-8")
+
+    app = create_app(
+        Settings(
+            APP_ENV="e2e",
+            DUCKDB_PATH=str(active_database),
+            E2E_BASELINE_DIR=str(baseline_dir),
+            E2E_RUN_DIR=str(tmp_path),
+            E2E_RESET_TOKEN="acceptance-secret",
+        )
+    )
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        import dojo.api.e2e as e2e_routes
+
+        def fail_to_open(*args, **kwargs):
+            raise RuntimeError("replacement failed")
+
+        monkeypatch.setattr(e2e_routes, "DojoService", fail_to_open)
+        reset = client.post(
+            "/__e2e/reset",
+            headers={"X-Dojo-E2E-Token": "acceptance-secret"},
+            json={"scenario": E2EScenario.ASSETS_LIABILITIES_OVERVIEW.value},
+        )
+        assert reset.status_code == 500
+
+        overview = client.get("/api/assets-liabilities")
+        assert overview.status_code == 200
+        assert overview.json()["net_worth_minor"] == 36_100_000
+
+    assert sorted(path.name for path in tmp_path.glob("worker*.duckdb")) == ["worker.duckdb"]

@@ -85,9 +85,10 @@ Core read-path SQL such as account listing, transaction paging, account balances
 - `web/cypress/` provides the checked-in Cypress component-testing harness for Vue components.
 - `web/cypress/e2e/` runs the real Vue router and FastAPI API against deterministic scenario databases in Nix-provided Chromium.
 - `api/src/dojo/e2e.py` builds allowlisted scenario baselines from canonical migrations plus data-only SQL under `api/src/dojo/sql/tests/e2e/`.
-- The E2E-only reset route is absent outside `APP_ENV=e2e`; it restores an API-owned worker database and recreates process-local service state before each test.
+- The E2E-only reset route is absent outside `APP_ENV=e2e`; it constructs a replacement API-owned worker database and service before atomically swapping process-local state, so a failed replacement leaves the current service usable.
+- Shared XDG baselines use an inter-process file lock and atomic publication, allowing concurrent E2E runs without exposing partial database files.
 - Generated baselines, logs, failure databases, and timing reports live under `${XDG_CACHE_HOME:-$HOME/.cache}/dojo/e2e/`, never in the repository or developer database.
-- `web/cypress/e2e/performance-budgets.json` contains generous reviewed ceilings for setup, reset, test, suite, and request-count regressions; `just profile-e2e` produces median and p95 evidence used to ratchet them downward.
+- `web/cypress/e2e/performance-budgets.json` contains the required scenario names plus generous reviewed ceilings for setup, reset, test, suite, and request-count regressions; `just profile-e2e` produces median and p95 evidence used to ratchet them downward.
 
 ## Import Architecture
 

@@ -236,6 +236,9 @@ describe("Investment contribution provenance", () => {
       .and("contain", "February contribution")
       .and("contain", "Checking → Brokerage");
 
+    cy.visit("/assets-liabilities/00000000-0000-0000-0000-000000000101");
+    cy.get('[data-cy="metric-balance"]').should("contain", "$19,000");
+
     cy.visit("/transactions");
     cy.get('[data-cy="transaction-row"]').should((rows) => {
       const matchingRows = [...rows].filter((row) =>
@@ -316,16 +319,22 @@ describe("Linked loan payment activity", () => {
 
     cy.get('[data-cy="loan-payment-row"]')
       .should("have.length", 1)
+      .and("contain", "2026-02-15")
       .and("contain", "Checking")
       .and("contain", "February mortgage payment")
       .and("contain", "Cleared")
       .and("contain", "$5,000");
 
     cy.visit("/transactions");
-    cy.get('[data-cy="transaction-row"]')
-      .should("contain", "February mortgage payment")
-      .and("contain", "Mortgage")
-      .and("contain", "-$5,000");
+    cy.get('[data-cy="transaction-row"]').should((rows) => {
+      const matchingRows = [...rows].filter((row) =>
+        row.textContent?.includes("February mortgage payment"),
+      );
+      expect(matchingRows).to.have.length(1);
+      expect(matchingRows[0]?.textContent).to.include("02/15/2026");
+      expect(matchingRows[0]?.textContent).to.include("Mortgage");
+      expect(matchingRows[0]?.textContent).to.include("-$5,000");
+    });
 
     cy.visit("/budgets");
     cy.get(

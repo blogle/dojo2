@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from time import perf_counter
+from uuid import uuid4
 
 from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel
@@ -60,14 +61,25 @@ async def reset(
 
     async with request.app.state.e2e_reset_lock:
         started = perf_counter()
-        staged = stage_baseline(baseline, active_database)
-        request.app.state.dojo_service.close()
-        db_bytes = activate_staged_baseline(staged, active_database)
+        replacement_database = run_dir / f"worker-{uuid4()}.duckdb"
+        staged = stage_baseline(baseline, replacement_database)
+        db_bytes = activate_staged_baseline(staged, replacement_database)
         restore_ms = (perf_counter() - started) * 1000
 
         started = perf_counter()
-        request.app.state.dojo_service = DojoService(settings.duckdb_path, clock=fixed_e2e_clock())
+        try:
+            replacement_service = DojoService(str(replacement_database), clock=fixed_e2e_clock())
+        except Exception:
+            replacement_database.unlink(missing_ok=True)
+            raise
+        previous_service = request.app.state.dojo_service
+        previous_database = request.app.state.e2e_active_database
+        request.app.state.dojo_service = replacement_service
+        request.app.state.e2e_active_database = replacement_database
         request.app.state.oauth_token_store = OAuthTokenStore()
+        previous_service.close()
+        if previous_database.parent == run_dir:
+            previous_database.unlink(missing_ok=True)
         reopen_ms = (perf_counter() - started) * 1000
 
     return E2EResetResponse(

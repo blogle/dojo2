@@ -44,6 +44,9 @@ The suite is intentionally small. It proves the integration seams and user-visib
 - Observation: Loan reconciliation could be opened before its snapshot query finished, defaulting escrow to zero.
   Evidence: The first AL-06 run reached the form before `loanSnapshots` resolved and observed `loan-escrow=0`; disabling the action during snapshot loading and synchronizing on the visible escrow value removed the race.
 
+- Observation: A reset that closes the current service before opening its replacement can turn a fixture failure into an unavailable E2E API, and direct shared-cache rebuilds can expose partial DuckDB files to parallel runs.
+  Evidence: Final review traced both risks to the reset and baseline publication order. The harness now opens the replacement service before swapping, retains the current service on failure, locks shared builds, publishes baselines atomically, and covers both paths with backend tests.
+
 ## Decision Log
 
 - Decision: Use the real Vue application, FastAPI process, and DuckDB persistence boundary for acceptance behavior.
@@ -98,13 +101,17 @@ The suite is intentionally small. It proves the integration seams and user-visib
   Rationale: The complete-suite local p95 values are 964 ms baseline setup, 851 ms API startup, 581 ms web startup, 95.25 ms reset, about 5,600 ms slowest test, 21,975 ms suite time, and 252 requests. The ceilings are intentionally generous enough for CI variance while still catching order-of-magnitude regressions. Lowering a ceiling is a normal ratchet; raising one requires explicit review.
   Date/Author: 2026-08-20 / opencode
 
+- Decision: The performance gate also requires the exact seven approved scenario names and seven passing results.
+  Rationale: Timing and request budgets alone can become faster when a scenario is accidentally skipped or removed. Completeness is a structural prerequisite for interpreting performance evidence.
+  Date/Author: 2026-08-20 / opencode
+
 ## Outcomes & Retrospective
 
 All seven scenarios are working end to end. AL-07 replaces one `$500,000` tracking asset with a `$200,000` investment, `$350,000` tangible asset, and `$50,000` loan liability while preserving `$520,000` total net worth including Checking. It proves that no transaction or allocation is created and that reload does not duplicate successors. The complete suite uses 250 browser API requests and completes Cypress execution in 21.73 seconds; AL-06 is currently the slowest scenario at 5.55 seconds.
 
 The final three-run profile measured p95 values of 964 ms baseline generation, 851 ms API startup, 581 ms web startup, 95.25 ms reset, and 21,975 ms suite duration. API request count ranged from 251 to 252. These measurements established the first checked-in ceilings; every functional E2E run now reports and enforces them.
 
-The plan is complete. `just check` passes with the canonical component runner moved from unstable Electron to Nix-provided Chromium. The suite exposed and closed three integration gaps while being built: cash-only statements were mislabeled as no statement, investment transfer provenance was absent from detail, and loan reconciliation could open before its source snapshot loaded. Recurring financial-flow validation is now programmatic; future scenarios should be added only when product use reveals a meaningful uncovered regression risk.
+The plan is complete. `just check` passes with the canonical component runner moved from unstable Electron to Nix-provided Chromium. The hardened final E2E run completed all seven named scenarios in 22.42 seconds with 261 API requests, a 90.06 ms slowest reset, zero failed requests, and all ceilings satisfied. The suite exposed and closed three product integration gaps while being built: cash-only statements were mislabeled as no statement, investment transfer provenance was absent from detail, and loan reconciliation could open before its source snapshot loaded. Recurring financial-flow validation is now programmatic; future scenarios should be added only when product use reveals a meaningful uncovered regression risk.
 
 The first three-run profile recorded medians of 524 ms baseline generation, 847 ms API startup, 582 ms web startup, 75.19 ms reset, and 1,901 ms Cypress suite time. The corresponding p95 values were 527 ms, 848 ms, 589 ms, 81.74 ms, and 1,914 ms. These are observations, not failure thresholds; timing budgets remain deferred until the seven-scenario suite has representative CI evidence.
 
@@ -265,4 +272,4 @@ The backend needs an explicit E2E configuration type or settings fields for the 
 
 Cypress support provides one command to reset a named scenario and a small set of selectors or helpers that encode stable user actions, not page implementation details. Process orchestration owns child-process startup, readiness checks, logs, cleanup, and metrics output. All routine commands remain routed through the root `justfile`.
 
-Revision note: Created 2026-08-20 from the product-owner-approved acceptance discussion. Updated after AL-01 to record measured baseline costs, the XDG-cache decision, the absence of a Net Worth page, the API-based cross-surface assertion, and first complete-run performance evidence.
+Revision note: Created 2026-08-20 from the product-owner-approved acceptance discussion. Updated through completion to record all seven scenarios, measured budgets, XDG-cache and Net Worth decisions, Chromium quality-gate closure, failure-safe reset, concurrent baseline publication, and exact scenario-set enforcement.

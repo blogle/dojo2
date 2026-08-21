@@ -47,7 +47,7 @@ cleanup() {
     wait "$api_pid" 2>/dev/null || true
   fi
   if [[ "$status" -eq 0 ]]; then
-    rm -f "$active_database"
+    rm -f "$run_dir"/worker*.duckdb
   else
     printf 'E2E failure artifacts retained at %s\n' "$run_dir" >&2
   fi

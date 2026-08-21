@@ -34,6 +34,23 @@ const failures = Object.entries(budget.ceilings).flatMap(([name, ceiling]) =>
     ? [`${name}: ${actual[name]} exceeded ${ceiling}`]
     : [],
 );
+const actualTests = run.tests.map((test) => test.title).sort();
+const expectedTests = [...budget.expectedTests].sort();
+if (
+  run.totalTests !== expectedTests.length ||
+  run.totalPassed !== expectedTests.length ||
+  run.totalFailed !== 0 ||
+  run.tests.some((test) => test.state !== "passed")
+) {
+  failures.push(
+    `suite result differed: total=${run.totalTests}, passed=${run.totalPassed}, failed=${run.totalFailed}`,
+  );
+}
+if (JSON.stringify(actualTests) !== JSON.stringify(expectedTests)) {
+  failures.push(
+    `scenario set differed: expected ${expectedTests.length}, recorded ${actualTests.length}`,
+  );
+}
 
 if (failures.length > 0) {
   console.error("\nE2E performance budget failed");

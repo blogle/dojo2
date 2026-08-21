@@ -1,5 +1,14 @@
 {
   "version": 1,
+  "expectedTests": [
+    "AL-01 shows truthful grouped totals across surfaces",
+    "AL-02 creates a tangible asset that persists across surfaces",
+    "AL-03 corrects a same-date tracking snapshot across surfaces",
+    "AL-04 reconciles an investment statement without holdings",
+    "AL-05 preserves contribution provenance and net worth",
+    "AL-06 shows one mortgage payment across transaction, budget, and loan views",
+    "AL-07 replaces one tracking asset with three signed successors"
+  ],
   "ceilings": {
     "baselineGenerationMs": 3000,
     "apiStartupMs": 2000,
