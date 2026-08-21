@@ -347,6 +347,7 @@ const spendingHistoryRows = computed(() => {
       class="category-detail__history"
     >
       <TableShell
+        data-cy="category-spending-history"
         :columns="spendingHistoryColumns"
         :rows="spendingHistoryRows"
         empty-text="No transactions for this category."

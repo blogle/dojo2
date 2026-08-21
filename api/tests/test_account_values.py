@@ -517,6 +517,13 @@ def test_investment_contribution_funds_linked_category_and_withdrawal_returns_at
     assert len(derived_activity) == 1
     assert derived_activity[0]["amount_minor"] == -10_000
     assert derived_activity[0]["account_name"] == "Brokerage"
+    investment_activity = service.list_transactions(
+        limit=10,
+        show_hidden=False,
+        account_id=investment_id,
+    )["items"]
+    assert investment_activity[0]["transfer_counterparty_account_id"] == checking_id
+    assert investment_activity[0]["transfer_counterparty_account_name"] == "Checking"
 
     service.create_investment_transfer(
         investment_id,

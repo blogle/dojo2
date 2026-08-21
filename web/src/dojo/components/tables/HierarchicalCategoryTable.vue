@@ -305,6 +305,8 @@ defineExpose({ isDragging });
           }"
           :data-drag-group="reorderable && !row.depth ? row.key : undefined"
           :data-drag-child="reorderable && row.depth ? row.key : undefined"
+          data-cy="category-row"
+          :data-row-key="row.key"
           @click="emit('select', row.key)"
         >
           <td class="hierarchical-category-table__cell">

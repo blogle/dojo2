@@ -89,6 +89,30 @@ describe("TransactionLedger", () => {
     cy.get(".ledger__row").last().should("contain.text", "Paycheck");
   });
 
+  it("shows transfer provenance when requested", () => {
+    mount(TransactionLedger, {
+      props: {
+        transactions: [
+          {
+            ...mockTransactions[1],
+            account_name: "Brokerage",
+            amount_minor: 100000,
+            system_category: "TX_ACCOUNT_TRANSFER",
+            transfer_counterparty_account_name: "Checking",
+          },
+        ],
+        accounts: mockAccounts,
+        categories: mockCategories,
+        showTransferProvenance: true,
+      },
+    });
+
+    cy.get("[data-cy=transaction-transfer-provenance]").should(
+      "contain.text",
+      "Checking → Brokerage",
+    );
+  });
+
   it("enters edit mode on row click", () => {
     mount(TransactionLedger, {
       props: {

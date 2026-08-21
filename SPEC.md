@@ -1235,6 +1235,8 @@ Investment account details include:
 
 The investment activity list contains contribution and withdrawal transfers plus statement reconciliation events. Trades, dividends, interest, and sale proceeds are represented through changes between holdings, cash, and price snapshots rather than separate manual transaction-entry workflows.
 
+Investment contribution and withdrawal activity identifies the source and destination accounts as one semantic transfer operation. The Transactions page still exposes both paired ledger legs, while the linked budget category shows one derived activity row so the contribution is neither doubled nor visually canceled.
+
 The current value is the latest reconciled holdings-plus-cash value plus cleared contribution and withdrawal cash deltas after that reconciliation. The page distinguishes reconciled and provisional portions.
 
 Investment statements may contain cash and no holdings. A cash-only investment account is valid.

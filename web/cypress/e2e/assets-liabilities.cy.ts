@@ -201,3 +201,88 @@ describe("Cash-only investment reconciliation", () => {
     cy.get('[data-cy="metric-net-worth"]').should("contain", "$32,000");
   });
 });
+
+describe("Investment contribution provenance", () => {
+  beforeEach(() => {
+    cy.resetScenario("investment-contribution");
+    cy.visit("/assets-liabilities/00000000-0000-0000-0000-000000000401");
+    cy.get('[data-cy="account-detail-page"]').should("be.visible");
+  });
+
+  it("AL-05 preserves contribution provenance and net worth", () => {
+    cy.get('[data-cy="metric-value"]').should("contain", "$10,000");
+    cy.get('[data-cy="account-detail-contribute"]').click();
+    cy.get('input[name="investment-transfer-amount"]').type("1000");
+    cy.get('input[name="investment-transfer-memo"]')
+      .clear()
+      .type("February contribution");
+    cy.get('[data-cy="form-modal-root"]')
+      .should("contain", "Investment Contributions")
+      .and("contain", "$1,500.00 available")
+      .and("contain", "$500.00");
+
+    cy.intercept("POST", "**/investment-transfers").as("contribute");
+    cy.get('[data-cy="form-modal-root"]')
+      .contains("button", "Save contribution")
+      .click();
+    cy.wait("@contribute").its("response.statusCode").should("equal", 200);
+
+    cy.get('[data-cy="metric-value"]')
+      .should("contain", "$11,000")
+      .and("contain", "Provisional");
+    cy.get('[data-cy="transactions-section"]')
+      .find('[data-cy="transaction-row"]')
+      .should("have.length", 1)
+      .and("contain", "February contribution")
+      .and("contain", "Checking → Brokerage");
+
+    cy.visit("/transactions");
+    cy.get('[data-cy="transaction-row"]').should((rows) => {
+      const matchingRows = [...rows].filter((row) =>
+        row.textContent?.includes("February contribution"),
+      );
+      expect(matchingRows).to.have.length(2);
+    });
+
+    cy.visit("/budgets");
+    cy.get(
+      '[data-cy="category-row"][data-row-key="00000000-0000-0000-0000-000000000011"]',
+    ).click();
+    cy.get('[data-cy="full-screen-trouser-root"]')
+      .should("contain", "Investment Contributions")
+      .and("contain", "-$1,000.00")
+      .and("contain", "$500.00");
+    cy.get('[data-cy="full-screen-trouser-root"]')
+      .contains('[role="tab"]', "Spending history")
+      .click();
+    cy.get('[data-cy="category-spending-history"]')
+      .should("contain", "Brokerage")
+      .and("contain", "February contribution")
+      .and("contain", "-$1,000.00");
+
+    cy.visit("/assets-liabilities/00000000-0000-0000-0000-000000000401");
+    cy.get('[data-cy="account-detail-reconcile-investment"]').click();
+    cy.get('input[name="investment-statement-cash"]').clear().type("11000");
+    cy.intercept("POST", "**/investment-statements").as("includeContribution");
+    cy.get('[data-cy="form-modal-root"]')
+      .contains("button", "Apply statement")
+      .click();
+    cy.wait("@includeContribution")
+      .its("response.statusCode")
+      .should("equal", 200);
+
+    cy.get('[data-cy="metric-value"]')
+      .should("contain", "$11,000")
+      .and("not.contain", "Provisional");
+    cy.request(
+      `${String(Cypress.env("apiBaseUrl")).replace(/\/$/, "")}/api/accounts/00000000-0000-0000-0000-000000000401/investment-statements/latest`,
+    )
+      .its("body.provisional_transfer_minor")
+      .should("equal", 0);
+    cy.request(
+      `${String(Cypress.env("apiBaseUrl")).replace(/\/$/, "")}/api/net-worth`,
+    )
+      .its("body.current_net_worth_minor")
+      .should("equal", 3000000);
+  });
+});

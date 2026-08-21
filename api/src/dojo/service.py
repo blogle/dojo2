@@ -1453,17 +1453,46 @@ class DojoService:
             tuple(query_params),
         )
 
+        transfer_accounts: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        transfer_ids = sorted(
+            {str(row["transfer_id"]) for row in rows if row.get("transfer_id") is not None}
+        )
+        if transfer_ids:
+            transfer_placeholders = ",".join("?" for _ in transfer_ids)
+            for transfer_row in self.db.fetch_all(
+                render_sql(
+                    "queries/transfer_accounts_by_ids",
+                    transfer_placeholders=transfer_placeholders,
+                ),
+                tuple(transfer_ids),
+            ):
+                transfer_accounts[str(transfer_row["transfer_id"])].append(transfer_row)
+
         results: list[dict[str, Any]] = []
         for row in rows:
             account = accounts[row["account_id"]]
             category = categories.get(row["category_id"])
             hidden = account["is_hidden"] or (category["is_hidden"] if category else False)
+            counterpart = next(
+                (
+                    candidate
+                    for candidate in transfer_accounts.get(str(row.get("transfer_id")), [])
+                    if candidate["transaction_id"] != row["transaction_id"]
+                ),
+                None,
+            )
             results.append(
                 row
                 | {
                     "account_name": account["name"],
                     "category_name": category["name"] if category else None,
                     "is_hidden_entity": hidden,
+                    "transfer_counterparty_account_id": (
+                        str(counterpart["account_id"]) if counterpart else None
+                    ),
+                    "transfer_counterparty_account_name": (
+                        counterpart["account_name"] if counterpart else None
+                    ),
                 }
             )
         return {

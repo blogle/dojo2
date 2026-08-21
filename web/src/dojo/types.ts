@@ -9,6 +9,7 @@ export type AppStatus = {
 
 export type Transaction = {
   transaction_id: string;
+  transfer_id?: string | null;
   date: string;
   account_id: string;
   account_name: string;
@@ -19,6 +20,8 @@ export type Transaction = {
   status: "PENDING" | "CLEARED";
   memo: string;
   is_hidden_entity: boolean;
+  transfer_counterparty_account_id?: string | null;
+  transfer_counterparty_account_name?: string | null;
 };
 
 export type CategoryActivity = {

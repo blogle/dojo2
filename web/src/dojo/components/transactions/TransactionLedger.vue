@@ -25,6 +25,7 @@ const props = withDefaults(
     loadingMore?: boolean;
     showAccountColumn?: boolean;
     showRunningBalance?: boolean;
+    showTransferProvenance?: boolean;
     runningBalances?: Record<string, number>;
     lockedAccountId?: string;
   }>(),
@@ -34,6 +35,7 @@ const props = withDefaults(
     loadingMore: false,
     showAccountColumn: true,
     showRunningBalance: false,
+    showTransferProvenance: false,
     runningBalances: () => ({}),
     lockedAccountId: undefined,
   },
@@ -249,6 +251,14 @@ const directionOptions = [
   { value: "outflow", label: "Outflow" },
   { value: "inflow", label: "Inflow" },
 ];
+
+function transferProvenance(tx: Transaction): string {
+  const counterparty = tx.transfer_counterparty_account_name;
+  if (!counterparty) return "—";
+  return tx.amount_minor >= 0
+    ? `${counterparty} → ${tx.account_name}`
+    : `${tx.account_name} → ${counterparty}`;
+}
 </script>
 
 <template>
@@ -268,12 +278,16 @@ const directionOptions = [
             </th>
             <th class="ledger__head">Date</th>
             <th v-if="showAccountColumn" class="ledger__head">Account</th>
+            <th v-if="showTransferProvenance" class="ledger__head">Transfer</th>
             <th class="ledger__head">Category</th>
             <th class="ledger__head">Memo</th>
             <th class="ledger__head">Direction</th>
             <th class="ledger__head ledger__head--end">Amount</th>
             <th class="ledger__head">Status</th>
-            <th v-if="showRunningBalance" class="ledger__head ledger__head--end">
+            <th
+              v-if="showRunningBalance"
+              class="ledger__head ledger__head--end"
+            >
               Balance
             </th>
           </tr>
@@ -296,6 +310,7 @@ const directionOptions = [
               :style="{
                 transform: `translateY(${virtualRow.start}px)`,
               }"
+              data-cy="transaction-row"
               @click="editingId !== tx.transaction_id && startEdit(tx)"
               tabindex="0"
             >
@@ -327,6 +342,9 @@ const directionOptions = [
                     v-model="editAccountId"
                     :options="accountOptions"
                   />
+                </td>
+                <td v-if="showTransferProvenance" class="ledger__cell">
+                  {{ transferProvenance(tx) }}
                 </td>
                 <td class="ledger__cell">
                   <SelectField
@@ -360,7 +378,9 @@ const directionOptions = [
                   v-if="showRunningBalance"
                   class="ledger__cell ledger__cell--end ledger__cell--amount"
                 >
-                  {{ formatCurrency(runningBalances?.[tx.transaction_id] ?? 0) }}
+                  {{
+                    formatCurrency(runningBalances?.[tx.transaction_id] ?? 0)
+                  }}
                 </td>
               </template>
 
@@ -368,6 +388,13 @@ const directionOptions = [
                 <td class="ledger__cell">{{ formatDate(tx.date) }}</td>
                 <td v-if="showAccountColumn" class="ledger__cell">
                   {{ tx.account_name }}
+                </td>
+                <td
+                  v-if="showTransferProvenance"
+                  class="ledger__cell"
+                  data-cy="transaction-transfer-provenance"
+                >
+                  {{ transferProvenance(tx) }}
                 </td>
                 <td class="ledger__cell">
                   <span v-if="tx.category_name" class="ledger__category">
@@ -410,7 +437,9 @@ const directionOptions = [
                   v-if="showRunningBalance"
                   class="ledger__cell ledger__cell--end ledger__cell--amount"
                 >
-                  {{ formatCurrency(runningBalances?.[tx.transaction_id] ?? 0) }}
+                  {{
+                    formatCurrency(runningBalances?.[tx.transaction_id] ?? 0)
+                  }}
                 </td>
               </template>
             </tr>

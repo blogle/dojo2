@@ -880,6 +880,13 @@ const budgetAccountTypeLabel = computed(() => {
 const valueAsOfLabel = computed(() => {
   const effectiveDate = account.value?.value_effective_date;
   if (!effectiveDate) return "No value recorded";
+  if (
+    isInvestmentAccount.value &&
+    account.value?.provisional_value_minor !== undefined &&
+    account.value.provisional_value_minor !== 0
+  ) {
+    return `Provisional after ${formatDateShort(new Date(`${effectiveDate}T00:00:00`))}`;
+  }
   return `As of ${formatDateShort(new Date(`${effectiveDate}T00:00:00`))}`;
 });
 
@@ -2064,6 +2071,7 @@ function formatTaxTreatment(value: string | null | undefined): string {
                     :has-more="hasNextPage"
                     :loading-more="isFetchingNextPage"
                     :show-account-column="false"
+                    :show-transfer-provenance="isInvestmentAccount"
                     :show-running-balance="true"
                     :running-balances="runningBalances"
                     :locked-account-id="accountId"
