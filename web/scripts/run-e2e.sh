@@ -13,6 +13,7 @@ scenarios=(
   "tracking-snapshot-correction"
   "cash-only-investment"
   "investment-contribution"
+  "linked-loan-payment"
 )
 initial_baseline="${baseline_dir}/${scenarios[0]}.duckdb"
 allocate_port() {

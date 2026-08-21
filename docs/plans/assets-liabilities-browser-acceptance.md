@@ -17,7 +17,7 @@ The suite is intentionally small. It proves the integration seams and user-visib
 - [x] (2026-08-20) Implemented AL-03 same-date tracking correction across detail, history, reload, overview, and net worth.
 - [x] (2026-08-20) Implemented AL-04 cash-only investment reconciliation and corrected the empty-holdings state to distinguish a cash-only statement from no statement.
 - [x] (2026-08-20) Implemented AL-05 contribution provenance across investment detail, both transaction legs, one derived budget activity row, same-day statement correction, and net-worth neutrality.
-- [ ] Implement and commit AL-06 independently.
+- [x] (2026-08-20) Implemented AL-06 linked Mortgage payment visibility across Transactions, Budget Spending history, and Chase Mortgage detail, followed by truthful statement-derived components.
 - [ ] Implement and commit AL-07 independently.
 - [ ] Establish initial performance budgets from representative measurements and complete the broad repository quality gate.
 
@@ -40,6 +40,9 @@ The suite is intentionally small. It proves the integration seams and user-visib
 
 - Observation: Fingerprint-keyed XDG baseline reuse keeps multi-scenario setup bounded.
   Evidence: The first two-scenario build generated 11.52 MiB in 1.17 seconds; the next run reused both baselines and completed baseline validation in 271 ms.
+
+- Observation: Loan reconciliation could be opened before its snapshot query finished, defaulting escrow to zero.
+  Evidence: The first AL-06 run reached the form before `loanSnapshots` resolved and observed `loan-escrow=0`; disabling the action during snapshot loading and synchronizing on the visible escrow value removed the race.
 
 ## Decision Log
 
@@ -93,7 +96,7 @@ The suite is intentionally small. It proves the integration seams and user-visib
 
 ## Outcomes & Retrospective
 
-The first five scenarios are working end to end. AL-01 verifies grouped values and detail routing. AL-02 creates a tangible asset. AL-03 corrects a tracking snapshot. AL-04 records a cash-only investment statement. AL-05 now proves a contribution as one semantic `Checking → Brokerage` operation on investment detail, two paired rows on Transactions, one derived row in Budget Spending history, and a later same-day statement that removes the provisional delta without changing net worth. The accumulated suite has five tests, uses 158 browser API requests, and completes Cypress execution in 12.37 seconds. AL-06 and AL-07 remain.
+The first six scenarios are working end to end. AL-01 verifies grouped values and detail routing. AL-02 creates a tangible asset. AL-03 corrects a tracking snapshot. AL-04 records a cash-only investment statement. AL-05 proves investment provenance and net-worth neutrality. AL-06 now follows one Mortgage transaction through Transactions, Budget Spending history, and Chase Mortgage Payment activity before reconciling `$198,000` principal, `$2,000` principal reduction, `$3,000` unknown non-principal cost, and unchanged `$4,000` escrow. The accumulated suite has six tests, uses 222 browser API requests, and completes Cypress execution in 17.99 seconds. AL-07 remains.
 
 The first three-run profile recorded medians of 524 ms baseline generation, 847 ms API startup, 582 ms web startup, 75.19 ms reset, and 1,901 ms Cypress suite time. The corresponding p95 values were 527 ms, 848 ms, 589 ms, 81.74 ms, and 1,914 ms. These are observations, not failure thresholds; timing budgets remain deferred until the seven-scenario suite has representative CI evidence.
 

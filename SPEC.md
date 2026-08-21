@@ -1031,6 +1031,8 @@ Until a dedicated loan-payment flow exists, dojo may let the user attribute an e
 
 The first loan-payment model uses this lightweight attribution approach rather than requiring a split during transaction entry. Recording a payment from loan detail creates an ordinary budget transaction with the loan and its payment category preselected. On the Transactions page, a uniquely linked payment category attributes the transaction automatically. If several loans share the category, dojo asks for the loan in a follow-up control rather than adding a permanent loan column to the transaction table.
 
+An attributed loan payment remains the same ordinary transaction across surfaces: it appears on Transactions, in the linked category's Activity and Spending history, and in the loan detail's Payment activity with date, source account, amount, status, and memo.
+
 New attribution behavior is prospective. Historical transactions are not automatically backfilled or reinterpreted.
 
 Loan reconciliation captures a statement period and the lender's current principal, accrued interest, escrow, and unapplied-credit balances. Given the previously verified principal, current principal, attributed payments in the period, and any explicit principal-changing adjustments, dojo derives the aggregate principal reduction and the remaining unallocated non-principal cash. dojo must label that remainder as unknown non-principal unless lender statement detail supplies a more precise classification; it must not guess that the remainder is interest, fees, or escrow.

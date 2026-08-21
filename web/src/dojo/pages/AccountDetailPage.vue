@@ -302,7 +302,7 @@ const { data: accountBudgetLinks } = useQuery({
       !!accountId.value && (isInvestmentAccount.value || isLoanAccount.value),
   ),
 });
-const { data: loanSnapshots } = useQuery({
+const { data: loanSnapshots, isLoading: loanSnapshotsLoading } = useQuery({
   queryKey: computed(() => ["loan-snapshots", accountId.value]),
   queryFn: () => fetchLoanSnapshots(accountId.value),
   enabled: computed(() => !!accountId.value && isLoanAccount.value),
@@ -1620,6 +1620,7 @@ function formatTaxTreatment(value: string | null | undefined): string {
               v-if="isLoanAccount"
               variant="secondary"
               data-cy="account-detail-reconcile-loan"
+              :disabled="loanSnapshotsLoading"
               @click="openLoanStatementModal"
             >
               Reconcile statement
@@ -1858,9 +1859,14 @@ function formatTaxTreatment(value: string | null | undefined): string {
                     v-for="payment in loanPayments ?? []"
                     :key="payment.transaction_id"
                     class="account-detail-page__snapshot-row"
+                    data-cy="loan-payment-row"
                   >
                     <span class="account-detail-page__snapshot-td"
-                      >{{ payment.date }} · {{ payment.account_name }}</span
+                      >{{ payment.date }} · {{ payment.account_name }} ·
+                      {{ payment.memo }} ·
+                      {{
+                        payment.status === "CLEARED" ? "Cleared" : "Pending"
+                      }}</span
                     >
                     <span
                       class="account-detail-page__snapshot-td account-detail-page__snapshot-td--end"

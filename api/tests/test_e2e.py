@@ -100,6 +100,30 @@ def test_al_05_fixture_contract_has_funded_linked_investment(tmp_path) -> None:
         service.close()
 
 
+def test_al_06_fixture_contract_has_funded_linked_loan(tmp_path) -> None:
+    baseline = tmp_path / "linked-loan-payment.duckdb"
+    fixture = build_baseline(E2EScenario.LINKED_LOAN_PAYMENT, baseline)
+
+    service = DojoService(str(fixture.path), clock=fixed_e2e_clock())
+    try:
+        mortgage = next(
+            category
+            for category in service.list_categories(month="2026-02", show_hidden=False)
+            if category["name"] == "Mortgage"
+        )
+        assert mortgage["available_minor"] == 500_000
+        loan = next(
+            account
+            for account in service.list_accounts(show_hidden=False)
+            if account["name"] == "Chase Mortgage"
+        )
+        assert loan["current_value_minor"] == 20_000_000
+        assert loan["restricted_asset_component_minor"] == 400_000
+        assert service.get_net_worth()["current_net_worth_minor"] == -17_600_000
+    finally:
+        service.close()
+
+
 def test_e2e_reset_route_is_absent_outside_e2e(tmp_path) -> None:
     database_path = tmp_path / "development.duckdb"
     build_baseline(E2EScenario.ASSETS_LIABILITIES_OVERVIEW, database_path)
