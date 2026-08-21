@@ -11,7 +11,7 @@
     "format:check": "prettier --check .",
     "lint": "eslint . --ext .ts,.vue --max-warnings 0",
     "test": "pnpm test:unit && pnpm test:component",
-    "test:component": "./scripts/run-cypress.sh run --component --browser electron",
+    "test:component": "./scripts/run-cypress.sh run --component --browser ${DOJO_E2E_BROWSER:-chrome}",
     "test:e2e": "./scripts/run-cypress.sh run --e2e --browser ${DOJO_E2E_BROWSER:-chrome}",
     "test:unit": "vitest run",
     "typecheck": "vue-tsc --noEmit"

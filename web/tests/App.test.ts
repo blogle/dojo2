@@ -10,13 +10,13 @@ describe("dojo app", () => {
       history: createMemoryHistory(),
       routes: [
         {
-          path: "/",
+          path: "/dev/test",
           component: { template: "<div>budget page</div>" },
         },
       ],
     });
 
-    router.push("/");
+    router.push("/dev/test");
     await router.isReady();
 
     const wrapper = mount(App, {

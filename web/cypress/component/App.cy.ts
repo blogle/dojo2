@@ -9,12 +9,15 @@ describe("App", () => {
       history: createMemoryHistory(),
       routes: [
         {
-          path: "/",
-          component: { template: "<div>test route</div>" },
+          path: "/dev/test",
+          component: {
+            template: '<div data-cy="app-test-route">test route</div>',
+          },
         },
       ],
     });
 
+    router.push("/dev/test");
     router.isReady().then(() => {
       mount(App, {
         global: {
@@ -22,7 +25,7 @@ describe("App", () => {
         },
       });
 
-      cy.get("body").should("exist");
+      cy.get("[data-cy=app-test-route]").should("contain.text", "test route");
     });
   });
 });

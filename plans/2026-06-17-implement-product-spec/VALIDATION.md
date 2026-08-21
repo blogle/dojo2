@@ -71,6 +71,7 @@ For each completed work item, record:
 - Product-owner browser revalidation remains required before Dashboard work.
 - Cypress Electron repeatedly exited with `SIGSEGV` after two tests in larger specs; identical specs pass under headless Chrome.
 - The full `just check` remains affected by the Electron issue and unrelated pre-existing formatting drift in `api/tests/test_api_endpoints.py`.
+- (2026-08-20) Closure: the canonical component runner now uses Nix-provided Chromium, the App tests avoid product bootstrap on `/dev/test`, and the unrelated formatting drift was committed separately. Revalidate with `just test-web` and `just check`.
 
 ---
 
