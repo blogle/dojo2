@@ -36,6 +36,7 @@
         devShells.default = pkgs.mkShell {
           packages = with pkgs; [
             cypress
+            chromium
             python
             uv
             nodejs_22
@@ -57,6 +58,7 @@
           ];
           CYPRESS_INSTALL_BINARY = 0;
           DOJO_CYPRESS_APP_DIR = "${pkgs.cypress}/opt/cypress";
+          DOJO_E2E_BROWSER = "${pkgs.chromium}/bin/chromium";
           GSETTINGS_SCHEMA_DIR = "${pkgs.gsettings-desktop-schemas}/share/gsettings-schemas/${pkgs.gsettings-desktop-schemas.name}/glib-2.0/schemas";
         };
 

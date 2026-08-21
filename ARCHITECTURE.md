@@ -83,8 +83,10 @@ Core read-path SQL such as account listing, transaction paging, account balances
 - `api/tests/test_properties.py` uses Hypothesis against real repository behavior for allocations, transfers, status changes, and transaction history.
 - `web/tests/` covers focused frontend state behavior with Vitest.
 - `web/cypress/` provides the checked-in Cypress component-testing harness for Vue components.
-
-There is still no checked-in deterministic Cypress browser e2e harness. `just test-e2e` remains reserved and reports that narrower gap explicitly.
+- `web/cypress/e2e/` runs the real Vue router and FastAPI API against deterministic scenario databases in Nix-provided Chromium.
+- `api/src/dojo/e2e.py` builds allowlisted scenario baselines from canonical migrations plus data-only SQL under `api/src/dojo/sql/tests/e2e/`.
+- The E2E-only reset route is absent outside `APP_ENV=e2e`; it restores an API-owned worker database and recreates process-local service state before each test.
+- Generated baselines, logs, failure databases, and timing reports live under `${XDG_CACHE_HOME:-$HOME/.cache}/dojo/e2e/`, never in the repository or developer database.
 
 ## Import Architecture
 

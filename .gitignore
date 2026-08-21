@@ -13,3 +13,6 @@ __pycache__/
 .venv/
 .DS_Store
 docs/book/
+web/cypress/downloads/
+web/cypress/screenshots/
+web/cypress/videos/

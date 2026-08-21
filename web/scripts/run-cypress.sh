@@ -5,15 +5,18 @@ set -euo pipefail
 
 version=$(node -p 'require("./node_modules/cypress/package.json").version')
 
-export XDG_CONFIG_HOME="/tmp/opencode/dojo-cypress-config"
-export XDG_CACHE_HOME="/tmp/opencode/dojo-cypress-xdg-cache"
-export CYPRESS_CACHE_FOLDER="/tmp/opencode/dojo-cypress-cache"
+export XDG_CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
+cypress_state_dir="${XDG_CACHE_HOME}/dojo/cypress"
+xdg_config_root="${XDG_CONFIG_HOME:-$HOME/.config}"
+export XDG_CONFIG_HOME="${xdg_config_root}/dojo/cypress"
+export CYPRESS_CACHE_FOLDER="${CYPRESS_CACHE_FOLDER:-${cypress_state_dir}/binary-cache}"
 
 binary_dir="${CYPRESS_CACHE_FOLDER}/${version}/Cypress"
 mkdir -p "$(dirname "$binary_dir")"
 ln -sfn "$DOJO_CYPRESS_APP_DIR" "$binary_dir"
 
-output_file=$(mktemp /tmp/opencode/dojo-cypress-output.XXXXXX)
+mkdir -p "$cypress_state_dir"
+output_file=$(mktemp "${cypress_state_dir}/output.XXXXXX")
 
 set +e
 ./node_modules/.bin/cypress "$@" >"$output_file" 2>&1

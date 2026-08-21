@@ -55,6 +55,7 @@ const formatDelta = (delta: number) => `${delta > 0 ? "+" : ""}${delta}`;
       :key="item.key"
       class="metric-strip__item"
       :class="{ 'metric-strip__item--clickable': item.clickable }"
+      :data-cy="`metric-${item.key}`"
       :role="item.clickable ? 'button' : undefined"
       :tabindex="item.clickable ? 0 : undefined"
       @click="item.clickable && emit('select', item.key)"

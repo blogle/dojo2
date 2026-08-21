@@ -1440,6 +1440,7 @@ The application should implement the following shared components:
 * The web app can be started with `just web` and can reach the API through the configured base URL.
 * `GET /api/transactions` accepts `offset`, `limit`, `sort_by`, and `sort_dir`, rejects unsupported sort fields, and returns bounded pages with `total` and `has_more` metadata.
 * Automated checks exist for repository policy enforcement, fresh database provisioning, SCD2 history behavior, bounded transaction reads, and deterministic fixture-backed financial invariants.
+* `just test-e2e` runs deterministic browser acceptance in Chromium against isolated FastAPI and DuckDB worker processes and records per-phase performance evidence.
 * `just check` runs the normal local quality gate, and `just ci` runs the canonical CI command.
 
 ## Current Non-Goals
@@ -1447,7 +1448,6 @@ The application should implement the following shared components:
 * production deployment workflows
 * background job orchestration
 * multi-user authentication and authorization
-* browser e2e coverage through a full Cypress suite; the command surface reserves `just test-e2e`, but deterministic Cypress infrastructure is not yet implemented
 
 ## Known Gaps and Deferred Detail
 
@@ -1460,4 +1460,4 @@ The following areas are intentionally directionally specified but not yet fully 
 * detailed investment holdings views, performance analysis, and aggregated position tracking
 * Monte Carlo, forecasting, and future dedicated net-worth planning screens
 * editing behavior, if any, while in future global historical mode
-* full browser e2e coverage and deterministic Cypress infrastructure
+* browser-acceptance expansion beyond the initial Assets & Liabilities scenarios

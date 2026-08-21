@@ -12,7 +12,7 @@ The suite is intentionally small. It proves the integration seams and user-visib
 
 - [x] (2026-08-20) Agreed on the E2E architecture, fixture boundaries, selector policy, performance policy, and initial seven scenarios.
 - [x] (2026-08-20) Committed the prerequisite rich-account remediation as `24e1b1e`.
-- [ ] Implement the deterministic scenario builder, E2E-only reset boundary, Chromium orchestration, metrics collection, and AL-01.
+- [x] (2026-08-20) Implemented the deterministic scenario builder, E2E-only reset boundary, Chromium orchestration, metrics collection, and AL-01.
 - [ ] Implement and commit AL-02 independently.
 - [ ] Implement and commit AL-03 independently.
 - [ ] Implement and commit AL-04 independently.
@@ -31,6 +31,12 @@ The suite is intentionally small. It proves the integration seams and user-visib
 
 - Observation: Electron is unstable for the larger component specs in the current environment while Chromium is stable.
   Evidence: `plans/2026-06-17-implement-product-spec/VALIDATION.md` records Electron `SIGSEGV` failures; a full Chrome component run on 2026-08-20 passed 265 tests in 37 specs.
+
+- Observation: A generated AL-01 DuckDB baseline is 7.51 MiB and takes about 0.5 seconds to rebuild.
+  Evidence: Two clean consecutive harness runs measured 518–538 ms baseline generation, 846–848 ms API startup, 562–564 ms web startup, 85–91 ms reset, and 1.88–1.93 seconds Cypress suite time.
+
+- Observation: dojo2 has no dedicated Net Worth browser route.
+  Evidence: `web/src/dojo/router.ts` exposes budgets, transactions, Assets & Liabilities, creation, and account detail routes. AL-01 therefore verifies the independent real `/api/net-worth` read rather than inventing an unapproved page.
 
 ## Decision Log
 
@@ -74,9 +80,19 @@ The suite is intentionally small. It proves the integration seams and user-visib
   Rationale: Each scenario remains independently reviewable, measurable, and reversible. Infrastructure work may proceed in parallel in non-overlapping files, but integration and commits remain serialized.
   Date/Author: 2026-08-20 / product owner and opencode
 
+- Decision: Keep generated baseline databases in the XDG cache rather than checking them into Git.
+  Rationale: AL-01 alone is 7.51 MiB while deterministic regeneration costs about 0.5 seconds. Seven checked-in binaries would add substantial opaque repository weight for negligible runtime savings.
+  Date/Author: 2026-08-20 / opencode
+
+- Decision: AL-01 uses the existing `/api/net-worth` response as the independent net-worth surface.
+  Rationale: No dedicated Net Worth page exists, and adding one without an approved product or visual contract would expand scope. The real browser still proves overview and detail behavior while `cy.request` proves the independently shaped net-worth read.
+  Date/Author: 2026-08-20 / opencode
+
 ## Outcomes & Retrospective
 
-The acceptance contract is approved but implementation has not started. Update this section after each milestone with scenario counts, suite duration, reset cost, fixture sizes, flaky-test observations, and any behavior gaps discovered by the new tests.
+The first milestone is working end to end. AL-01 starts real API and Vite processes, resets an API-owned worker database, verifies grouped values and detail routing in Chromium, and independently verifies net worth. Two clean consecutive runs passed without retries and without leaking child processes. The current suite has one test, uses 13 API requests, resets in under 92 ms, and completes Cypress execution in under two seconds. AL-02 through AL-07 remain.
+
+The first three-run profile recorded medians of 524 ms baseline generation, 847 ms API startup, 582 ms web startup, 75.19 ms reset, and 1,901 ms Cypress suite time. The corresponding p95 values were 527 ms, 848 ms, 589 ms, 81.74 ms, and 1,914 ms. These are observations, not failure thresholds; timing budgets remain deferred until the seven-scenario suite has representative CI evidence.
 
 ## Context and Orientation
 
@@ -116,7 +132,7 @@ Full-page pixel snapshots are not acceptance criteria. Existing fixture-driven c
 
 Given cash of $20,000, a $500,000 tracking asset, a $25,000 tangible asset, a $12,000 investment, a $200,000 loan principal liability, and a $4,000 restricted escrow asset, when the user opens Assets & Liabilities, then every entity appears in the correct group, total assets are $561,000, total liabilities are $200,000, and net worth is $361,000.
 
-When the user opens Net Worth, the page reports the same $361,000. When the user selects a representative entity, the production router opens its detail page and the detail value agrees with the overview. This scenario is the broad application-wiring smoke test; later scenarios provide mutation coverage.
+The independent `/api/net-worth` read reports the same $361,000. When the user selects a representative entity, the production router opens its detail page and the detail value agrees with the overview. This scenario is the broad application-wiring smoke test; later scenarios provide mutation coverage.
 
 ### AL-02: Tangible asset creation persists through the real wizard
 
@@ -235,4 +251,4 @@ The backend needs an explicit E2E configuration type or settings fields for the 
 
 Cypress support provides one command to reset a named scenario and a small set of selectors or helpers that encode stable user actions, not page implementation details. Process orchestration owns child-process startup, readiness checks, logs, cleanup, and metrics output. All routine commands remain routed through the root `justfile`.
 
-Revision note: Created 2026-08-20 from the product-owner-approved acceptance discussion. It records the initial seven scenarios, investment and loan provenance requirements, deterministic fixture architecture, selector policy, sequential commit policy, XDG artifact location, and performance measurement/ratchet strategy before implementation begins.
+Revision note: Created 2026-08-20 from the product-owner-approved acceptance discussion. Updated after AL-01 to record measured baseline costs, the XDG-cache decision, the absence of a Net Worth page, the API-based cross-surface assertion, and first complete-run performance evidence.

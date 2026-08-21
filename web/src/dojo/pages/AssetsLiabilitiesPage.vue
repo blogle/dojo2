@@ -158,6 +158,8 @@ const toggleGroup = (key: string) => {
 
 const isGroupCollapsed = (key: string) => collapsedGroups.value.has(key);
 
+const groupTestKey = (key: string) => key.toLowerCase().replace(/_/g, "-");
+
 const handleAdd = () => {
   router.push("/assets-liabilities/add");
 };
@@ -238,10 +240,12 @@ const getSourceLabel = (source: string) => {
         </template>
       </PageHeader>
 
-      <MetricStrip
-        :items="metricItems"
-        class="assets-liabilities-page__metrics"
-      />
+      <div data-cy="assets-liabilities-metrics">
+        <MetricStrip
+          :items="metricItems"
+          class="assets-liabilities-page__metrics"
+        />
+      </div>
 
       <div
         v-if="isLoading"
@@ -260,7 +264,8 @@ const getSourceLabel = (source: string) => {
           v-for="group in data.groups"
           :key="group.key"
           class="assets-liabilities-page__group"
-          :data-cy="`group-${group.key.toLowerCase()}`"
+          data-cy="assets-liabilities-group"
+          :data-group-key="groupTestKey(group.key)"
         >
           <button
             class="assets-liabilities-page__group-header"
@@ -358,6 +363,7 @@ const getSourceLabel = (source: string) => {
               v-for="item in group.items"
               :key="item.presentation_id ?? item.account_id"
               class="assets-liabilities-page__row"
+              data-cy="assets-liabilities-row"
               @click="handleRowSelect(item.account_id)"
             >
               <span

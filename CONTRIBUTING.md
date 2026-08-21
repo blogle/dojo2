@@ -32,7 +32,9 @@ Use the root `justfile` as the only routine command interface.
 | `just test-property` | Run backend Hypothesis property tests |
 | `just test-integration` | Run backend integration tests with real DuckDB |
 | `just test-web` | Run frontend Vitest and Cypress component tests |
-| `just test-e2e` | Reserved e2e entrypoint; browser-level deterministic Cypress coverage is still not implemented |
+| `just test-e2e` | Run deterministic Cypress browser acceptance against isolated FastAPI and DuckDB processes |
+| `just test-e2e-spec <spec>` | Run one browser-acceptance spec |
+| `just profile-e2e` | Repeat browser acceptance and retain timing reports for performance analysis |
 | `just test` | Run the normal backend and frontend test suites |
 | `just bench` | Run backend and frontend benchmark commands |
 | `just docs` | Build the mdBook documentation |
@@ -59,7 +61,8 @@ Before finishing a change, run `just check`. For CI-equivalent verification, run
 - `api/tests/`: backend tests, including architecture checks and support helpers
 - `web/src/dojo/`: Vue application code
 - `web/tests/`: frontend Vitest tests
-- `web/cypress/`: frontend Cypress component tests
+- `web/cypress/component/`: frontend Cypress component tests
+- `web/cypress/e2e/`: deterministic browser acceptance tests using the real frontend, API, and an isolated scenario database
 - `docs/`: mdBook user documentation
 - `agents/`: compact repository guidance and templates
 - `plans/`: task-scoped ExecPlans for non-trivial implementation work
