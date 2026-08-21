@@ -23,6 +23,7 @@ E2E_FIXED_TIME = datetime(2026, 2, 15, 12, 0, tzinfo=timezone.utc)
 class E2EScenario(StrEnum):
     ASSETS_LIABILITIES_OVERVIEW = "assets-liabilities-overview"
     TANGIBLE_ASSET_CREATION = "tangible-asset-creation"
+    TRACKING_SNAPSHOT_CORRECTION = "tracking-snapshot-correction"
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,6 +51,9 @@ def fixture_sql(scenario: E2EScenario) -> tuple[str, ...]:
     scenario_sql = {
         E2EScenario.ASSETS_LIABILITIES_OVERVIEW: ("tests/e2e/scenarios/al_01_overview",),
         E2EScenario.TANGIBLE_ASSET_CREATION: ("tests/e2e/scenarios/al_02_tangible_creation",),
+        E2EScenario.TRACKING_SNAPSHOT_CORRECTION: (
+            "tests/e2e/scenarios/al_03_tracking_correction",
+        ),
     }
     return ("tests/e2e/core", *scenario_sql[scenario])
 

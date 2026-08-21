@@ -7,7 +7,11 @@ baseline_dir="${cache_root}/baselines"
 run_id=$(date -u +%Y%m%dT%H%M%S)-$$
 run_dir="${cache_root}/runs/${run_id}"
 active_database="${run_dir}/worker.duckdb"
-scenarios=("assets-liabilities-overview" "tangible-asset-creation")
+scenarios=(
+  "assets-liabilities-overview"
+  "tangible-asset-creation"
+  "tracking-snapshot-correction"
+)
 initial_baseline="${baseline_dir}/${scenarios[0]}.duckdb"
 allocate_port() {
   node -e 'const server=require("node:net").createServer(); server.listen(0,"127.0.0.1",()=>{console.log(server.address().port);server.close();});'

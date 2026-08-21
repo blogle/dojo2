@@ -111,3 +111,46 @@ describe("Tangible asset creation", () => {
       .should("equal", 4500000);
   });
 });
+
+describe("Tracking snapshot correction", () => {
+  beforeEach(() => {
+    cy.resetScenario("tracking-snapshot-correction");
+    cy.visit("/assets-liabilities/00000000-0000-0000-0000-000000000201");
+    cy.get('[data-cy="account-detail-page"]').should("be.visible");
+  });
+
+  it("AL-03 corrects a same-date tracking snapshot across surfaces", () => {
+    cy.get('[data-cy="metric-value"]').should("contain", "$500,000");
+    cy.get('[data-cy="snapshot-history-row"]')
+      .should("have.length", 1)
+      .and("contain", "$500,000");
+
+    cy.get('[data-cy="account-detail-add-snapshot"]').click();
+    cy.get('input[name="value-date"]').should("have.value", "2026-02-15");
+    cy.get('input[name="value-amount"]').type("510000");
+    cy.get('input[name="value-notes"]').type("Updated appraisal");
+
+    cy.intercept("POST", "**/tracking-snapshots").as("correctSnapshot");
+    cy.get('[data-cy="form-modal-root"]').contains("button", "Save").click();
+    cy.wait("@correctSnapshot").its("response.statusCode").should("equal", 200);
+
+    cy.get('[data-cy="metric-value"]').should("contain", "$510,000");
+    cy.get('[data-cy="snapshot-history-row"]')
+      .should("have.length", 1)
+      .and("contain", "$510,000");
+
+    cy.reload();
+    cy.get('[data-cy="metric-value"]').should("contain", "$510,000");
+    cy.get('[data-cy="snapshot-history-row"]').should("have.length", 1);
+
+    cy.visit("/assets-liabilities");
+    cy.get(
+      '[data-cy="assets-liabilities-group"][data-group-key="tracking-assets"]',
+    )
+      .find('[data-cy="assets-liabilities-row"]')
+      .should("have.length", 1)
+      .and("contain", "Home estimate")
+      .and("contain", "$510,000");
+    cy.get('[data-cy="metric-net-worth"]').should("contain", "$530,000");
+  });
+});

@@ -42,6 +42,22 @@ def test_al_02_fixture_contract_starts_with_only_checking(tmp_path) -> None:
         service.close()
 
 
+def test_al_03_fixture_contract_has_one_effective_tracking_snapshot(tmp_path) -> None:
+    baseline = tmp_path / "tracking-snapshot-correction.duckdb"
+    fixture = build_baseline(E2EScenario.TRACKING_SNAPSHOT_CORRECTION, baseline)
+
+    service = DojoService(str(fixture.path), clock=fixed_e2e_clock())
+    try:
+        snapshots = service.list_tracking_snapshots("00000000-0000-0000-0000-000000000201")
+        assert [
+            (snapshot["effective_date"].isoformat(), snapshot["amount_minor"])
+            for snapshot in snapshots
+        ] == [("2026-02-15", 50_000_000)]
+        assert service.get_net_worth()["current_net_worth_minor"] == 52_000_000
+    finally:
+        service.close()
+
+
 def test_e2e_reset_route_is_absent_outside_e2e(tmp_path) -> None:
     database_path = tmp_path / "development.duckdb"
     build_baseline(E2EScenario.ASSETS_LIABILITIES_OVERVIEW, database_path)

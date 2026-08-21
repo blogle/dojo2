@@ -1773,6 +1773,7 @@ function formatTaxTreatment(value: string | null | undefined): string {
                     v-for="snapshot in valueHistory"
                     :key="snapshot.valuation_id"
                     class="account-detail-page__snapshot-row"
+                    data-cy="snapshot-history-row"
                   >
                     <span class="account-detail-page__snapshot-td">
                       <span class="account-detail-page__snapshot-dot" />
