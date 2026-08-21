@@ -124,6 +124,24 @@ def test_al_06_fixture_contract_has_funded_linked_loan(tmp_path) -> None:
         service.close()
 
 
+def test_al_07_fixture_contract_has_one_tracking_predecessor(tmp_path) -> None:
+    baseline = tmp_path / "tracking-cutover.duckdb"
+    fixture = build_baseline(E2EScenario.TRACKING_CUTOVER, baseline)
+
+    service = DojoService(str(fixture.path), clock=fixed_e2e_clock())
+    try:
+        accounts = service.list_accounts(show_hidden=False)
+        assert [(account["name"], account["current_value_minor"]) for account in accounts] == [
+            ("Checking", 2_000_000),
+            ("Legacy portfolio", 50_000_000),
+        ]
+        assert service.get_net_worth()["current_net_worth_minor"] == 52_000_000
+        assert service.list_transactions(limit=10, show_hidden=False)["total"] == 1
+        assert service.list_allocations(show_hidden=False) == []
+    finally:
+        service.close()
+
+
 def test_e2e_reset_route_is_absent_outside_e2e(tmp_path) -> None:
     database_path = tmp_path / "development.duckdb"
     build_baseline(E2EScenario.ASSETS_LIABILITIES_OVERVIEW, database_path)

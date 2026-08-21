@@ -18,7 +18,7 @@ The suite is intentionally small. It proves the integration seams and user-visib
 - [x] (2026-08-20) Implemented AL-04 cash-only investment reconciliation and corrected the empty-holdings state to distinguish a cash-only statement from no statement.
 - [x] (2026-08-20) Implemented AL-05 contribution provenance across investment detail, both transaction legs, one derived budget activity row, same-day statement correction, and net-worth neutrality.
 - [x] (2026-08-20) Implemented AL-06 linked Mortgage payment visibility across Transactions, Budget Spending history, and Chase Mortgage detail, followed by truthful statement-derived components.
-- [ ] Implement and commit AL-07 independently.
+- [x] (2026-08-20) Implemented AL-07 one-to-many tracking cutover with three signed successors, unchanged net worth, no ledger activity, and reload persistence.
 - [ ] Establish initial performance budgets from representative measurements and complete the broad repository quality gate.
 
 ## Surprises & Discoveries
@@ -96,7 +96,7 @@ The suite is intentionally small. It proves the integration seams and user-visib
 
 ## Outcomes & Retrospective
 
-The first six scenarios are working end to end. AL-01 verifies grouped values and detail routing. AL-02 creates a tangible asset. AL-03 corrects a tracking snapshot. AL-04 records a cash-only investment statement. AL-05 proves investment provenance and net-worth neutrality. AL-06 now follows one Mortgage transaction through Transactions, Budget Spending history, and Chase Mortgage Payment activity before reconciling `$198,000` principal, `$2,000` principal reduction, `$3,000` unknown non-principal cost, and unchanged `$4,000` escrow. The accumulated suite has six tests, uses 222 browser API requests, and completes Cypress execution in 17.99 seconds. AL-07 remains.
+All seven scenarios are working end to end. AL-07 replaces one `$500,000` tracking asset with a `$200,000` investment, `$350,000` tangible asset, and `$50,000` loan liability while preserving `$520,000` total net worth including Checking. It proves that no transaction or allocation is created and that reload does not duplicate successors. The complete suite uses 250 browser API requests and completes Cypress execution in 21.73 seconds; AL-06 is currently the slowest scenario at 5.55 seconds.
 
 The first three-run profile recorded medians of 524 ms baseline generation, 847 ms API startup, 582 ms web startup, 75.19 ms reset, and 1,901 ms Cypress suite time. The corresponding p95 values were 527 ms, 848 ms, 589 ms, 81.74 ms, and 1,914 ms. These are observations, not failure thresholds; timing budgets remain deferred until the seven-scenario suite has representative CI evidence.
 

@@ -374,3 +374,92 @@ describe("Linked loan payment activity", () => {
     cy.get('[data-cy="metric-net-worth"]').should("contain", "-$179,000");
   });
 });
+
+describe("Tracking cutover", () => {
+  let transactionsBefore = 0;
+  let allocationsBefore = 0;
+
+  beforeEach(() => {
+    cy.resetScenario("tracking-cutover");
+    const apiBaseUrl = String(Cypress.env("apiBaseUrl")).replace(/\/$/, "");
+    cy.request(`${apiBaseUrl}/api/transactions?limit=10`).then((response) => {
+      transactionsBefore = response.body.total;
+    });
+    cy.request(`${apiBaseUrl}/api/allocations`).then((response) => {
+      allocationsBefore = response.body.items.length;
+    });
+    cy.visit("/assets-liabilities/00000000-0000-0000-0000-000000000201");
+    cy.get('[data-cy="account-detail-page"]').should("be.visible");
+  });
+
+  it("AL-07 replaces one tracking asset with three signed successors", () => {
+    cy.get('[data-cy="metric-value"]').should("contain", "$500,000");
+    cy.get('[data-cy="account-detail-create-richer"]').click();
+    cy.get('[data-cy="cutover-successor"]').should("have.length", 1);
+
+    cy.get('input[name="cutover-name-0"]').clear().type("Brokerage");
+    cy.get('input[name="cutover-opening-0"]').clear().type("200000");
+
+    cy.get('[data-cy="form-modal-root"]')
+      .contains("button", "Add successor")
+      .click();
+    cy.get('select[name="cutover-type-1"]').select("TANGIBLE_ASSET");
+    cy.get('input[name="cutover-name-1"]').clear().type("Rental property");
+    cy.get('input[name="cutover-opening-1"]').type("350000");
+
+    cy.get('[data-cy="form-modal-root"]')
+      .contains("button", "Add successor")
+      .click();
+    cy.get('select[name="cutover-type-2"]').select("LOAN");
+    cy.get('input[name="cutover-name-2"]').clear().type("Mortgage");
+    cy.get('input[name="cutover-opening-2"]').type("50000");
+    cy.get('select[name="cutover-category-2"]').select(
+      "00000000-0000-0000-0000-000000000011",
+    );
+
+    cy.get('[data-cy="cutover-successor"]').should("have.length", 3);
+    cy.get('[data-cy="form-modal-root"]')
+      .should("contain", "Successor total: $500,000.00")
+      .and("contain", "Variance: $0.00");
+
+    cy.intercept("POST", "**/cutovers").as("applyCutover");
+    cy.get('[data-cy="form-modal-root"]')
+      .contains("button", "Apply cutover")
+      .click();
+    cy.wait("@applyCutover").its("response.statusCode").should("equal", 200);
+
+    cy.visit("/assets-liabilities");
+    cy.get('[data-cy="assets-liabilities-groups"]').should(
+      "not.contain",
+      "Legacy portfolio",
+    );
+    const successors = [
+      ["investments", "Brokerage", "$200,000"],
+      ["tangible-assets", "Rental property", "$350,000"],
+      ["loans", "Mortgage", "$50,000"],
+    ];
+    successors.forEach(([group, name, value]) => {
+      cy.get(`[data-cy="assets-liabilities-group"][data-group-key="${group}"]`)
+        .find('[data-cy="assets-liabilities-row"]')
+        .should("have.length", 1)
+        .and("contain", name)
+        .and("contain", value);
+    });
+    cy.get('[data-cy="metric-net-worth"]').should("contain", "$520,000");
+
+    cy.reload();
+    successors.forEach(([group]) => {
+      cy.get(`[data-cy="assets-liabilities-group"][data-group-key="${group}"]`)
+        .find('[data-cy="assets-liabilities-row"]')
+        .should("have.length", 1);
+    });
+
+    const apiBaseUrl = String(Cypress.env("apiBaseUrl")).replace(/\/$/, "");
+    cy.request(`${apiBaseUrl}/api/transactions?limit=10`)
+      .its("body.total")
+      .should("equal", transactionsBefore);
+    cy.request(`${apiBaseUrl}/api/allocations`)
+      .its("body.items")
+      .should("have.length", allocationsBefore);
+  });
+});
