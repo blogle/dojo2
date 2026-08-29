@@ -1,7 +1,12 @@
 <script setup lang="ts">
-import { ref, computed } from "vue";
+import { ref, computed, watch } from "vue";
 
-import type { Account, Category, TransactionPayload } from "../../types";
+import type {
+  Account,
+  Category,
+  TransactionPayload,
+  TransactionSystemCategory,
+} from "../../types";
 import { parseMoneyInput } from "../../utils/currency";
 import Button from "../actions/Button.vue";
 import DatePicker from "../forms/DatePicker.vue";
@@ -21,6 +26,8 @@ const emit = defineEmits<{
 const date = ref("");
 const accountId = ref("");
 const categoryId = ref("");
+type EntryKind = "STANDARD" | "AVAILABLE_TO_BUDGET" | "ACCOUNT_TRANSFER";
+const entryKind = ref<EntryKind>("STANDARD");
 const amount = ref("");
 const direction = ref("outflow");
 const memo = ref("");
@@ -33,6 +40,7 @@ function todayString() {
 function resetForm() {
   date.value = todayString();
   categoryId.value = "";
+  entryKind.value = "STANDARD";
   amount.value = "";
   memo.value = "";
   direction.value = "outflow";
@@ -42,6 +50,7 @@ resetForm();
 
 function handleSubmit() {
   if (!date.value || !accountId.value || !amount.value) return;
+  if (entryKind.value === "STANDARD" && !categoryId.value) return;
 
   const amountMinor = parseMoneyInput(amount.value);
   if (amountMinor === null || amountMinor === 0) return;
@@ -49,12 +58,18 @@ function handleSubmit() {
   const finalAmount =
     direction.value === "outflow" ? -amountMinor : amountMinor;
 
+  const systemCategory: TransactionSystemCategory | null =
+    entryKind.value === "AVAILABLE_TO_BUDGET"
+      ? "TX_AVAILABLE_TO_BUDGET"
+      : entryKind.value === "ACCOUNT_TRANSFER"
+        ? "TX_ACCOUNT_TRANSFER"
+        : null;
   emit("submit", {
     date: date.value,
     account_id: accountId.value,
     amount_minor: finalAmount,
-    category_id: categoryId.value || null,
-    system_category: null,
+    category_id: systemCategory ? null : categoryId.value || null,
+    system_category: systemCategory,
     status: "PENDING",
     memo: memo.value,
   });
@@ -70,13 +85,27 @@ function handleKeyDown(event: KeyboardEvent) {
 
 const accountOptions = computed(() => [
   { value: "", label: "Select account..." },
-  ...props.accounts.map((a) => ({ value: a.account_id, label: a.name })),
+  ...props.accounts
+    .filter(
+      (a) =>
+        a.is_active &&
+        (a.account_class === "BUDGET" ||
+          (entryKind.value === "ACCOUNT_TRANSFER" &&
+            a.account_class === "INVESTMENT")),
+    )
+    .map((a) => ({ value: a.account_id, label: a.name })),
 ]);
 
 const categoryOptions = computed(() => [
   { value: "", label: "None" },
   ...props.categories
-    .filter((c) => c.is_active && !c.is_hidden)
+    .filter(
+      (c) =>
+        entryKind.value === "STANDARD" &&
+        c.category_kind === "STANDARD" &&
+        c.is_active &&
+        !c.is_hidden,
+    )
     .map((c) => ({ value: c.category_id, label: c.name })),
 ]);
 
@@ -84,6 +113,25 @@ const directionOptions = [
   { value: "outflow", label: "Outflow" },
   { value: "inflow", label: "Inflow" },
 ];
+
+const entryKindOptions = [
+  { value: "STANDARD", label: "Standard category" },
+  { value: "AVAILABLE_TO_BUDGET", label: "Available to budget" },
+  { value: "ACCOUNT_TRANSFER", label: "Account transfer" },
+];
+
+watch(entryKind, () => {
+  categoryId.value = "";
+  const selectedAccount = props.accounts.find(
+    (account) => account.account_id === accountId.value,
+  );
+  if (
+    selectedAccount?.account_class === "INVESTMENT" &&
+    entryKind.value !== "ACCOUNT_TRANSFER"
+  ) {
+    accountId.value = "";
+  }
+});
 </script>
 
 <template>
@@ -99,6 +147,11 @@ const directionOptions = [
         v-model="accountId"
         label="Account"
         :options="accountOptions"
+      />
+      <SelectField
+        v-model="entryKind"
+        label="Entry type"
+        :options="entryKindOptions"
       />
       <SelectField
         v-model="categoryId"

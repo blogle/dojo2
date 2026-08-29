@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added account-local reconciliation drafts, persisted source evidence, digest-checked idempotent apply with explicit balance adjustments, reopening status, working-set/history endpoints, and a balance-first budget-account action.
 - Added a deterministic Cypress browser-acceptance harness with API-owned scenario resets, XDG-cached DuckDB baselines, Chromium execution, per-phase timing reports, and initial cross-surface Assets & Liabilities coverage.
 - Added type-aware tracking, tangible, investment, and loan value flows; account-configured contribution/payment categories; same-day provisional investment ordering; transfer provenance; derived category activity/history; cross-surface loan payment activity; cash-only investment statements; future-date guards; opening loan principal; lender YTD checkpoints; estimated amortization; separately presented restricted escrow; and atomic one-to-many tracking cutover.
 - Added the Assets & Liabilities Add item wizard with an explicit `/assets-liabilities/add` route, entity-type selection, minimal type-specific account forms, and Cypress coverage for route safety and account creation payloads.

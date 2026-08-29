@@ -8,6 +8,7 @@ import {
   fetchBudget,
   fetchAllocations,
   fetchCategoryActivity,
+  fundCategory,
   createCategory,
   updateCategory,
   createCategoryGroup,
@@ -69,6 +70,7 @@ const activeModal = ref<
 const selectedCategory = ref<Category | null>(null);
 const selectedGroup = ref<CategoryGroup | null>(null);
 const fundingCategory = ref<Category | null>(null);
+const fundingOperationId = ref("");
 
 const groupName = ref("");
 const categoryName = ref("");
@@ -220,6 +222,27 @@ const categoryGroupMutation = useMutation({
       ? updateCategoryGroup(groupId, payload)
       : createCategoryGroup(payload),
   onSuccess: () => invalidateBudgetQueries(),
+});
+
+const fundCategoryMutation = useMutation({
+  mutationFn: ({
+    categoryId,
+    amountMinor,
+  }: {
+    categoryId: string;
+    amountMinor: number;
+  }) =>
+    fundCategory({
+      client_operation_id: fundingOperationId.value,
+      date: `${selectedMonth.value || currentMonth.value}-01`,
+      category_id: categoryId,
+      amount_minor: amountMinor,
+      memo: `Fund ${categories.value.find((item) => item.category_id === categoryId)?.name ?? "category"}`,
+    }),
+  onSuccess: () => {
+    invalidateBudgetQueries();
+    closeModal();
+  },
 });
 
 // --- Derived data ---
@@ -428,6 +451,7 @@ function handleFundCategory() {
     return;
   }
   fundingCategory.value = selectedCategory.value;
+  fundingOperationId.value = crypto.randomUUID();
   activeModal.value = "funding";
 }
 
@@ -452,16 +476,8 @@ function submitFundCategory(payload: {
   categoryId: string;
   amountMinor: number;
 }) {
-  const cat = categories.value.find(
-    (c) => c.category_id === payload.categoryId,
-  );
-  if (!cat) return;
-  const newAvailable = cat.available_minor + payload.amountMinor;
-  categoryMutation.mutate({
-    payload: { available_minor: newAvailable },
-    categoryId: payload.categoryId,
-  });
-  closeModal();
+  if (!fundingOperationId.value) return;
+  fundCategoryMutation.mutate(payload);
 }
 
 function handleMonthSelect() {
@@ -479,6 +495,8 @@ function closeModal() {
   activeModal.value = null;
   selectedCategory.value = null;
   selectedGroup.value = null;
+  fundingCategory.value = null;
+  fundingOperationId.value = "";
   groupName.value = "";
   categoryName.value = "";
   categoryGroupId.value = "";
@@ -799,6 +817,7 @@ function submitFundGroup(
       :allocations="allocations ?? []"
       :budget-month="selectedMonth || currentMonth"
       :available-to-budget-minor="budget?.available_to_budget_minor ?? 0"
+      :loading="fundCategoryMutation.isPending.value"
       @close="closeModal"
       @submit="submitFundCategory"
     />

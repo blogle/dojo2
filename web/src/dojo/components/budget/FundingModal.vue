@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 
 import type { Allocation, Category } from "../../types";
 import { formatCurrency, parseMoneyInput } from "../../utils/currency";
@@ -9,13 +9,17 @@ import SelectField from "../forms/SelectField.vue";
 import PreviewBox from "../feedback/PreviewBox.vue";
 import FormModal from "../overlays/FormModal.vue";
 
-const props = defineProps<{
-  visible: boolean;
-  category: Category | null;
-  allocations: Allocation[];
-  budgetMonth: string;
-  availableToBudgetMinor: number;
-}>();
+const props = withDefaults(
+  defineProps<{
+    visible: boolean;
+    category: Category | null;
+    allocations: Allocation[];
+    budgetMonth: string;
+    availableToBudgetMinor: number;
+    loading?: boolean;
+  }>(),
+  { loading: false },
+);
 
 const emit = defineEmits<{
   close: [];
@@ -184,9 +188,16 @@ function handleSubmit() {
     categoryId: props.category.category_id,
     amountMinor: selectedAmount.value,
   });
-  selectedOption.value = "same-as-last-month";
-  customAmount.value = "";
 }
+
+watch(
+  () => props.visible,
+  (visible) => {
+    if (visible) return;
+    selectedOption.value = "same-as-last-month";
+    customAmount.value = "";
+  },
+);
 </script>
 
 <template>
@@ -195,6 +206,7 @@ function handleSubmit() {
     :title="`Fund: ${category?.name ?? ''}`"
     submit-text="Save"
     :submit-disabled="selectedAmount <= 0"
+    :loading="loading"
     @submit="handleSubmit"
     @cancel="emit('close')"
     @close="emit('close')"

@@ -5,6 +5,7 @@ from datetime import date
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Iterator
+from uuid import uuid4
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
@@ -26,6 +27,12 @@ from dojo.constants import (
     SYSTEM_ATB_BUCKET_ID,
 )
 from dojo.migrations import provision_database
+from dojo.operations import (
+    create_transaction_operation,
+    link_transaction_operation,
+    relink_transaction_operation,
+    unlink_transaction_operation,
+)
 from dojo.scd import insert_version
 from dojo.service import DojoService
 from dojo.sql import load_sql, render_sql
@@ -75,6 +82,31 @@ def first_two_budget_accounts(service: DojoService) -> tuple[dict[str, object], 
         if account["account_class"] == "BUDGET"
     ]
     return accounts[0], accounts[1]
+
+
+def financial_read_snapshot(service: DojoService) -> dict[str, object]:
+    transaction_rows = [
+        {
+            key: value
+            for key, value in row.items()
+            if key
+            not in {
+                "operation_id",
+                "operation_kind",
+                "transfer_counterparty_account_id",
+                "transfer_counterparty_account_name",
+            }
+        }
+        for row in service.list_transactions(limit=10_000, show_hidden=True)["items"]
+    ]
+    return {
+        "accounts": service.list_accounts(show_hidden=True),
+        "available_to_budget_minor": service.compute_available_to_budget(),
+        "categories": service.list_categories(month="2026-02", show_hidden=True),
+        "category_activity": service.list_category_activity(),
+        "net_worth": service.get_net_worth(),
+        "transactions": transaction_rows,
+    }
 
 
 @settings(max_examples=20, deadline=None)
@@ -977,3 +1009,68 @@ def test_different_link_behaviors_on_same_account_are_independent(
 
         assert _category_available(service, cat1_id, "2026-02") == cat1_before - amount
         assert _category_available(service, cat2_id, "2026-02") == cat2_before - amount
+
+
+def test_operation_provenance_changes_do_not_change_financial_reads() -> None:
+    with imported_service_context() as (service, clock):
+        transaction_rows = service.db.fetch_all(
+            "SELECT transaction_id FROM current_transactions ORDER BY entry_order LIMIT 2"
+        )
+        assert len(transaction_rows) == 2
+        source_transaction_id = str(transaction_rows[0]["transaction_id"])
+        destination_transaction_id = str(transaction_rows[1]["transaction_id"])
+        first_operation_id = str(uuid4())
+        second_operation_id = str(uuid4())
+        before = financial_read_snapshot(service)
+
+        with service.db.transaction() as connection:
+            create_transaction_operation(
+                connection,
+                operation_id=first_operation_id,
+                operation_kind="TRANSFER",
+                origin="USER",
+                client_operation_id=str(uuid4()),
+                request_fingerprint="first",
+                created_at=clock.now(),
+            )
+            link_transaction_operation(
+                connection,
+                operation_id=first_operation_id,
+                transaction_id=source_transaction_id,
+                leg_role="SOURCE",
+                now=clock.now(),
+            )
+            link_transaction_operation(
+                connection,
+                operation_id=first_operation_id,
+                transaction_id=destination_transaction_id,
+                leg_role="DESTINATION",
+                now=clock.now(),
+            )
+        assert financial_read_snapshot(service) == before
+
+        clock.advance(seconds=1)
+        with service.db.transaction() as connection:
+            create_transaction_operation(
+                connection,
+                operation_id=second_operation_id,
+                operation_kind="TRANSFER",
+                origin="USER",
+                client_operation_id=str(uuid4()),
+                request_fingerprint="second",
+                created_at=clock.now(),
+            )
+            relink_transaction_operation(
+                connection,
+                operation_id=second_operation_id,
+                transaction_id=source_transaction_id,
+                leg_role="SOURCE",
+                now=clock.now(),
+            )
+            unlink_transaction_operation(
+                connection,
+                operation_id=first_operation_id,
+                transaction_id=destination_transaction_id,
+                now=clock.now(),
+            )
+        assert financial_read_snapshot(service) == before

@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
+from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError
 
 from dojo.api.models import AccountPayload
 from dojo.service import DojoService
+from dojo.sql import load_sql
 from tests.support.clock import MutableClock
 
 
@@ -278,7 +280,7 @@ def test_tracking_cutover_is_atomic_idempotent_and_activates_on_date(
         "operation_id": "5c3d76b6-0b53-49ec-84b7-78532c7ddf04",
         "cutover_date": "2026-03-01",
         "expected_predecessor_value_minor": 30_000,
-        "variance_confirmed": False,
+        "final_predecessor_value_minor": 30_000,
         "successors": [
             {
                 "account_class": "INVESTMENT",
@@ -349,7 +351,7 @@ def test_tracking_liability_cutover_preserves_signed_net_worth(service: DojoServ
             "operation_id": "fa1f2b8c-353a-409b-814a-d10cbac0f035",
             "cutover_date": service.clock.today(),
             "expected_predecessor_value_minor": 10_000,
-            "variance_confirmed": False,
+            "final_predecessor_value_minor": 10_000,
             "successors": [
                 {
                     "account_class": "LOAN",
@@ -368,6 +370,66 @@ def test_tracking_liability_cutover_preserves_signed_net_worth(service: DojoServ
     overview = service.get_assets_liabilities()
     assert overview["liabilities_minor"] == -11_000
     assert overview["assets_minor"] == 1_000
+
+
+def test_tracking_cutover_records_contemporary_final_value_and_rejects_difference(
+    service: DojoService,
+) -> None:
+    tracking_id = service.create_account(
+        {"name": "Legacy asset", "account_class": "TRACKING", "polarity": "ASSET"}
+    )["account_id"]
+    service.create_tracking_snapshot(
+        tracking_id,
+        {"effective_date": "2026-02-01", "amount_minor": 10_000},
+    )
+    invalid_operation_id = "b0df01b7-57e2-4f66-90da-571d31b7b252"
+    invalid_payload = {
+        "operation_id": invalid_operation_id,
+        "cutover_date": service.clock.today(),
+        "expected_predecessor_value_minor": 10_000,
+        "final_predecessor_value_minor": 11_000,
+        "successors": [
+            {
+                "account_class": "TANGIBLE_ASSET",
+                "name": "Asset",
+                "opening_value_minor": 10_000,
+            }
+        ],
+    }
+
+    with pytest.raises(ValueError, match="must equal the final tracking value"):
+        service.create_tracking_cutover(tracking_id, invalid_payload)
+    assert (
+        service.db.fetch_one(
+            load_sql("queries/tracking_cutover_by_operation"),
+            (invalid_operation_id,),
+        )
+        is None
+    )
+    assert (
+        service.db.fetch_one(
+            load_sql("queries/financial_command_receipt_by_id"),
+            (invalid_operation_id,),
+        )
+        is None
+    )
+
+    service.create_tracking_cutover(
+        tracking_id,
+        invalid_payload
+        | {
+            "operation_id": "b1906dc2-aad0-49ea-9a9b-07cfb669ab15",
+            "successors": [
+                {
+                    "account_class": "TANGIBLE_ASSET",
+                    "name": "Asset",
+                    "opening_value_minor": 11_000,
+                }
+            ],
+        },
+    )
+    assert service.list_tracking_snapshots(tracking_id)[0]["amount_minor"] == 11_000
+    assert service.get_net_worth()["current_net_worth_minor"] == 11_000
 
 
 def test_snapshot_writes_reject_the_wrong_account_class(service: DojoService) -> None:
@@ -417,6 +479,10 @@ def test_investment_statement_value_applies_post_statement_transfers_provisional
     assert before["provisional_value_minor"] == 0
     assert before["reconciliation_status"] == "CURRENT"
     assert service.get_net_worth()["current_net_worth_minor"] == 30_000
+    statement = service.latest_investment_statement(investment_id)
+    assert statement["holdings_cost_basis_minor"] == 20_000
+    assert statement["unrealized_gain_minor"] == 5_000
+    assert statement["holdings"][0]["cost_basis_minor"] == 20_000
 
     service.create_transfer(
         from_account_id=checking_id,
@@ -443,6 +509,7 @@ def test_investment_statement_value_applies_post_statement_transfers_provisional
                     "ticker": "VTI",
                     "quantity_micros": 2_500_000,
                     "price_minor": 10_000,
+                    "average_basis_minor": 8_000,
                 }
             ],
         },
@@ -487,21 +554,23 @@ def test_investment_contribution_funds_linked_category_and_withdrawal_returns_at
         {"effective_date": "2026-02-01", "cash_balance_minor": 0, "holdings": []},
     )
 
-    contribution = service.create_investment_transfer(
+    service.create_investment_transfer(
         investment_id,
         {
             "direction": "CONTRIBUTION",
-            "budget_account_id": checking_id,
-            "date": service.clock.today(),
+            "client_operation_id": str(uuid4()),
+            "source_account_id": checking_id,
+            "source_posted_date": service.clock.today(),
+            "source_status": "CLEARED",
+            "destination_account_id": investment_id,
+            "destination_posted_date": service.clock.today(),
+            "destination_status": "CLEARED",
             "amount_minor": 10_000,
-            "status": "CLEARED",
             "memo": "Contribution",
-            "fund_shortfall": True,
         },
     )
-    assert contribution["funded_shortfall_minor"] == 10_000
-    assert service.compute_category_available(category_id) == 0
-    assert service.compute_available_to_budget() == -10_000
+    assert service.compute_category_available(category_id) == -10_000
+    assert service.compute_available_to_budget() == 0
     assert service.get_net_worth()["current_net_worth_minor"] == 0
     category = next(
         item
@@ -529,14 +598,18 @@ def test_investment_contribution_funds_linked_category_and_withdrawal_returns_at
         investment_id,
         {
             "direction": "WITHDRAWAL",
-            "budget_account_id": checking_id,
-            "date": service.clock.today(),
+            "client_operation_id": str(uuid4()),
+            "source_account_id": investment_id,
+            "source_posted_date": service.clock.today(),
+            "source_status": "CLEARED",
+            "destination_account_id": checking_id,
+            "destination_posted_date": service.clock.today(),
+            "destination_status": "CLEARED",
             "amount_minor": 4_000,
-            "status": "CLEARED",
             "memo": "Withdrawal",
         },
     )
-    assert service.compute_available_to_budget() == -6_000
+    assert service.compute_available_to_budget() == 4_000
     assert _account(service, investment_id)["current_value_minor"] == 6_000
     assert service.get_net_worth()["current_net_worth_minor"] == 0
     assert len([item for item in service.list_category_activity() if item["is_derived"]]) == 1
@@ -575,12 +648,15 @@ def test_same_day_investment_transfer_uses_statement_version_order(
         investment_id,
         {
             "direction": "CONTRIBUTION",
-            "budget_account_id": checking_id,
-            "date": clock.today(),
+            "client_operation_id": str(uuid4()),
+            "source_account_id": checking_id,
+            "source_posted_date": clock.today(),
+            "source_status": "CLEARED",
+            "destination_account_id": investment_id,
+            "destination_posted_date": clock.today(),
+            "destination_status": "CLEARED",
             "amount_minor": 10_000,
-            "status": "CLEARED",
             "memo": "Same-day contribution",
-            "fund_shortfall": True,
         },
     )
     provisional = _account(service, investment_id)
@@ -643,10 +719,14 @@ def test_investment_link_changes_preserve_prior_derived_category_activity(
         investment_id,
         {
             "direction": "CONTRIBUTION",
-            "budget_account_id": checking_id,
-            "date": "2026-02-10",
+            "client_operation_id": str(uuid4()),
+            "source_account_id": checking_id,
+            "source_posted_date": "2026-02-10",
+            "source_status": "CLEARED",
+            "destination_account_id": investment_id,
+            "destination_posted_date": "2026-02-10",
+            "destination_status": "CLEARED",
             "amount_minor": 10_000,
-            "status": "CLEARED",
             "memo": "Old link",
         },
     )
@@ -654,10 +734,14 @@ def test_investment_link_changes_preserve_prior_derived_category_activity(
         investment_id,
         {
             "direction": "CONTRIBUTION",
-            "budget_account_id": checking_id,
-            "date": "2026-02-15",
+            "client_operation_id": str(uuid4()),
+            "source_account_id": checking_id,
+            "source_posted_date": "2026-02-15",
+            "source_status": "CLEARED",
+            "destination_account_id": investment_id,
+            "destination_posted_date": "2026-02-15",
+            "destination_status": "CLEARED",
             "amount_minor": 20_000,
-            "status": "CLEARED",
             "memo": "New link",
         },
     )
@@ -673,6 +757,44 @@ def test_investment_link_changes_preserve_prior_derived_category_activity(
         (category_ids[0], -10_000),
         (category_ids[1], -20_000),
     }
+
+
+def test_credit_card_payment_is_idempotent_and_records_operation_provenance(
+    service: DojoService,
+) -> None:
+    checking_id = service.create_account(
+        {"name": "Checking", "account_class": "BUDGET", "budget_account_type": "DEPOSIT"}
+    )["account_id"]
+    card_id = service.create_account(
+        {"name": "Card", "account_class": "BUDGET", "budget_account_type": "CREDIT_CARD"}
+    )["account_id"]
+    operation_id = str(uuid4())
+    payload = {
+        "client_operation_id": operation_id,
+        "source_account_id": checking_id,
+        "source_posted_date": "2026-02-10",
+        "source_status": "CLEARED",
+        "destination_account_id": card_id,
+        "destination_posted_date": "2026-02-13",
+        "destination_status": "PENDING",
+        "amount_minor": 12_500,
+        "memo": "Card payment",
+    }
+    first = service.create_credit_card_payment(card_id, payload)
+    assert service.create_credit_card_payment(card_id, payload) == first
+    with pytest.raises(ValueError, match="different content"):
+        service.create_credit_card_payment(card_id, payload | {"amount_minor": 13_000})
+
+    transactions = service.list_transactions(limit=10, show_hidden=False)["items"]
+    assert {item["operation_id"] for item in transactions} == {first["operation_id"]}
+    assert {str(item["date"]) for item in transactions} == {"2026-02-10", "2026-02-13"}
+    assert {item["status"] for item in transactions} == {"CLEARED", "PENDING"}
+    assert service.list_allocations(show_hidden=True) == []
+    with pytest.raises(ValueError, match="budget deposit"):
+        service.create_credit_card_payment(
+            card_id,
+            payload | {"source_account_id": card_id, "client_operation_id": str(uuid4())},
+        )
 
 
 def test_loan_reconciliation_derives_aggregate_principal_and_unknown_remainder(

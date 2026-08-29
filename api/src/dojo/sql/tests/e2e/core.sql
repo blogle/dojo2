@@ -107,13 +107,12 @@ INSERT INTO budget_account_settings (
 );
 
 INSERT INTO transactions (
-    row_id, transaction_id, transfer_id, date, account_id, amount_minor, category_id,
+    row_id, transaction_id, date, account_id, amount_minor, category_id,
     system_category, status, memo, entry_order, record_order, valid_from, valid_to,
     created_at, created_by_user_id
 ) VALUES (
     '00000000-0000-0000-0000-000000000103',
-    '00000000-0000-0000-0000-000000000103',
-    NULL, DATE '2026-02-15',
+    '00000000-0000-0000-0000-000000000103', DATE '2026-02-15',
     '00000000-0000-0000-0000-000000000101',
     2000000, NULL, 'TX_STARTING_BALANCE', 'CLEARED', 'E2E opening balance', 1, 1,
     TIMESTAMPTZ '2026-02-15 12:00:00+00',

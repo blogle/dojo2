@@ -236,6 +236,22 @@ describe("AccountDetailPage", () => {
     cy.get("[data-cy=balance-trend-chart]").should("be.visible");
   });
 
+  it("opens the account-local reconciliation balance action", () => {
+    mountPage();
+
+    cy.get("[data-cy=account-detail-reconcile]").click();
+    cy.get("[data-cy=form-modal-root]").should(
+      "contain.text",
+      "Reconcile account",
+    );
+    cy.get('input[name="reconciliation-cutoff"]').should("be.visible");
+    cy.get('input[name="reconciliation-ending-balance"]').should("be.visible");
+    cy.get("[data-cy=form-modal-root]").should(
+      "contain.text",
+      "Preview difference",
+    );
+  });
+
   it("opens edit configuration and submits account metadata", () => {
     mountPage();
 
@@ -318,15 +334,71 @@ const trackingSnapshots = [
 ];
 
 function stubTrackingFetch() {
-  cy.stub(window, "fetch").callsFake((url: string) => {
+  let promotedAccount: typeof trackingAccount | null = null;
+  cy.stub(window, "fetch").callsFake((url: string, init?: RequestInit) => {
     const path = new URL(url, "http://localhost").pathname;
 
     if (path === "/api/accounts") {
       return Promise.resolve(
-        new Response(JSON.stringify({ items: [trackingAccount] }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }),
+        new Response(
+          JSON.stringify({ items: [promotedAccount ?? trackingAccount] }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+      );
+    }
+
+    if (
+      path === `/api/accounts/${trackingAccount.account_id}/cutovers` &&
+      init?.method === "POST"
+    ) {
+      const body = JSON.parse(init.body as string);
+      const successorIds = body.successors.map(
+        (_successor: unknown, index: number) => `successor-${index + 1}`,
+      );
+      if (successorIds.length === 1) {
+        promotedAccount = {
+          ...trackingAccount,
+          account_id: successorIds[0],
+          name: body.successors[0].name,
+          account_class: body.successors[0].account_class,
+          tracking_polarity: undefined,
+          tracking_source: undefined,
+        } as typeof trackingAccount;
+      }
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            operation_id: body.operation_id,
+            predecessor_account_id: trackingAccount.account_id,
+            cutover_date: body.cutover_date,
+            prior_value_minor: body.final_predecessor_value_minor,
+            successor_total_minor: body.final_predecessor_value_minor,
+            variance_minor: 0,
+            successor_account_ids: successorIds,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    }
+
+    if (path === "/api/accounts/successor-1/investment-statements/latest") {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            effective_date: null,
+            cash_balance_minor: null,
+            holdings: [],
+            holdings_value_minor: null,
+            holdings_cost_basis_minor: null,
+            unrealized_gain_minor: null,
+            current_value_minor: null,
+            provisional_transfer_minor: 0,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
       );
     }
 
@@ -409,6 +481,7 @@ function mountTrackingPage() {
       plugins: [router, [VueQueryPlugin, { queryClient }]],
     },
   });
+  return router;
 }
 
 describe("AccountDetailPage — tracking account", () => {
@@ -513,7 +586,7 @@ describe("AccountDetailPage — tracking account", () => {
   });
 
   it("opens and closes the cutover modal", () => {
-    mountTrackingPage();
+    const router = mountTrackingPage();
 
     cy.get("[data-cy=account-detail-create-richer]").click();
     cy.get("[data-cy=form-modal-root]").should(
@@ -539,8 +612,12 @@ describe("AccountDetailPage — tracking account", () => {
     cy.get("[data-cy=cutover-successor]").should("have.length", 2);
     cy.get('select[name="cutover-type-1"]').select("TANGIBLE_ASSET");
     cy.get('input[name="cutover-opening-1"]').type("100");
+    cy.get('input[name="cutover-final-tracking-value"]').type("98532.21");
     cy.get("[data-cy=form-modal-root]").contains("Apply cutover").click();
     cy.get("[data-cy=form-modal-root]").should("not.exist");
+    cy.wrap(null).should(() => {
+      expect(router.currentRoute.value.path).to.equal("/assets-liabilities");
+    });
     cy.window().then((win) => {
       const calls = (
         win.fetch as unknown as {
@@ -562,6 +639,19 @@ describe("AccountDetailPage — tracking account", () => {
         account_class: "TANGIBLE_ASSET",
         opening_value_minor: 10_000,
       });
+      expect(body).to.include({ final_predecessor_value_minor: 9_853_221 });
+    });
+  });
+
+  it("routes a single current cutover to the successor account", () => {
+    const router = mountTrackingPage();
+    cy.get("[data-cy=account-detail-create-richer]").click();
+    cy.get('input[name="cutover-final-tracking-value"]').type("98432.21");
+    cy.get("[data-cy=form-modal-root]").contains("Apply cutover").click();
+    cy.wrap(null).should(() => {
+      expect(router.currentRoute.value.path).to.equal(
+        "/assets-liabilities/successor-1",
+      );
     });
   });
 });

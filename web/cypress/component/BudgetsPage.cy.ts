@@ -134,9 +134,13 @@ const mockTransactions = [
   },
 ];
 
-function stubFetch() {
-  cy.stub(window, "fetch").callsFake((url: string) => {
+function stubFetch(
+  responseOverride?: (path: string, init?: RequestInit) => Response | undefined,
+) {
+  cy.stub(window, "fetch").callsFake((url: string, init?: RequestInit) => {
     const path = new URL(url, "http://localhost").pathname;
+    const overridden = responseOverride?.(path, init);
+    if (overridden) return Promise.resolve(overridden);
     let body: unknown;
 
     if (path === "/api/bootstrap") {
@@ -216,8 +220,10 @@ function stubFetch() {
   });
 }
 
-function mountPage() {
-  stubFetch();
+function mountPage(
+  responseOverride?: (path: string, init?: RequestInit) => Response | undefined,
+) {
+  stubFetch(responseOverride);
   const queryClient = createDojoQueryClient();
   return mount(BudgetsPage, {
     global: {
@@ -311,6 +317,100 @@ describe("BudgetsPage", () => {
       "contain.text",
       "Investment contribution",
     );
+  });
+
+  it("funds a category through a persisted allocation", () => {
+    mountPage();
+    cy.contains("Groceries").click();
+    cy.contains("button", "Fund").click();
+    cy.get("[data-cy=form-modal-root]").within(() => {
+      cy.contains("label", "Funding option")
+        .parent()
+        .find("select")
+        .select("custom");
+      cy.contains("label", "Custom amount").parent().find("input").type("1000");
+      cy.contains("button", "Save").click();
+    });
+
+    cy.window().then((win) => {
+      const calls = (
+        win.fetch as unknown as {
+          getCalls: () => Array<{ args: [string, RequestInit?] }>;
+        }
+      ).getCalls();
+      const fundingCall = calls.find((call) => {
+        const requestUrl = new URL(call.args[0], "http://localhost");
+        return (
+          requestUrl.pathname === "/api/allocations/fund" &&
+          call.args[1]?.method === "POST"
+        );
+      });
+      expect(fundingCall).not.to.eq(undefined);
+      const body = JSON.parse(fundingCall?.args[1]?.body as string);
+      expect(body).to.include({
+        category_id: "c1",
+        amount_minor: 100_000,
+      });
+      expect(body.client_operation_id).to.be.a("string");
+      expect(body.client_operation_id).not.to.equal("");
+      const categoryUpdate = calls.find((call) =>
+        new URL(call.args[0], "http://localhost").pathname.startsWith(
+          "/api/categories/c1",
+        ),
+      );
+      expect(categoryUpdate).to.eq(undefined);
+    });
+  });
+
+  it("preserves the funding draft and operation id for a retry", () => {
+    let fundingAttempts = 0;
+    mountPage((path, init) => {
+      if (path !== "/api/allocations/fund" || init?.method !== "POST") {
+        return undefined;
+      }
+      fundingAttempts += 1;
+      if (fundingAttempts === 1) {
+        return new Response(JSON.stringify({ detail: "Temporary failure" }), {
+          status: 503,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({ allocation_id: "a2" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    cy.contains("Groceries").click();
+    cy.contains("button", "Fund").click();
+    cy.get("[data-cy=form-modal-root]").within(() => {
+      cy.get("select").select("custom");
+      cy.get("input").type("1000");
+      cy.contains("button", "Save").click();
+      cy.get("input").should("have.value", "1000");
+      cy.contains("button", "Save").should("not.be.disabled").click();
+    });
+
+    cy.window().then((win) => {
+      const calls = (
+        win.fetch as unknown as {
+          getCalls: () => Array<{ args: [string, RequestInit?] }>;
+        }
+      )
+        .getCalls()
+        .filter((call) => {
+          const requestUrl = new URL(call.args[0], "http://localhost");
+          return (
+            requestUrl.pathname === "/api/allocations/fund" &&
+            call.args[1]?.method === "POST"
+          );
+        });
+      expect(calls).to.have.length(2);
+      const firstBody = JSON.parse(calls[0].args[1]?.body as string);
+      const secondBody = JSON.parse(calls[1].args[1]?.body as string);
+      expect(secondBody.client_operation_id).to.equal(
+        firstBody.client_operation_id,
+      );
+    });
   });
 
   it("opens category groups in the detail trouser", () => {

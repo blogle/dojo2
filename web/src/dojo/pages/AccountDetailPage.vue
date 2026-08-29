@@ -14,6 +14,9 @@ import {
   createTrackingCutover,
   createTrackingSnapshot,
   createInvestmentTransfer,
+  createCreditCardPayment,
+  applyReconciliation,
+  createReconciliationDraft,
   createLoanPayment,
   fetchAccountBudgetLinks,
   fetchAccounts,
@@ -153,11 +156,30 @@ const investmentTransferDirection = ref<"CONTRIBUTION" | "WITHDRAWAL">(
   "CONTRIBUTION",
 );
 const investmentTransferDate = ref(new Date().toISOString().slice(0, 10));
+const investmentTransferDestinationDate = ref(
+  new Date().toISOString().slice(0, 10),
+);
 const investmentTransferBudgetAccountId = ref("");
 const investmentTransferAmount = ref("");
 const investmentTransferMemo = ref("");
 const investmentTransferStatus = ref<"PENDING" | "CLEARED">("CLEARED");
-const investmentTransferFundShortfall = ref(true);
+const investmentTransferDestinationStatus = ref<"PENDING" | "CLEARED">(
+  "CLEARED",
+);
+const investmentTransferOperationId = ref(crypto.randomUUID());
+const showCreditCardPaymentModal = ref(false);
+const creditCardPaymentSourceAccountId = ref("");
+const creditCardPaymentSourceDate = ref(new Date().toISOString().slice(0, 10));
+const creditCardPaymentDestinationDate = ref(
+  new Date().toISOString().slice(0, 10),
+);
+const creditCardPaymentSourceStatus = ref<"PENDING" | "CLEARED">("CLEARED");
+const creditCardPaymentDestinationStatus = ref<"PENDING" | "CLEARED">(
+  "CLEARED",
+);
+const creditCardPaymentAmount = ref("");
+const creditCardPaymentMemo = ref("Credit-card payment");
+const creditCardPaymentOperationId = ref(crypto.randomUUID());
 const showLoanPaymentModal = ref(false);
 const loanPaymentDate = ref(new Date().toISOString().slice(0, 10));
 const loanPaymentBudgetAccountId = ref("");
@@ -172,6 +194,14 @@ const loanUnapplied = ref("");
 const loanYtdPrincipal = ref("");
 const loanYtdInterest = ref("");
 const showLoanAdvancedFields = ref(false);
+const showReconciliationModal = ref(false);
+const reconciliationDate = ref(new Date().toISOString().slice(0, 10));
+const reconciliationEndingBalance = ref("");
+const reconciliationDraft = ref<Awaited<
+  ReturnType<typeof createReconciliationDraft>
+> | null>(null);
+const reconciliationCreateAdjustment = ref(false);
+const reconciliationOperationId = ref(crypto.randomUUID());
 
 const { data: categoriesResponse } = useQuery({
   queryKey: computed(() => ["categories", currentMonth.value]),
@@ -248,6 +278,11 @@ const { data: trendData } = useQuery({
 
 const isBudgetAccount = computed(
   () => account.value?.account_class === "BUDGET",
+);
+const isCreditCardAccount = computed(
+  () =>
+    isBudgetAccount.value &&
+    account.value?.budget_account_type === "CREDIT_CARD",
 );
 const isInvestmentAccount = computed(
   () => account.value?.account_class === "INVESTMENT",
@@ -369,14 +404,10 @@ const selectedLoanCategory = computed(() =>
 const contributionPreview = computed(() => {
   const available = selectedContributionCategory.value?.available_minor ?? 0;
   const amount = parseCurrencyMinor(investmentTransferAmount.value) ?? 0;
-  const fundedShortfall = investmentTransferFundShortfall.value
-    ? Math.max(amount - available, 0)
-    : 0;
   return {
     available,
     amount,
-    fundedShortfall,
-    resultingAvailable: available + fundedShortfall - amount,
+    resultingAvailable: available - amount,
   };
 });
 const loanProjectionColumns = [
@@ -407,10 +438,12 @@ const showCutoverModal = ref(false);
 const cutoverDate = ref(new Date().toISOString().slice(0, 10));
 const cutoverRepresentationConfirmed = ref(true);
 const cutoverOperationId = ref("");
+const cutoverFinalTrackingValue = ref("");
 type CutoverHoldingDraft = {
   ticker: string;
   quantity: string;
   price: string;
+  averageBasis: string;
 };
 type CutoverSuccessorDraft = {
   id: string;
@@ -461,9 +494,14 @@ const cutoverSuccessorTotal = computed(() =>
         total +
         opening +
         successor.holdings.reduce((holdingTotal, holding) => {
-          const quantity = Number(holding.quantity);
+          const quantityMicros = Math.round(
+            Number(holding.quantity) * 1_000_000,
+          );
           const price = parseCurrencyMinor(holding.price) ?? 0;
-          return holdingTotal + Math.round(quantity * price);
+          return (
+            holdingTotal +
+            Math.floor((quantityMicros * price + 500_000) / 1_000_000)
+          );
         }, 0)
       );
     }
@@ -471,7 +509,7 @@ const cutoverSuccessorTotal = computed(() =>
   }, 0),
 );
 const cutoverExpectedSignedValue = computed(() => {
-  const value = accountCurrentValue.value ?? 0;
+  const value = parseCurrencyMinor(cutoverFinalTrackingValue.value) ?? 0;
   return account.value?.tracking_polarity === "LIABILITY" ? -value : value;
 });
 const cutoverVariance = computed(
@@ -480,6 +518,8 @@ const cutoverVariance = computed(
 const cutoverCanSave = computed(
   () =>
     cutoverRepresentationConfirmed.value &&
+    parseCurrencyMinor(cutoverFinalTrackingValue.value) !== null &&
+    cutoverVariance.value === 0 &&
     cutoverSuccessors.value.length > 0 &&
     cutoverSuccessors.value.every(
       (successor) =>
@@ -493,7 +533,8 @@ const cutoverCanSave = computed(
               holding.ticker.trim().length > 0 &&
               Number.isFinite(Number(holding.quantity)) &&
               Number(holding.quantity) >= 0 &&
-              (parseCurrencyMinor(holding.price) ?? 0) > 0,
+              (parseCurrencyMinor(holding.price) ?? 0) > 0 &&
+              parseCurrencyMinor(holding.averageBasis) !== null,
           )),
     ),
 );
@@ -921,7 +962,7 @@ const handleBack = () => {
 
 const handleMoreAction = (key: string) => {
   if (key === "reconcile") {
-    showReconciliationStub();
+    openReconciliationModal();
   }
   if (key === "edit-configuration") {
     openConfigurationModal();
@@ -983,10 +1024,21 @@ const createValueMutation = useMutation({
 const cutoverMutation = useMutation({
   mutationFn: (payload: Parameters<typeof createTrackingCutover>[1]) =>
     createTrackingCutover(accountId.value, payload),
-  onSuccess: () => {
+  onSuccess: async (result) => {
     showCutoverModal.value = false;
     actionMessage.value =
-      "Representation cutover recorded. No ledger transactions were created.";
+      result.cutover_date > currentDate
+        ? `Representation cutover scheduled for ${result.cutover_date}. The tracking account remains current until then.`
+        : "Representation cutover recorded. No ledger transactions were created.";
+    if (result.cutover_date <= currentDate) {
+      if (result.successor_account_ids.length === 1) {
+        await router.replace(
+          `/assets-liabilities/${result.successor_account_ids[0]}`,
+        );
+      } else {
+        await router.replace("/assets-liabilities");
+      }
+    }
     invalidateAccountDetailQueries();
   },
 });
@@ -1008,6 +1060,14 @@ const investmentTransferMutation = useMutation({
     invalidateAccountDetailQueries();
   },
 });
+const creditCardPaymentMutation = useMutation({
+  mutationFn: (payload: Parameters<typeof createCreditCardPayment>[1]) =>
+    createCreditCardPayment(accountId.value, payload),
+  onSuccess: () => {
+    showCreditCardPaymentModal.value = false;
+    invalidateAccountDetailQueries();
+  },
+});
 const loanPaymentMutation = useMutation({
   mutationFn: (payload: Parameters<typeof createLoanPayment>[1]) =>
     createLoanPayment(accountId.value, payload),
@@ -1024,6 +1084,39 @@ const loanStatementMutation = useMutation({
   onSuccess: () => {
     showLoanStatementModal.value = false;
     queryClient.invalidateQueries({ queryKey: ["loan-snapshots"] });
+    invalidateAccountDetailQueries();
+  },
+});
+const reconciliationDraftMutation = useMutation({
+  mutationFn: () => {
+    const ending = parseCurrencyMinor(reconciliationEndingBalance.value);
+    if (ending === null) throw new Error("Enter an ending balance");
+    return createReconciliationDraft(accountId.value, {
+      source_kind: isCreditCardAccount.value
+        ? "CREDIT_CARD_STATEMENT"
+        : "BANK_STATEMENT",
+      cutoff: reconciliationDate.value,
+      source_ending_value_minor: ending,
+    });
+  },
+  onSuccess: (draft) => {
+    reconciliationDraft.value = draft;
+  },
+});
+const reconciliationApplyMutation = useMutation({
+  mutationFn: () => {
+    if (!reconciliationDraft.value)
+      throw new Error("Create a reconciliation draft first");
+    return applyReconciliation(reconciliationDraft.value.reconciliation_id, {
+      client_operation_id: reconciliationOperationId.value,
+      balance_adjustment_minor: reconciliationCreateAdjustment.value
+        ? reconciliationDraft.value.difference_minor
+        : null,
+    });
+  },
+  onSuccess: () => {
+    showReconciliationModal.value = false;
+    reconciliationDraft.value = null;
     invalidateAccountDetailQueries();
   },
 });
@@ -1060,6 +1153,23 @@ function openValueModal() {
   valueAmount.value = "";
   valueNotes.value = "";
   showValueModal.value = true;
+}
+
+function openReconciliationModal() {
+  reconciliationDate.value = new Date().toISOString().slice(0, 10);
+  reconciliationEndingBalance.value = "";
+  reconciliationDraft.value = null;
+  reconciliationCreateAdjustment.value = false;
+  reconciliationOperationId.value = crypto.randomUUID();
+  showReconciliationModal.value = true;
+}
+
+function createReconciliationPreview() {
+  reconciliationDraftMutation.mutate();
+}
+
+function applyReconciliationDraft() {
+  reconciliationApplyMutation.mutate();
 }
 
 function saveValue() {
@@ -1115,9 +1225,7 @@ function saveInvestmentStatement() {
     ticker: holding.ticker.trim().toUpperCase(),
     quantity_micros: Math.round(Number(holding.quantity) * 1_000_000),
     price_minor: parseCurrencyMinor(holding.price) ?? 0,
-    ...(holding.averageBasis.trim()
-      ? { average_basis_minor: parseCurrencyMinor(holding.averageBasis) ?? 0 }
-      : {}),
+    average_basis_minor: parseCurrencyMinor(holding.averageBasis) ?? 0,
   }));
   reconcileInvestmentMutation.mutate({
     effective_date: investmentStatementDate.value,
@@ -1130,6 +1238,7 @@ function saveInvestmentStatement() {
 function openInvestmentTransferModal(direction: "CONTRIBUTION" | "WITHDRAWAL") {
   investmentTransferDirection.value = direction;
   investmentTransferDate.value = new Date().toISOString().slice(0, 10);
+  investmentTransferDestinationDate.value = investmentTransferDate.value;
   investmentTransferBudgetAccountId.value =
     budgetAccountOptions.value[0]?.value ?? "";
   investmentTransferAmount.value = "";
@@ -1138,7 +1247,8 @@ function openInvestmentTransferModal(direction: "CONTRIBUTION" | "WITHDRAWAL") {
       ? "Investment contribution"
       : "Investment withdrawal";
   investmentTransferStatus.value = "CLEARED";
-  investmentTransferFundShortfall.value = true;
+  investmentTransferDestinationStatus.value = "CLEARED";
+  investmentTransferOperationId.value = crypto.randomUUID();
   showInvestmentTransferModal.value = true;
 }
 
@@ -1147,12 +1257,21 @@ function saveInvestmentTransfer() {
   if (amount === null || !investmentTransferBudgetAccountId.value) return;
   investmentTransferMutation.mutate({
     direction: investmentTransferDirection.value,
-    budget_account_id: investmentTransferBudgetAccountId.value,
-    date: investmentTransferDate.value,
+    client_operation_id: investmentTransferOperationId.value,
+    source_account_id:
+      investmentTransferDirection.value === "CONTRIBUTION"
+        ? investmentTransferBudgetAccountId.value
+        : accountId.value,
+    source_posted_date: investmentTransferDate.value,
+    source_status: investmentTransferStatus.value,
+    destination_account_id:
+      investmentTransferDirection.value === "CONTRIBUTION"
+        ? accountId.value
+        : investmentTransferBudgetAccountId.value,
+    destination_posted_date: investmentTransferDestinationDate.value,
+    destination_status: investmentTransferDestinationStatus.value,
     amount_minor: amount,
-    status: investmentTransferStatus.value,
     memo: investmentTransferMemo.value,
-    fund_shortfall: investmentTransferFundShortfall.value,
   });
 }
 
@@ -1163,6 +1282,35 @@ const investmentTransferCanSave = computed(
     (investmentTransferDirection.value === "WITHDRAWAL" ||
       linkedContributionCategoryId.value.length > 0),
 );
+
+function openCreditCardPaymentModal() {
+  creditCardPaymentSourceAccountId.value =
+    budgetAccountOptions.value[0]?.value ?? "";
+  creditCardPaymentSourceDate.value = new Date().toISOString().slice(0, 10);
+  creditCardPaymentDestinationDate.value = creditCardPaymentSourceDate.value;
+  creditCardPaymentSourceStatus.value = "CLEARED";
+  creditCardPaymentDestinationStatus.value = "CLEARED";
+  creditCardPaymentAmount.value = "";
+  creditCardPaymentMemo.value = "Credit-card payment";
+  creditCardPaymentOperationId.value = crypto.randomUUID();
+  showCreditCardPaymentModal.value = true;
+}
+
+function saveCreditCardPayment() {
+  const amount = parseCurrencyMinor(creditCardPaymentAmount.value);
+  if (amount === null || !creditCardPaymentSourceAccountId.value) return;
+  creditCardPaymentMutation.mutate({
+    client_operation_id: creditCardPaymentOperationId.value,
+    source_account_id: creditCardPaymentSourceAccountId.value,
+    source_posted_date: creditCardPaymentSourceDate.value,
+    source_status: creditCardPaymentSourceStatus.value,
+    destination_account_id: accountId.value,
+    destination_posted_date: creditCardPaymentDestinationDate.value,
+    destination_status: creditCardPaymentDestinationStatus.value,
+    amount_minor: amount,
+    memo: creditCardPaymentMemo.value,
+  });
+}
 
 function openLoanPaymentModal() {
   loanPaymentDate.value = new Date().toISOString().slice(0, 10);
@@ -1244,7 +1392,8 @@ const investmentStatementCanSave = computed(() => {
       holding.ticker.trim().length > 0 &&
       Number.isFinite(Number(holding.quantity)) &&
       Number(holding.quantity) >= 0 &&
-      (parseCurrencyMinor(holding.price) ?? 0) > 0,
+      (parseCurrencyMinor(holding.price) ?? 0) > 0 &&
+      parseCurrencyMinor(holding.averageBasis) !== null,
   );
 });
 
@@ -1371,16 +1520,13 @@ function retireAccount() {
   });
 }
 
-function showReconciliationStub() {
-  actionMessage.value = "Reconciliation review is not built yet.";
-}
-
 function openCutoverModal() {
   if (!account.value) return;
   const latestValuation = accountCurrentValue.value ?? 0;
   const name = cleanAccountName(account.value.name) ?? account.value.name;
   cutoverDate.value = new Date().toISOString().slice(0, 10);
   cutoverOperationId.value = crypto.randomUUID();
+  cutoverFinalTrackingValue.value = "";
   cutoverSuccessors.value = [
     newCutoverSuccessor(String(latestValuation / 100), `${name} (Upgraded)`),
   ];
@@ -1397,7 +1543,12 @@ function removeCutoverSuccessor(index: number) {
 }
 
 function addCutoverHolding(successor: CutoverSuccessorDraft) {
-  successor.holdings.push({ ticker: "", quantity: "", price: "" });
+  successor.holdings.push({
+    ticker: "",
+    quantity: "",
+    price: "",
+    averageBasis: "",
+  });
 }
 
 function removeCutoverHolding(successor: CutoverSuccessorDraft, index: number) {
@@ -1422,6 +1573,7 @@ function handleCutoverSubmit() {
             ticker: holding.ticker.trim().toUpperCase(),
             quantity_micros: Math.round(Number(holding.quantity) * 1_000_000),
             price_minor: parseCurrencyMinor(holding.price) ?? 0,
+            average_basis_minor: parseCurrencyMinor(holding.averageBasis) ?? 0,
           })),
         };
       }
@@ -1456,7 +1608,8 @@ function handleCutoverSubmit() {
     operation_id: cutoverOperationId.value,
     cutover_date: cutoverDate.value,
     expected_predecessor_value_minor: accountCurrentValue.value,
-    variance_confirmed: cutoverRepresentationConfirmed.value,
+    final_predecessor_value_minor:
+      parseCurrencyMinor(cutoverFinalTrackingValue.value) ?? 0,
     successors,
   });
 }
@@ -1631,6 +1784,13 @@ function formatTaxTreatment(value: string | null | undefined): string {
               @click="openInvestmentTransferModal('CONTRIBUTION')"
             >
               Contribute
+            </Button>
+            <Button
+              v-if="isCreditCardAccount"
+              data-cy="account-detail-pay"
+              @click="openCreditCardPaymentModal"
+            >
+              Pay
             </Button>
             <Button
               v-if="isInvestmentAccount"
@@ -2140,9 +2300,13 @@ function formatTaxTreatment(value: string | null | undefined): string {
                     :key="holding.position_id"
                     class="account-detail-page__snapshot-row"
                   >
-                    <span class="account-detail-page__snapshot-td">{{
-                      holding.ticker
-                    }}</span>
+                    <span class="account-detail-page__snapshot-td">
+                      {{ holding.ticker }}
+                      <span class="account-detail-page__summary-sub">
+                        Basis {{ formatCurrency(holding.cost_basis_minor) }} ·
+                        Gain {{ formatCurrency(holding.unrealized_gain_minor) }}
+                      </span>
+                    </span>
                     <span
                       class="account-detail-page__snapshot-td account-detail-page__snapshot-td--end"
                     >
@@ -2225,13 +2389,91 @@ function formatTaxTreatment(value: string | null | undefined): string {
               <KeyValueList :items="reconciliationDetails" />
               <button
                 class="account-detail-page__sidebar-link"
-                @click="showReconciliationStub"
+                @click="openReconciliationModal"
               >
                 View reconciliation
               </button>
             </section>
           </aside>
         </div>
+
+        <FormModal
+          :visible="showReconciliationModal"
+          title="Reconcile account"
+          :submit-text="
+            reconciliationDraft ? 'Apply reconciliation' : 'Preview difference'
+          "
+          :submit-disabled="
+            reconciliationDraft
+              ? reconciliationDraft.difference_minor !== 0 &&
+                !reconciliationCreateAdjustment
+              : parseCurrencyMinor(reconciliationEndingBalance) === null
+          "
+          :loading="
+            reconciliationDraftMutation.isPending.value ||
+            reconciliationApplyMutation.isPending.value
+          "
+          @submit="
+            reconciliationDraft
+              ? applyReconciliationDraft()
+              : createReconciliationPreview()
+          "
+          @cancel="showReconciliationModal = false"
+          @close="showReconciliationModal = false"
+        >
+          <div class="account-detail-page__config-form">
+            <DatePicker
+              v-model="reconciliationDate"
+              label="Statement cutoff"
+              name="reconciliation-cutoff"
+              :max="currentDate"
+            />
+            <CurrencyField
+              v-model="reconciliationEndingBalance"
+              :label="
+                isCreditCardAccount
+                  ? 'Statement liability'
+                  : 'Statement ending balance'
+              "
+              name="reconciliation-ending-balance"
+            />
+            <div
+              v-if="reconciliationDraft"
+              class="account-detail-page__reconciliation-preview"
+            >
+              <p>
+                Ledger through cutoff:
+                <strong>{{
+                  formatCurrency(reconciliationDraft.ledger_value_minor)
+                }}</strong>
+              </p>
+              <p>
+                Difference:
+                <strong>{{
+                  formatCurrency(reconciliationDraft.difference_minor)
+                }}</strong>
+              </p>
+              <p class="account-detail-page__config-note">
+                Source records can be supplied through the API contract. This
+                focused action records the balance evidence without hiding
+                unmatched ledger activity.
+              </p>
+              <label
+                v-if="reconciliationDraft.difference_minor !== 0"
+                class="account-detail-page__cutover-checkbox"
+              >
+                <input
+                  v-model="reconciliationCreateAdjustment"
+                  type="checkbox"
+                />
+                <span
+                  >Create an explicit balance-adjustment transaction for this
+                  difference.</span
+                >
+              </label>
+            </div>
+          </div>
+        </FormModal>
 
         <FormModal
           :visible="showConfigurationModal"
@@ -2277,6 +2519,71 @@ function formatTaxTreatment(value: string | null | undefined): string {
         </FormModal>
 
         <FormModal
+          :visible="showCreditCardPaymentModal"
+          title="Pay credit card"
+          submit-text="Save payment"
+          :submit-disabled="
+            parseCurrencyMinor(creditCardPaymentAmount) === null ||
+            !creditCardPaymentSourceAccountId
+          "
+          :loading="creditCardPaymentMutation.isPending.value"
+          @submit="saveCreditCardPayment"
+          @cancel="showCreditCardPaymentModal = false"
+          @close="showCreditCardPaymentModal = false"
+        >
+          <div class="account-detail-page__config-form">
+            <SelectField
+              v-model="creditCardPaymentSourceAccountId"
+              label="From account"
+              name="credit-card-payment-source"
+              :options="budgetAccountOptions"
+            />
+            <DatePicker
+              v-model="creditCardPaymentSourceDate"
+              label="Source posted date"
+              name="credit-card-payment-source-date"
+            />
+            <SelectField
+              v-model="creditCardPaymentSourceStatus"
+              label="Source status"
+              name="credit-card-payment-source-status"
+              :options="[
+                { value: 'CLEARED', label: 'Cleared' },
+                { value: 'PENDING', label: 'Pending' },
+              ]"
+            />
+            <DatePicker
+              v-model="creditCardPaymentDestinationDate"
+              label="Card posted date"
+              name="credit-card-payment-card-date"
+            />
+            <SelectField
+              v-model="creditCardPaymentDestinationStatus"
+              label="Card status"
+              name="credit-card-payment-card-status"
+              :options="[
+                { value: 'CLEARED', label: 'Cleared' },
+                { value: 'PENDING', label: 'Pending' },
+              ]"
+            />
+            <CurrencyField
+              v-model="creditCardPaymentAmount"
+              label="Amount"
+              name="credit-card-payment-amount"
+            />
+            <TextField
+              v-model="creditCardPaymentMemo"
+              label="Memo"
+              name="credit-card-payment-memo"
+            />
+            <p class="account-detail-page__cutover-info">
+              The checking outflow and card payment-category reserve are equal
+              and opposite. Net worth is unchanged.
+            </p>
+          </div>
+        </FormModal>
+
+        <FormModal
           :visible="showLoanPaymentModal"
           title="Record payment"
           submit-text="Record payment"
@@ -2293,7 +2600,7 @@ function formatTaxTreatment(value: string | null | undefined): string {
           <div class="account-detail-page__config-form">
             <DatePicker
               v-model="loanPaymentDate"
-              label="Date"
+              label="Source posted date"
               name="loan-payment-date"
             />
             <SelectField
@@ -2430,26 +2737,27 @@ function formatTaxTreatment(value: string | null | undefined): string {
             />
             <SelectField
               v-model="investmentTransferStatus"
-              label="Status"
+              label="Source status"
               name="investment-transfer-status"
               :options="[
                 { value: 'CLEARED', label: 'Cleared' },
                 { value: 'PENDING', label: 'Pending' },
               ]"
             />
-            <label
-              v-if="investmentTransferDirection === 'CONTRIBUTION'"
-              class="account-detail-page__cutover-checkbox"
-            >
-              <input
-                v-model="investmentTransferFundShortfall"
-                type="checkbox"
-              />
-              <span>
-                Fund any category shortfall from Available to budget before the
-                contribution.
-              </span>
-            </label>
+            <DatePicker
+              v-model="investmentTransferDestinationDate"
+              label="Destination posted date"
+              name="investment-transfer-destination-date"
+            />
+            <SelectField
+              v-model="investmentTransferDestinationStatus"
+              label="Destination status"
+              name="investment-transfer-destination-status"
+              :options="[
+                { value: 'CLEARED', label: 'Cleared' },
+                { value: 'PENDING', label: 'Pending' },
+              ]"
+            />
             <TextField
               v-model="investmentTransferMemo"
               label="Memo"
@@ -2462,9 +2770,7 @@ function formatTaxTreatment(value: string | null | undefined): string {
                   "No category configured"
                 }}:
                 {{ formatCurrency(contributionPreview.available) }} available −
-                {{ formatCurrency(contributionPreview.amount) }} contribution +
-                {{ formatCurrency(contributionPreview.fundedShortfall) }} from
-                Available to budget =
+                {{ formatCurrency(contributionPreview.amount) }} contribution =
                 {{ formatCurrency(contributionPreview.resultingAvailable) }}.
                 The transfer creates two ledger legs and does not change net
                 worth or economic spending.
@@ -2540,7 +2846,7 @@ function formatTaxTreatment(value: string | null | undefined): string {
                 />
                 <CurrencyField
                   v-model="holding.averageBasis"
-                  label="Average basis"
+                  label="Average cost per unit"
                   :name="`holding-basis-${index}`"
                 />
                 <Button
@@ -2618,6 +2924,12 @@ function formatTaxTreatment(value: string | null | undefined): string {
               label="Cutover date"
               name="cutover-date"
               helper="Successors become current on this date"
+            />
+            <CurrencyField
+              v-model="cutoverFinalTrackingValue"
+              label="Final tracking value"
+              name="cutover-final-tracking-value"
+              helper="Enter the source value as of the cutover date"
             />
             <section
               v-for="(successor, successorIndex) in cutoverSuccessors"
@@ -2710,8 +3022,13 @@ function formatTaxTreatment(value: string | null | undefined): string {
                   />
                   <CurrencyField
                     v-model="holding.price"
-                    label="Price"
+                    label="Price per unit on cutover date"
                     :name="`cutover-price-${successorIndex}-${holdingIndex}`"
+                  />
+                  <CurrencyField
+                    v-model="holding.averageBasis"
+                    label="Average cost per unit"
+                    :name="`cutover-basis-${successorIndex}-${holdingIndex}`"
                   />
                   <Button
                     variant="tertiary"
@@ -2751,7 +3068,7 @@ function formatTaxTreatment(value: string | null | undefined): string {
             </Button>
             <div class="account-detail-page__cutover-info">
               <span>
-                Tracking value:
+                Final tracking value:
                 {{ formatCurrency(cutoverExpectedSignedValue) }} · Successor
                 total: {{ formatCurrency(cutoverSuccessorTotal) }} · Variance:
                 {{ formatCurrency(cutoverVariance) }}
@@ -2762,7 +3079,8 @@ function formatTaxTreatment(value: string | null | undefined): string {
               <span>
                 This is a representation change, not a ledger transfer. No money
                 moves and no transactions are posted. We're replacing a snapshot
-                with the successor entities. I confirm the displayed variance.
+                with successor entities whose opening values exactly reconcile
+                to the final tracking value.
               </span>
             </label>
             <div class="account-detail-page__cutover-info">

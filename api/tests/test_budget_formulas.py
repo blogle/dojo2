@@ -1,7 +1,13 @@
 from __future__ import annotations
 
 from datetime import date
+from uuid import uuid4
 
+import pytest
+from pydantic import ValidationError
+
+from dojo.api.models import CategoryUpdatePayload
+from dojo.commands import CommandConflictError
 from dojo.fixture_data import DEFAULT_FIXTURE
 from dojo.service import DojoService
 from dojo.sql import render_sql
@@ -40,6 +46,64 @@ def test_available_to_budget_ignores_liability_starting_balance_outflows(
     imported_service: DojoService,
 ) -> None:
     assert imported_service.compute_available_to_budget() == 424000
+
+
+def test_fund_category_persists_allocation_and_allows_negative_atb(
+    imported_service: DojoService,
+) -> None:
+    category = next(
+        item
+        for item in imported_service.list_categories(month="2026-02", show_hidden=True)
+        if item["category_kind"] == "STANDARD" and item["is_active"]
+    )
+    before_atb = imported_service.compute_available_to_budget()
+    before_available = int(category["available_minor"])
+    before_budgeted = int(category["month_budgeted_minor"])
+    before_allocation_count = len(imported_service.list_allocations(show_hidden=True))
+    amount_minor = before_atb + 1_000
+    operation_id = str(uuid4())
+
+    result = imported_service.fund_category(
+        client_operation_id=operation_id,
+        category_id=str(category["category_id"]),
+        amount_minor=amount_minor,
+        memo="Fund category",
+        allocation_date=date(2026, 2, 15),
+    )
+
+    after = next(
+        item
+        for item in imported_service.list_categories(month="2026-02", show_hidden=True)
+        if item["category_id"] == category["category_id"]
+    )
+    assert after["available_minor"] == before_available + amount_minor
+    assert after["month_budgeted_minor"] == before_budgeted + amount_minor
+    assert imported_service.compute_available_to_budget() == -1_000
+    assert len(imported_service.list_allocations(show_hidden=True)) == before_allocation_count + 1
+
+    replay = imported_service.fund_category(
+        client_operation_id=operation_id,
+        category_id=str(category["category_id"]),
+        amount_minor=amount_minor,
+        memo="Fund category",
+        allocation_date=date(2026, 2, 15),
+    )
+    assert replay == result
+    assert len(imported_service.list_allocations(show_hidden=True)) == before_allocation_count + 1
+
+    with pytest.raises(CommandConflictError):
+        imported_service.fund_category(
+            client_operation_id=operation_id,
+            category_id=str(category["category_id"]),
+            amount_minor=amount_minor + 1,
+            memo="Fund category",
+            allocation_date=date(2026, 2, 15),
+        )
+
+
+def test_category_update_rejects_derived_available_balance() -> None:
+    with pytest.raises(ValidationError, match="available_minor"):
+        CategoryUpdatePayload.model_validate({"available_minor": 100_000})
 
 
 def test_hidden_categories_and_accounts_are_preserved(imported_service: DojoService) -> None:
@@ -108,7 +172,11 @@ def test_status_toggle_changes_pending_and_cleared_without_changing_actual(
 def test_transaction_edit_and_delete_preserve_history(
     imported_service: DojoService, clock: MutableClock
 ) -> None:
-    account_id = imported_service.list_accounts(show_hidden=True)[0]["account_id"]
+    account_id = next(
+        account["account_id"]
+        for account in imported_service.list_accounts(show_hidden=True)
+        if account["account_class"] == "BUDGET"
+    )
     created = imported_service.create_transaction(
         {
             "date": date(2026, 3, 1),

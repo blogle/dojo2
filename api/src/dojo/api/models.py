@@ -4,7 +4,7 @@ from datetime import date
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 AccountClass = Literal["BUDGET", "TRACKING", "INVESTMENT", "LOAN", "TANGIBLE_ASSET"]
 BudgetAccountType = Literal["DEPOSIT", "CREDIT_CARD"]
@@ -69,6 +69,14 @@ class AllocationRequest(BaseModel):
     to_bucket_id: str
 
 
+class FundCategoryRequest(BaseModel):
+    client_operation_id: UUID
+    date: date
+    category_id: str
+    amount_minor: int = Field(gt=0)
+    memo: str = ""
+
+
 class TransactionPayload(BaseModel):
     date: date
     account_id: str
@@ -104,12 +112,27 @@ class AccountBudgetLinkPayload(BaseModel):
 
 class InvestmentTransferPayload(BaseModel):
     direction: Literal["CONTRIBUTION", "WITHDRAWAL"]
-    budget_account_id: str
-    date: date
+    client_operation_id: UUID
+    source_account_id: str
+    source_posted_date: date
+    source_status: TransactionStatus
+    destination_account_id: str
+    destination_posted_date: date
+    destination_status: TransactionStatus
     amount_minor: int = Field(gt=0)
-    status: TransactionStatus
     memo: str = ""
-    fund_shortfall: bool = True
+
+
+class CreditCardPaymentPayload(BaseModel):
+    client_operation_id: UUID
+    source_account_id: str
+    source_posted_date: date
+    source_status: TransactionStatus
+    destination_account_id: str
+    destination_posted_date: date
+    destination_status: TransactionStatus
+    amount_minor: int = Field(gt=0)
+    memo: str = ""
 
 
 class AccountPayload(BaseModel):
@@ -212,6 +235,8 @@ class CategoryPayload(BaseModel):
 
 
 class CategoryUpdatePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     group_id: str | None = None
     name: str | None = None
     sort_order: int | None = None
@@ -270,14 +295,14 @@ class InvestmentPositionPayload(BaseModel):
     effective_date: date
     ticker: str = Field(min_length=1)
     quantity_micros: int = Field(ge=0)
-    average_basis_minor: int | None = None
+    average_basis_minor: int = Field(ge=0)
 
 
 class InvestmentStatementHoldingPayload(BaseModel):
     ticker: str = Field(min_length=1)
     quantity_micros: int = Field(ge=0)
     price_minor: int = Field(gt=0)
-    average_basis_minor: int | None = Field(default=None, ge=0)
+    average_basis_minor: int = Field(ge=0)
 
 
 class InvestmentStatementPayload(BaseModel):
@@ -361,5 +386,33 @@ class TrackingCutoverPayload(BaseModel):
     operation_id: UUID
     cutover_date: date
     expected_predecessor_value_minor: int = Field(ge=0)
-    variance_confirmed: bool = False
+    final_predecessor_value_minor: int = Field(ge=0)
     successors: list[CutoverSuccessorPayload] = Field(min_length=1)
+
+
+class ReconciliationSourceRecordPayload(BaseModel):
+    source_record_id: str = Field(min_length=1)
+    posted_date: date
+    cleared_date: date | None = None
+    signed_amount_minor: int
+    source_status: TransactionStatus
+    description: str = ""
+    transaction_id: UUID | None = None
+    raw_payload: dict[str, object] | None = None
+
+
+class ReconciliationDraftPayload(BaseModel):
+    source_kind: Literal["BANK_STATEMENT", "CREDIT_CARD_STATEMENT", "INVESTMENT_STATEMENT"]
+    period_start: date | None = None
+    cutoff: date
+    source_ending_value_minor: int = Field(
+        validation_alias=AliasChoices(
+            "source_ending_value_minor", "ending_value_minor", "ending_balance_minor"
+        )
+    )
+    source_records: list[ReconciliationSourceRecordPayload] = Field(default_factory=list)
+
+
+class ReconciliationApplyPayload(BaseModel):
+    client_operation_id: UUID
+    balance_adjustment_minor: int | None = None

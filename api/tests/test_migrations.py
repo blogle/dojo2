@@ -31,7 +31,39 @@ def test_current_migration_set_provisions_fresh_database(tmp_path) -> None:
             "transactions",
             "allocations",
             "net_worth_valuations",
+            "financial_command_receipts",
+            "transaction_operations",
+            "transaction_operation_legs",
+            "reconciliation_commits",
+            "reconciliation_source_records",
+            "reconciliation_transaction_refs",
         } <= tables
+
+        receipt_columns = {
+            row["column_name"]: row
+            for row in database.fetch_all(
+                load_sql("queries/duckdb_columns_by_table"),
+                ("financial_command_receipts",),
+            )
+        }
+        assert receipt_columns["client_operation_id"]["is_nullable"] is False
+        assert receipt_columns["result"]["data_type"] == "JSON"
+
+        operation_leg_columns = {
+            row["column_name"]: row
+            for row in database.fetch_all(
+                load_sql("queries/duckdb_columns_by_table"),
+                ("transaction_operation_legs",),
+            )
+        }
+        assert {
+            "operation_id",
+            "transaction_id",
+            "leg_role",
+            "valid_from",
+            "valid_to",
+        } <= operation_leg_columns.keys()
+        assert database.fetch_all("SELECT * FROM current_transaction_operation_legs") == []
     finally:
         database.close()
 

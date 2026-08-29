@@ -15,6 +15,8 @@ from dojo.api.models import (
     CategoryGroupUpdatePayload,
     CategoryPayload,
     CategoryUpdatePayload,
+    CreditCardPaymentPayload,
+    FundCategoryRequest,
     GoalPayload,
     ImportCommitRequest,
     ImportRequest,
@@ -25,6 +27,8 @@ from dojo.api.models import (
     InvestmentTransferPayload,
     LoanBalanceSnapshotPayload,
     LoanPaymentPayload,
+    ReconciliationApplyPayload,
+    ReconciliationDraftPayload,
     TangibleAssetValuationPayload,
     TrackingAccountSnapshotPayload,
     TrackingCutoverPayload,
@@ -32,6 +36,7 @@ from dojo.api.models import (
     TransferPayload,
 )
 from dojo.api.settings import Settings
+from dojo.commands import CommandConflictError
 from dojo.google import (
     OAuthTokenStore,
     build_google_auth_url,
@@ -254,7 +259,23 @@ def budget(
 
 
 @router.post("/allocations/fund")
-def fund_category(request: Request, payload: AllocationRequest) -> dict[str, Any]:
+def fund_category(request: Request, payload: FundCategoryRequest) -> dict[str, Any]:
+    try:
+        return get_service(request).fund_category(
+            client_operation_id=str(payload.client_operation_id),
+            category_id=payload.category_id,
+            amount_minor=payload.amount_minor,
+            memo=payload.memo,
+            allocation_date=payload.date,
+        )
+    except CommandConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/allocations/move")
+def move_money(request: Request, payload: AllocationRequest) -> dict[str, Any]:
     return get_service(request).create_allocation(
         from_bucket_id=payload.from_bucket_id,
         to_bucket_id=payload.to_bucket_id,
@@ -264,14 +285,15 @@ def fund_category(request: Request, payload: AllocationRequest) -> dict[str, Any
     )
 
 
-@router.post("/allocations/move")
-def move_money(request: Request, payload: AllocationRequest) -> dict[str, Any]:
-    return fund_category(request, payload)
-
-
 @router.post("/allocations/return-to-atb")
 def return_to_atb(request: Request, payload: AllocationRequest) -> dict[str, Any]:
-    return fund_category(request, payload)
+    return get_service(request).create_allocation(
+        from_bucket_id=payload.from_bucket_id,
+        to_bucket_id=payload.to_bucket_id,
+        amount_minor=payload.amount_minor,
+        memo=payload.memo,
+        allocation_date=payload.date,
+    )
 
 
 @router.get("/allocations")
@@ -316,14 +338,20 @@ def transactions(
 
 @router.post("/transactions")
 def create_transaction(request: Request, payload: TransactionPayload) -> dict[str, Any]:
-    return get_service(request).create_transaction(payload.model_dump())
+    try:
+        return get_service(request).create_transaction(payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.put("/transactions/{transaction_id}")
 def update_transaction(
     request: Request, transaction_id: str, payload: TransactionPayload
 ) -> dict[str, Any]:
-    return get_service(request).update_transaction(transaction_id, payload.model_dump())
+    try:
+        return get_service(request).update_transaction(transaction_id, payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.delete("/transactions/{transaction_id}")
@@ -429,6 +457,47 @@ def latest_investment_statement(request: Request, account_id: str) -> dict[str, 
     return get_service(request).latest_investment_statement(account_id)
 
 
+@router.post("/accounts/{account_id}/reconciliations/draft")
+def create_reconciliation_draft(
+    request: Request, account_id: str, payload: ReconciliationDraftPayload
+) -> dict[str, Any]:
+    try:
+        return get_service(request).create_reconciliation_draft(account_id, payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/reconciliations/{reconciliation_id}")
+def get_reconciliation(request: Request, reconciliation_id: str) -> dict[str, Any]:
+    try:
+        return get_service(request).get_reconciliation(reconciliation_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/reconciliations/{reconciliation_id}/apply")
+def apply_reconciliation(
+    request: Request, reconciliation_id: str, payload: ReconciliationApplyPayload
+) -> dict[str, Any]:
+    try:
+        return get_service(request).apply_reconciliation(reconciliation_id, payload.model_dump())
+    except CommandConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        status = 409 if "stale" in str(exc).lower() else 400
+        raise HTTPException(status_code=status, detail=str(exc)) from exc
+
+
+@router.get("/accounts/{account_id}/reconciliations")
+def list_reconciliations(request: Request, account_id: str) -> dict[str, Any]:
+    return {"items": get_service(request).list_reconciliations(account_id)}
+
+
+@router.get("/accounts/{account_id}/reconciliation-working-set")
+def reconciliation_working_set(request: Request, account_id: str) -> dict[str, Any]:
+    return get_service(request).reconciliation_working_set(account_id)
+
+
 @router.get("/accounts/{account_id}/budget-links")
 def account_budget_links(request: Request, account_id: str) -> dict[str, Any]:
     return {"items": get_service(request).list_account_budget_links(account_id)}
@@ -445,7 +514,24 @@ def set_account_budget_link(
 def create_investment_transfer(
     request: Request, account_id: str, payload: InvestmentTransferPayload
 ) -> dict[str, Any]:
-    return get_service(request).create_investment_transfer(account_id, payload.model_dump())
+    try:
+        return get_service(request).create_investment_transfer(account_id, payload.model_dump())
+    except CommandConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/accounts/{account_id}/credit-card-payments")
+def create_credit_card_payment(
+    request: Request, account_id: str, payload: CreditCardPaymentPayload
+) -> dict[str, Any]:
+    try:
+        return get_service(request).create_credit_card_payment(account_id, payload.model_dump())
+    except CommandConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/accounts/{account_id}/cash-snapshots")
@@ -483,7 +569,14 @@ def create_tracking_snapshot(
 def create_tracking_cutover(
     request: Request, account_id: str, payload: TrackingCutoverPayload
 ) -> dict[str, Any]:
-    return get_service(request).create_tracking_cutover(account_id, payload.model_dump(mode="json"))
+    try:
+        return get_service(request).create_tracking_cutover(
+            account_id, payload.model_dump(mode="json")
+        )
+    except CommandConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/accounts/{account_id}/tracking-snapshots")

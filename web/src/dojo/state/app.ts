@@ -332,10 +332,7 @@ async function submitAllocation(payload: {
   memo: string;
   from_bucket_id: string;
   to_bucket_id: string;
-  path:
-    | "/api/allocations/fund"
-    | "/api/allocations/move"
-    | "/api/allocations/return-to-atb";
+  path: "/api/allocations/move" | "/api/allocations/return-to-atb";
 }): Promise<void> {
   await withSaving(async () => {
     await createAllocation(payload, payload.path);

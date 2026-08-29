@@ -49,6 +49,7 @@ const dateFilter = ref("all");
 const categoryFilter = ref("all");
 const amountFilter = ref("all");
 const statusFilter = ref("all");
+const activityFilter = ref<"all" | "spending" | "transfers">("all");
 
 const currentMonth = computed(() => {
   const now = new Date();
@@ -68,7 +69,20 @@ const { data: txPage } = useQuery({
     fetchTransactionsPage(false, 0, PAGE_SIZE, transactionFilters.value),
 });
 
-const transactions = computed(() => txPage.value?.items ?? []);
+const transactions = computed(() => {
+  const items = txPage.value?.items ?? [];
+  if (activityFilter.value === "transfers") {
+    return items.filter(
+      (transaction) => transaction.system_category === "TX_ACCOUNT_TRANSFER",
+    );
+  }
+  if (activityFilter.value === "spending") {
+    return items.filter(
+      (transaction) => transaction.system_category !== "TX_ACCOUNT_TRANSFER",
+    );
+  }
+  return items;
+});
 
 const { data: accounts } = useQuery({
   queryKey: QUERY_KEYS.accounts,
@@ -178,17 +192,17 @@ const navItems = computed(() => [
 const metrics = computed<MetricStripItem[]>(() => [
   {
     key: "inflow",
-    label: "Inflow",
+    label: activityFilter.value === "spending" ? "Inflow" : "Gross Inflow",
     value: formatCurrency(inflow.value),
   },
   {
     key: "outflow",
-    label: "Outflow",
+    label: activityFilter.value === "spending" ? "Outflow" : "Gross Outflow",
     value: formatCurrency(outflow.value),
   },
   {
     key: "net",
-    label: "Net",
+    label: activityFilter.value === "spending" ? "Net" : "Net Flow",
     value: formatCurrency(net.value),
   },
 ]);
@@ -347,11 +361,13 @@ onUnmounted(() => {
         :category-filter="categoryFilter"
         :amount-filter="amountFilter"
         :status-filter="statusFilter"
+        :activity-filter="activityFilter"
         @update:account-filter="accountFilter = $event"
         @update:date-filter="dateFilter = $event"
         @update:category-filter="categoryFilter = $event"
         @update:amount-filter="amountFilter = $event"
         @update:status-filter="statusFilter = $event"
+        @update:activity-filter="activityFilter = $event"
       />
 
       <TransactionLedger

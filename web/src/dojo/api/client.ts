@@ -249,12 +249,22 @@ export async function createAllocation(
     from_bucket_id: string;
     to_bucket_id: string;
   },
-  path:
-    | "/api/allocations/fund"
-    | "/api/allocations/move"
-    | "/api/allocations/return-to-atb",
+  path: "/api/allocations/move" | "/api/allocations/return-to-atb",
 ): Promise<void> {
   await request(path, { method: "POST", body: JSON.stringify(payload) });
+}
+
+export async function fundCategory(payload: {
+  client_operation_id: string;
+  date: string;
+  category_id: string;
+  amount_minor: number;
+  memo: string;
+}): Promise<{ allocation_id: string }> {
+  return request("/api/allocations/fund", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
 export async function createTransaction(
@@ -366,6 +376,7 @@ export type TrackingCutoverSuccessor =
         ticker: string;
         quantity_micros: number;
         price_minor: number;
+        average_basis_minor: number;
       }>;
     }
   | {
@@ -391,7 +402,7 @@ export async function createTrackingCutover(
     operation_id: string;
     cutover_date: string;
     expected_predecessor_value_minor: number;
-    variance_confirmed: boolean;
+    final_predecessor_value_minor: number;
     successors: TrackingCutoverSuccessor[];
   },
 ): Promise<{
@@ -449,9 +460,11 @@ export type InvestmentStatementHolding = {
   position_id: string;
   ticker: string;
   quantity_micros: number;
-  average_basis_minor: number | null;
+  average_basis_minor: number;
   price_minor: number;
   value_minor: number;
+  cost_basis_minor: number;
+  unrealized_gain_minor: number;
 };
 
 export type InvestmentStatement = {
@@ -459,6 +472,8 @@ export type InvestmentStatement = {
   cash_balance_minor: number | null;
   holdings: InvestmentStatementHolding[];
   holdings_value_minor: number | null;
+  holdings_cost_basis_minor: number | null;
+  unrealized_gain_minor: number | null;
   current_value_minor: number | null;
   provisional_transfer_minor: number;
 };
@@ -480,7 +495,7 @@ export async function reconcileInvestmentStatement(
       ticker: string;
       quantity_micros: number;
       price_minor: number;
-      average_basis_minor?: number;
+      average_basis_minor: number;
     }>;
     notes?: string;
   },
@@ -489,6 +504,68 @@ export async function reconcileInvestmentStatement(
     method: "POST",
     body: JSON.stringify(payload),
   });
+}
+
+export type ReconciliationSourceRecord = {
+  source_record_id: string;
+  posted_date: string;
+  cleared_date?: string | null;
+  signed_amount_minor: number;
+  source_status: "PENDING" | "CLEARED";
+  description?: string;
+  transaction_id?: string | null;
+  raw_payload?: Record<string, unknown> | null;
+};
+
+export type ReconciliationDraft = {
+  reconciliation_id: string;
+  account_id: string;
+  state: string;
+  source_kind: string;
+  cutoff: string;
+  source_ending_value_minor: number;
+  ledger_value_minor: number;
+  difference_minor: number;
+  baseline_digest: string;
+  classifications: Record<string, unknown>;
+};
+
+export async function createReconciliationDraft(
+  accountId: string,
+  payload: {
+    source_kind:
+      | "BANK_STATEMENT"
+      | "CREDIT_CARD_STATEMENT"
+      | "INVESTMENT_STATEMENT";
+    period_start?: string;
+    cutoff: string;
+    source_ending_value_minor: number;
+    source_records?: ReconciliationSourceRecord[];
+  },
+): Promise<ReconciliationDraft> {
+  return request(`/api/accounts/${accountId}/reconciliations/draft`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function applyReconciliation(
+  reconciliationId: string,
+  payload: {
+    client_operation_id: string;
+    balance_adjustment_minor?: number | null;
+  },
+): Promise<Record<string, unknown>> {
+  return request(`/api/reconciliations/${reconciliationId}/apply`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function fetchReconciliationWorkingSet(
+  accountId: string,
+): Promise<Record<string, unknown>> {
+  return request(`/api/accounts/${accountId}/reconciliation-working-set`);
 }
 
 export type AccountBudgetLink = {
@@ -526,21 +603,42 @@ export async function createInvestmentTransfer(
   accountId: string,
   payload: {
     direction: "CONTRIBUTION" | "WITHDRAWAL";
-    budget_account_id: string;
-    date: string;
+    client_operation_id: string;
+    source_account_id: string;
+    source_posted_date: string;
+    source_status: "PENDING" | "CLEARED";
+    destination_account_id: string;
+    destination_posted_date: string;
+    destination_status: "PENDING" | "CLEARED";
     amount_minor: number;
-    status: "PENDING" | "CLEARED";
     memo: string;
-    fund_shortfall: boolean;
   },
 ): Promise<{
-  transfer_id: string;
   source_transaction_id: string;
   destination_transaction_id: string;
-  funded_shortfall_minor: number;
   linked_category_id: string | null;
 }> {
   return request(`/api/accounts/${accountId}/investment-transfers`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function createCreditCardPayment(
+  accountId: string,
+  payload: {
+    client_operation_id: string;
+    source_account_id: string;
+    source_posted_date: string;
+    source_status: "PENDING" | "CLEARED";
+    destination_account_id: string;
+    destination_posted_date: string;
+    destination_status: "PENDING" | "CLEARED";
+    amount_minor: number;
+    memo: string;
+  },
+): Promise<Record<string, unknown>> {
+  return request(`/api/accounts/${accountId}/credit-card-payments`, {
     method: "POST",
     body: JSON.stringify(payload),
   });

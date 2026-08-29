@@ -9,7 +9,6 @@ export type AppStatus = {
 
 export type Transaction = {
   transaction_id: string;
-  transfer_id?: string | null;
   date: string;
   account_id: string;
   account_name: string;
@@ -22,6 +21,8 @@ export type Transaction = {
   is_hidden_entity: boolean;
   transfer_counterparty_account_id?: string | null;
   transfer_counterparty_account_name?: string | null;
+  operation_id?: string | null;
+  operation_kind?: string | null;
 };
 
 export type CategoryActivity = {
@@ -71,7 +72,11 @@ export type Account = {
   value_source?: string;
   value_effective_date?: string | null;
   change_30d_minor?: number | null;
-  reconciliation_status?: "CURRENT" | "NOT_RECONCILED" | "PROVISIONAL";
+  reconciliation_status?:
+    | "CURRENT"
+    | "NOT_RECONCILED"
+    | "REOPENED"
+    | "PROVISIONAL";
   provisional_value_minor?: number;
   investment_self_managed?: boolean | null;
   investment_tax_treatment?: string | null;
@@ -260,6 +265,12 @@ export type GoogleOnboardingStatus = {
   message: string;
   auth_url?: string | null;
 };
+
+export type TransactionSystemCategory =
+  | "TX_AVAILABLE_TO_BUDGET"
+  | "TX_ACCOUNT_TRANSFER"
+  | "TX_STARTING_BALANCE"
+  | "TX_BALANCE_ADJUSTMENT";
 
 export type TransactionPayload = {
   date: string;

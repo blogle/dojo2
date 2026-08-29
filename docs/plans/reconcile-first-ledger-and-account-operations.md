@@ -22,14 +22,15 @@ The application is not considered MVP-ready until account-local reconciliation e
 - [x] (2026-08-21) Agreed that pending transfer legs may settle on different dates and statuses, and pending investment contributions consume their linked category on entry.
 - [x] (2026-08-21) Agreed to exclude investment-to-investment transfers from the MVP.
 - [x] (2026-08-21) Reviewed this plan twice, corrected recovery and concurrency gaps, and verified it with `git diff --check` and `just docs`.
-- [ ] Milestone 1: establish the hard-cut ledger-operation schema and idempotent financial command boundary.
-- [ ] Milestone 2: repair category funding and defensive request validation.
-- [ ] Milestone 3: repair tracking cutover reconciliation inputs, investment holding semantics, and successor navigation.
-- [ ] Milestone 4: implement unified manual ledger entry and link-independent transfer calculations.
-- [ ] Milestone 5: complete account-detail investment and credit-card rich operations.
-- [ ] Milestone 6: implement account-local reconciliation evidence, working sets, and correction flow.
-- [ ] Milestone 7: add optional provenance presentation foundations without historical auto-matching.
-- [ ] Milestone 8: run focused browser acceptance and the complete repository verification gate.
+- [x] (2026-08-21) Milestone 1: added the fresh-schema command receipt and operation-provenance foundation, canonical fingerprints, JSON-stable replay, SCD2 link/relink/unlink, singleton and separate-connection concurrency coverage, and financial-invariance proof.
+- [x] (2026-08-21) Milestone 2: replaced derived category mutation with idempotent semantic funding, active allocatable-category validation, negative-ATB persistence, success-only modal close, retry-stable operation identity, and focused backend/component coverage.
+- [x] (2026-08-29) Milestone 3: added exact contemporary cutover reconciliation, required average cost, dated unrealized gain calculations, idempotent cutover, and correct successor navigation.
+- [x] (2026-08-29) Milestone 4: added unified budget/investment ledger entry, strict new-entry combinations, transfer event ordering, link-independent ATB, all/spending/transfer views, and hard-cut removal of `transactions.transfer_id`.
+- [x] (2026-08-21) Milestone 5: added receipt-backed investment contribution/withdrawal and credit-card payment operations with independent leg evidence, no auto-funding, operation provenance reads, and account-detail controls.
+- [x] (2026-08-21) Milestone 6: implemented account-local reconciliation evidence, working sets, digest-checked correction flow, reopening status, and a balance-first budget-account action.
+- [x] (2026-08-21) Milestone 6 verification: migration, integration (70 tests), property (16 tests), frontend (272 tests), lint, formatting, typecheck, and architecture checks pass; focused reconciliation tests cover comparison, explicit adjustment, and reopening.
+- [x] (2026-08-29) Milestone 7: rich operations expose operation-relation counterpart provenance while manual/imported rows remain truthfully unlinked; historical matching remains deferred.
+- [x] (2026-08-29) Milestone 8: completed the repository gate, 74 backend integration tests, 16 property tests, 272 frontend tests, and seven browser scenarios. Cold E2E baseline generation exceeded budget; the immediate warm rerun passed every functional and performance budget.
 
 ## Surprises & Discoveries
 
@@ -57,8 +58,35 @@ The application is not considered MVP-ready until account-local reconciliation e
 - Observation: Existing rich financial POST operations are not idempotent.
   Evidence: generic transaction and transfer services generate new UUIDs on every request; a retry can duplicate rows and investment shortfall allocations.
 
+- Observation: Physically removing `transactions.transfer_id` in Milestone 1 would force the link-independent ATB and transaction-presentation cutover to happen before their Milestone 4 tests exist.
+  Evidence: current ATB and counterparty readers still query `transfer_id`. Milestone 1 therefore adds the new operation/receipt foundation without using it financially; Milestone 4 removes the legacy column and readers in the same fresh-schema change that proves link-independent behavior.
+
+- Observation: DuckDB can allow two separate connections to begin the same idempotent command before either receipt is visible.
+  Evidence: Milestone 1's separate-connection concurrency test forces both mutations to start. The losing transaction rolls back on the write conflict, waits for the winning receipt, and returns the committed JSON-stable result; one receipt and one financial effect remain.
+
+- Observation: Provenance SCD invariants rely on dojo's documented singleton writer for normal operation, while receipt identity also has a database primary key and cross-connection recovery.
+  Evidence: `Database.transaction()` serializes one application connection. Operation helpers validate one current relation per transaction and one role per operation; operation relations are non-financial and are changed only through that writer boundary.
+
+- Observation: Resetting a funding modal draft when Save is clicked defeats idempotent retry even when the backend is correct.
+  Evidence: the first funding implementation cleared custom amount immediately after emit. Milestone 2 now resets only when the modal closes, and a component test proves a failed request retries with the same operation ID and amount.
+
+- Observation: Ending-balance reconciliation must separate statement-period matching from the all-history balance equation.
+  Evidence: final review found that summing only rows after `period_start` omits opening history. Draft/apply baselines now cover all current rows through cutoff while source classifications remain period-bounded; investment ending value uses holdings plus cash and cleared provisional transfers.
+
+- Observation: E2E baseline-generation performance is sensitive to cold cache state while scenario execution remains stable.
+  Evidence: final cold generation took 3.95 seconds against a 3.0-second budget and all seven scenarios passed. The immediate warm run generated in 0.94 seconds and passed every functional and performance budget.
+
 - Observation: The working tree contained unrelated onboarding, OAuth, import, and frontend proxy edits before this plan was created.
   Evidence: `git status --short` on 2026-08-21 listed `CHANGELOG.md`, `api/src/dojo/api/routes.py`, `api/src/dojo/google.py`, `api/src/dojo/importer.py`, `api/tests/test_api_endpoints.py`, `api/tests/test_google.py`, `api/tests/test_importer.py`, `web/src/dojo/api/client.ts`, `web/src/dojo/pages/OnboardingPage.vue`, `web/src/dojo/state/app.ts`, `web/src/dojo/types.ts`, `web/tests/App.test.ts`, `web/vite.config.ts`, and untracked `tmp/`. Those changes must not be staged, reformatted, overwritten, or deleted by this work unless their owner explicitly integrates them later.
+
+- Observation: The existing investment statement status is specialized source-of-truth evidence and must not be replaced by an empty generic reconciliation history.
+  Evidence: The account-value integration test expects an investment with a statement and no provisional transfers to remain `CURRENT`; generic reconciliation status is overlaid only when a generic commit exists or the account is reopened.
+
+- Observation: The account-local MVP accepts and classifies normalized source records through the backend while the first account-detail action remains balance-first.
+  Evidence: The draft endpoint persists source evidence and returns exact/source-only/local-only/duplicate/mismatch classifications; the modal intentionally submits no source records and explains that the API contract is available for richer clients.
+
+- Observation: Duplicate source identities must be retained as evidence rather than rejected by the evidence table.
+  Evidence: The source-record primary key uses evidence ID plus upload ordinal; duplicate provider IDs are then classified by the pure comparison function.
 
 ## Decision Log
 
@@ -118,6 +146,14 @@ The application is not considered MVP-ready until account-local reconciliation e
   Rationale: Relationship review must not silently rewrite amounts, dates, accounts, statuses, categories, or historical balances.
   Date/Author: 2026-08-21 / product owner and opencode
 
+- Decision: Use the existing `financial_command_receipts` command boundary for reconciliation apply idempotency instead of adding a separate apply ledger.
+  Rationale: Apply is the only reconciliation operation that may create money. Reusing the existing receipt table gives exact retry/conflict behavior while keeping reconciliation evidence immutable and the schema minimal.
+  Date/Author: 2026-08-21 / opencode
+
+- Decision: Ship a truthful balance-first account-detail action and keep source-record decision editing out of this milestone.
+  Rationale: The backend contract, persisted evidence, classification, stale-draft protection, and explicit adjustment path are release-critical. A partial source-review editor would imply decisions it cannot persist safely; the modal instead previews the balance and requires an explicit adjustment choice.
+  Date/Author: 2026-08-21 / opencode
+
 - Decision: Tracking cutover requires an explicitly entered same-date final tracking value that exactly equals the signed successor opening total.
   Rationale: Cash and holdings are independent user inputs. A contemporary source snapshot eliminates time-delta ambiguity and prevents the representation change from creating a net-worth jump.
   Date/Author: 2026-08-21 / product owner and opencode
@@ -128,7 +164,7 @@ The application is not considered MVP-ready until account-local reconciliation e
 
 ## Outcomes & Retrospective
 
-Planning is complete. No implementation outcome is claimed yet. The principal design outcome is a separation between financial facts, optional operation provenance, and account-local reconciliation evidence. The largest implementation risk is allowing malformed independent transfer legs to produce plausible global totals before reconciliation. The product explicitly accepts that temporary state, so UI reconciliation status and a fast correction workflow are release-critical rather than optional polish.
+Milestones 1–8 are implemented and verified in the current worktree. Category funding persists allocations; tracking cutover records exact same-date evidence and routes to successors; manual and imported transfer legs remain first-class financial rows; rich investment and credit-card actions add optional operation provenance; and account-local reconciliation persists source evidence, all-history ending-balance baselines through cutoff, exact transaction versions, explicit adjustments, and reopening state. The fresh schema no longer contains `transactions.transfer_id`, so provenance has one canonical non-financial representation. Investment statement evidence remains authoritative when no generic commit exists, and generic investment drafts compare ending value against holdings plus cash and cleared provisional transfers. The remaining deliberate gap is a rich source-record decision UI and optional historical counterpart matcher; the current modal is a truthful balance-first path, while backend source-record comparison is available and tested. Cold E2E baseline generation remains an environmental performance sensitivity documented above.
 
 ## Context and Orientation
 
@@ -345,3 +381,5 @@ At the end of Milestone 3, the operation interface must support an immutable cli
 Revision note (2026-08-21): Initial plan created after product-owner manual validation and adversarial review of funding, cutover, transfer, provenance, and reconciliation behavior. It records the decision to make reconciliation—not transfer pairing—the financial correctness gate.
 
 Revision note (2026-08-21): Expanded recovery, command-idempotency ordering, per-leg rich-operation inputs, transfer-boundary rules, reconciliation schemas and digests, milestone-specific verification, and path-scoped commit safety after independent plan review.
+
+Revision note (2026-08-21): Implemented Milestone 6 with a minimal four-table evidence schema, pure comparison/digest code, idempotent apply, backend classification contract, reopening-by-query, investment-status preservation, and balance-first account-detail UI; source-record decision UI remains explicitly deferred rather than partially implemented.

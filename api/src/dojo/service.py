@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import hashlib
-import json
 from collections import defaultdict
+from dataclasses import replace
 from datetime import date, datetime, timedelta
+from hashlib import sha256
 from time import perf_counter
 from typing import Any, cast
 from uuid import NAMESPACE_URL, uuid4, uuid5
@@ -19,6 +19,7 @@ from dojo.account_values import (
 )
 from dojo.aggregate_validation import build_validation_report
 from dojo.clock import Clock, SystemClock, budget_month
+from dojo.commands import execute_financial_command
 from dojo.constants import (
     ACCOUNT_CLASS_BUDGET,
     ACCOUNT_CLASS_INVESTMENT,
@@ -51,7 +52,17 @@ from dojo.importer import (
     fixture_bundle,
     parse_named_range_workbook,
 )
+from dojo.investment import position_amount_minor, position_metrics
 from dojo.loan_projection import LoanProjectionTerms, PaymentFrequency, project_loan
+from dojo.operations import create_transaction_operation, link_transaction_operation
+from dojo.reconciliation import (
+    LocalRecord,
+    SourceRecord,
+    baseline_digest,
+    compare_records,
+    source_digest,
+    transaction_digest,
+)
 from dojo.scd import (
     batch_insert_versions,
     close_current_version,
@@ -59,6 +70,7 @@ from dojo.scd import (
     replace_current_version,
 )
 from dojo.sql import load_sql, render_sql
+from dojo.transfer_boundary import TransferBoundaryFact, compute_transfer_boundary_adjustment
 
 
 class ImportValidationError(Exception):
@@ -1178,6 +1190,13 @@ class DojoService:
             ) == BUDGET_ACCOUNT_TYPE_CREDIT_CARD and account.get("display_liability_positive"):
                 display_balance = -display_balance
             value = values[account_id]
+            if account["account_class"] in {ACCOUNT_CLASS_BUDGET, ACCOUNT_CLASS_INVESTMENT}:
+                reconciliation_status = self.get_reconciliation_status(account_id)
+                if not (
+                    account["account_class"] == ACCOUNT_CLASS_INVESTMENT
+                    and reconciliation_status == "NOT_RECONCILED"
+                ):
+                    value = replace(value, reconciliation_status=reconciliation_status)
             results.append(
                 account
                 | {
@@ -1453,34 +1472,28 @@ class DojoService:
             tuple(query_params),
         )
 
-        transfer_accounts: dict[str, list[dict[str, Any]]] = defaultdict(list)
-        transfer_ids = sorted(
-            {str(row["transfer_id"]) for row in rows if row.get("transfer_id") is not None}
-        )
-        if transfer_ids:
-            transfer_placeholders = ",".join("?" for _ in transfer_ids)
-            for transfer_row in self.db.fetch_all(
+        operation_accounts: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        transaction_ids = [str(row["transaction_id"]) for row in rows]
+        if transaction_ids:
+            placeholders = ",".join("?" for _ in transaction_ids)
+            for operation_row in self.db.fetch_all(
                 render_sql(
-                    "queries/transfer_accounts_by_ids",
-                    transfer_placeholders=transfer_placeholders,
+                    "queries/transaction_operation_accounts_by_transaction_ids",
+                    transaction_placeholders=placeholders,
                 ),
-                tuple(transfer_ids),
+                tuple(transaction_ids),
             ):
-                transfer_accounts[str(transfer_row["transfer_id"])].append(transfer_row)
+                operation_accounts[str(operation_row["transaction_id"])].append(operation_row)
 
         results: list[dict[str, Any]] = []
         for row in rows:
             account = accounts[row["account_id"]]
             category = categories.get(row["category_id"])
             hidden = account["is_hidden"] or (category["is_hidden"] if category else False)
-            counterpart = next(
-                (
-                    candidate
-                    for candidate in transfer_accounts.get(str(row.get("transfer_id")), [])
-                    if candidate["transaction_id"] != row["transaction_id"]
-                ),
-                None,
+            operation_counterpart = next(
+                iter(operation_accounts.get(str(row["transaction_id"]), [])), None
             )
+            counterpart = operation_counterpart
             results.append(
                 row
                 | {
@@ -1488,10 +1501,22 @@ class DojoService:
                     "category_name": category["name"] if category else None,
                     "is_hidden_entity": hidden,
                     "transfer_counterparty_account_id": (
-                        str(counterpart["account_id"]) if counterpart else None
+                        str(
+                            counterpart.get("counterpart_account_id", counterpart.get("account_id"))
+                        )
+                        if counterpart
+                        else None
                     ),
                     "transfer_counterparty_account_name": (
                         counterpart["account_name"] if counterpart else None
+                    ),
+                    "operation_id": (
+                        str(operation_counterpart["operation_id"])
+                        if operation_counterpart
+                        else None
+                    ),
+                    "operation_kind": (
+                        operation_counterpart["operation_kind"] if operation_counterpart else None
                     ),
                 }
             )
@@ -2033,10 +2058,84 @@ class DojoService:
             )
         return {"allocation_id": allocation_id}
 
+    def fund_category(
+        self,
+        *,
+        client_operation_id: str,
+        category_id: str,
+        amount_minor: int,
+        memo: str,
+        allocation_date: date,
+    ) -> dict[str, Any]:
+        if amount_minor <= 0:
+            raise ValueError("Funding amount must be positive")
+        now = self.clock.now()
+        request = {
+            "category_id": category_id,
+            "amount_minor": amount_minor,
+            "memo": memo,
+            "date": allocation_date,
+        }
+
+        def apply_funding(
+            connection: duckdb.DuckDBPyConnection, _fingerprint: str
+        ) -> dict[str, Any]:
+            category_cursor = connection.execute(
+                load_sql("queries/current_category_by_id"),
+                (category_id,),
+            )
+            category_row = category_cursor.fetchone()
+            if category_row is None:
+                raise ValueError("Category not found")
+            category = dict(
+                zip(
+                    [column[0] for column in category_cursor.description],
+                    category_row,
+                    strict=True,
+                )
+            )
+            if not category["is_active"] or category["category_kind"] != CATEGORY_KIND_STANDARD:
+                raise ValueError("Funding requires an active standard category")
+
+            bucket = connection.execute(
+                load_sql("queries/current_allocatable_budget_bucket_by_category"),
+                (category_id,),
+            ).fetchone()
+            if bucket is None:
+                raise ValueError("Category does not have an allocatable budget bucket")
+
+            allocation_id = str(uuid4())
+            insert_version(
+                connection,
+                "allocations",
+                {
+                    "allocation_id": allocation_id,
+                    "date": allocation_date,
+                    "from_bucket_id": str(SYSTEM_ATB_BUCKET_ID),
+                    "to_bucket_id": str(bucket[0]),
+                    "amount_minor": amount_minor,
+                    "memo": memo,
+                    "valid_from": now,
+                    "valid_to": MAX_TS,
+                    "created_at": now,
+                    "created_by_user_id": None,
+                },
+            )
+            return {"allocation_id": allocation_id}
+
+        return execute_financial_command(
+            self.db,
+            client_operation_id=client_operation_id,
+            command_kind="FUND_CATEGORY",
+            request=request,
+            command=apply_funding,
+            now=now,
+        )
+
     def create_transaction(self, payload: dict[str, Any]) -> dict[str, Any]:
         now = self.clock.now()
         transaction_id = str(uuid4())
-        self._validate_transaction_payload(payload)
+        self._validate_transaction_payload(payload, new_entry=True)
         insert_after_id = payload.get("insert_after_transaction_id")
         with self.db.transaction() as connection:
             if insert_after_id is not None:
@@ -2055,12 +2154,16 @@ class DojoService:
             else:
                 max_row = connection.execute(load_sql("queries/max_entry_order")).fetchone()
                 entry_order = int(max_row[0]) + 1 if max_row else 1
+            record_order = (
+                self._next_financial_event_order(connection)
+                if payload.get("system_category") == SYSTEM_CATEGORY_TRANSFER
+                else None
+            )
             insert_version(
                 connection,
                 "transactions",
                 {
                     "transaction_id": transaction_id,
-                    "transfer_id": None,
                     "date": payload["date"],
                     "account_id": payload["account_id"],
                     "amount_minor": payload["amount_minor"],
@@ -2069,6 +2172,7 @@ class DojoService:
                     "status": payload["status"],
                     "memo": payload.get("memo", ""),
                     "entry_order": entry_order,
+                    "record_order": record_order,
                     "valid_from": now,
                     "valid_to": MAX_TS,
                     "created_at": now,
@@ -2103,7 +2207,6 @@ class DojoService:
                 {
                     "row_id": str(uuid4()),
                     "transaction_id": transaction_id,
-                    "transfer_id": current.get("transfer_id"),
                     "date": payload["date"],
                     "account_id": payload["account_id"],
                     "amount_minor": payload["amount_minor"],
@@ -2170,7 +2273,6 @@ class DojoService:
                 "transactions",
                 {
                     "transaction_id": transaction_id,
-                    "transfer_id": latest_closed.get("transfer_id"),
                     "date": latest_closed["date"],
                     "account_id": latest_closed["account_id"],
                     "amount_minor": latest_closed["amount_minor"],
@@ -2257,71 +2359,21 @@ class DojoService:
         self, investment_account_id: str, payload: dict[str, Any]
     ) -> dict[str, Any]:
         self._require_account_class(investment_account_id, ACCOUNT_CLASS_INVESTMENT)
-        self._require_account_class(payload["budget_account_id"], ACCOUNT_CLASS_BUDGET)
-        direction = payload["direction"]
-        transfer_date = payload["date"]
-        if isinstance(transfer_date, str):
-            transfer_date = date.fromisoformat(transfer_date)
-        amount_minor = payload["amount_minor"]
-        if direction == "CONTRIBUTION":
-            from_account_id = payload["budget_account_id"]
-            to_account_id = investment_account_id
-        else:
-            from_account_id = investment_account_id
-            to_account_id = payload["budget_account_id"]
-
-        link = self._effective_account_budget_link(
-            investment_account_id,
-            LINK_BEHAVIOR_INVESTMENT_CONTRIBUTION,
-            transfer_date,
+        return self._create_rich_account_operation(
+            endpoint_account_id=investment_account_id,
+            payload=payload,
+            operation_kind=f"INVESTMENT_{payload['direction']}",
         )
-        if direction == "CONTRIBUTION" and link is None:
-            raise ValueError("Configure an investment contribution category before contributing")
-        if direction == "WITHDRAWAL":
-            current_value = self._investment_values(
-                self.db.fetch_all(load_sql("queries/list_accounts")), self.clock.today()
-            ).get(investment_account_id)
-            if current_value is None or current_value[0] < amount_minor:
-                raise ValueError("Withdrawal exceeds the current investment value")
 
-        funded_minor = 0
-        now = self.clock.now()
-        with self.db.transaction() as connection:
-            if direction == "CONTRIBUTION" and link and payload.get("fund_shortfall", True):
-                available = self.compute_category_available(str(link["category_id"]))
-                funded_minor = max(amount_minor - available, 0)
-                if funded_minor:
-                    insert_version(
-                        connection,
-                        "allocations",
-                        {
-                            "allocation_id": str(uuid4()),
-                            "date": transfer_date,
-                            "from_bucket_id": str(SYSTEM_ATB_BUCKET_ID),
-                            "to_bucket_id": self._bucket_id_for_category(str(link["category_id"])),
-                            "amount_minor": funded_minor,
-                            "memo": "Fund investment contribution shortfall",
-                            "valid_from": now,
-                            "valid_to": MAX_TS,
-                            "created_at": now,
-                            "created_by_user_id": None,
-                        },
-                    )
-            result = self._insert_transfer(
-                connection,
-                from_account_id=from_account_id,
-                to_account_id=to_account_id,
-                amount_minor=amount_minor,
-                transfer_date=transfer_date,
-                memo=payload.get("memo", ""),
-                status=payload["status"],
-                now=now,
-            )
-        return result | {
-            "direction": direction,
-            "funded_shortfall_minor": funded_minor,
-            "linked_category_id": str(link["category_id"]) if link else None,
-        }
+    def create_credit_card_payment(
+        self, credit_card_account_id: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        self._require_account_class(credit_card_account_id, ACCOUNT_CLASS_BUDGET)
+        return self._create_rich_account_operation(
+            endpoint_account_id=credit_card_account_id,
+            payload=payload,
+            operation_kind="CREDIT_CARD_PAYMENT",
+        )
 
     def create_account(self, payload: dict[str, Any]) -> dict[str, Any]:
         now = self.clock.now()
@@ -2527,29 +2579,38 @@ class DojoService:
     def create_tracking_cutover(
         self, predecessor_account_id: str, payload: dict[str, Any]
     ) -> dict[str, Any]:
-        with self.db.transaction() as connection:
+        now = self.clock.now()
+
+        def apply_cutover(
+            connection: duckdb.DuckDBPyConnection, request_fingerprint: str
+        ) -> dict[str, Any]:
             return self._create_tracking_cutover_in_transaction(
-                connection, predecessor_account_id, payload
+                connection,
+                predecessor_account_id,
+                payload,
+                request_fingerprint=request_fingerprint,
+                now=now,
             )
+
+        return execute_financial_command(
+            self.db,
+            client_operation_id=payload["operation_id"],
+            command_kind="TRACKING_CUTOVER",
+            request={"predecessor_account_id": predecessor_account_id} | payload,
+            command=apply_cutover,
+            now=now,
+        )
 
     def _create_tracking_cutover_in_transaction(
         self,
         connection: duckdb.DuckDBPyConnection,
         predecessor_account_id: str,
         payload: dict[str, Any],
+        *,
+        request_fingerprint: str,
+        now: datetime,
     ) -> dict[str, Any]:
         operation_id = str(payload["operation_id"])
-        fingerprint = hashlib.sha256(
-            json.dumps(payload, sort_keys=True, default=str, separators=(",", ":")).encode()
-        ).hexdigest()
-        existing_cutover = self.db.fetch_one(
-            load_sql("queries/tracking_cutover_by_operation"), (operation_id,)
-        )
-        if existing_cutover is not None:
-            if existing_cutover["request_fingerprint"] != fingerprint:
-                raise ValueError("Cutover operation_id was already used with different content")
-            return self._tracking_cutover_response(existing_cutover)
-
         predecessor = self.db.fetch_one(
             load_sql("queries/current_account_by_id"), (predecessor_account_id,)
         )
@@ -2609,16 +2670,13 @@ class DojoService:
 
         successor_total = sum(successor_values)
         predecessor_is_liability = tracking_details["polarity"] == "LIABILITY"
-        if (predecessor_is_liability and successor_total > 0) or (
-            not predecessor_is_liability and successor_total < 0
-        ):
-            raise ValueError("Successor total has the wrong polarity for the tracking account")
-        signed_prior = -prior_amount if predecessor_is_liability else prior_amount
-        variance = successor_total - signed_prior
-        if variance and not payload.get("variance_confirmed", False):
-            raise ValueError("Confirm the cutover variance before applying")
+        final_predecessor_amount = int(payload["final_predecessor_value_minor"])
+        signed_final_predecessor = (
+            -final_predecessor_amount if predecessor_is_liability else final_predecessor_amount
+        )
+        if successor_total != signed_final_predecessor:
+            raise ValueError("Successor total must equal the final tracking value")
 
-        now = self.clock.now()
         existing_final = self.db.fetch_one(
             load_sql("queries/current_tracking_valuation_by_account_date"),
             (predecessor_account_id, cutover_date),
@@ -2637,7 +2695,7 @@ class DojoService:
             "account_id": predecessor_account_id,
             "raw_name": existing_final["raw_name"] if existing_final else "",
             "effective_date": cutover_date,
-            "amount_minor": abs(successor_total),
+            "amount_minor": final_predecessor_amount,
             "notes": "Final tracking value at representation cutover",
             "metadata": json_dumps({"source": "cutover", "operation_id": operation_id}),
             "created_at": existing_final["created_at"] if existing_final else now,
@@ -2679,10 +2737,10 @@ class DojoService:
                 operation_id,
                 predecessor_account_id,
                 cutover_date,
-                signed_prior,
+                signed_final_predecessor,
                 successor_total,
                 final_valuation_id,
-                fingerprint,
+                request_fingerprint,
                 now,
             ),
         )
@@ -2865,7 +2923,7 @@ class DojoService:
                     "ticker": payload["ticker"].strip().upper(),
                     "effective_date": effective_date,
                     "quantity_micros": payload["quantity_micros"],
-                    "average_basis_minor": payload.get("average_basis_minor"),
+                    "average_basis_minor": payload["average_basis_minor"],
                     "valid_from": now,
                     "valid_to": MAX_TS,
                     "created_at": now,
@@ -2984,7 +3042,7 @@ class DojoService:
                         "ticker": ticker,
                         "effective_date": effective_date,
                         "quantity_micros": holding["quantity_micros"],
-                        "average_basis_minor": holding.get("average_basis_minor"),
+                        "average_basis_minor": holding["average_basis_minor"],
                         "valid_from": now,
                         "valid_to": MAX_TS,
                         "created_at": (matched_position["created_at"] if matched_position else now),
@@ -3039,12 +3097,15 @@ class DojoService:
                 "cash_balance_minor": None,
                 "holdings": [],
                 "holdings_value_minor": None,
+                "holdings_cost_basis_minor": None,
+                "unrealized_gain_minor": None,
                 "current_value_minor": None,
                 "provisional_transfer_minor": 0,
             }
         effective_date = cash["effective_date"]
         holdings = []
         holdings_value = 0
+        holdings_cost_basis = 0
         for position in self.db.fetch_all(
             load_sql("queries/current_investment_positions_by_account_date"),
             (account_id, effective_date),
@@ -3055,15 +3116,22 @@ class DojoService:
             )
             if price is None:
                 raise ValueError(f"Missing statement price for {position['ticker']}")
-            value_minor = (
-                int(position["quantity_micros"]) * int(price["price_minor"]) + 500_000
-            ) // 1_000_000
-            holdings_value += value_minor
+            if position["average_basis_minor"] is None:
+                raise ValueError(f"Missing average cost for {position['ticker']}")
+            metrics = position_metrics(
+                quantity_micros=int(position["quantity_micros"]),
+                price_minor=int(price["price_minor"]),
+                average_basis_minor=int(position["average_basis_minor"]),
+            )
+            holdings_value += metrics.value_minor
+            holdings_cost_basis += metrics.cost_basis_minor
             holdings.append(
                 position
                 | {
                     "price_minor": int(price["price_minor"]),
-                    "value_minor": value_minor,
+                    "value_minor": metrics.value_minor,
+                    "cost_basis_minor": metrics.cost_basis_minor,
+                    "unrealized_gain_minor": metrics.unrealized_gain_minor,
                 }
             )
         transfer_row = self.db.fetch_one(
@@ -3076,9 +3144,365 @@ class DojoService:
             "cash_balance_minor": int(cash["cash_balance_minor"]),
             "holdings": holdings,
             "holdings_value_minor": holdings_value,
+            "holdings_cost_basis_minor": holdings_cost_basis,
+            "unrealized_gain_minor": holdings_value - holdings_cost_basis,
             "current_value_minor": int(cash["cash_balance_minor"]) + holdings_value + provisional,
             "provisional_transfer_minor": provisional,
         }
+
+    def create_reconciliation_draft(
+        self, account_id: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        account = self._require_account(account_id)
+        if account["account_class"] not in {ACCOUNT_CLASS_BUDGET, ACCOUNT_CLASS_INVESTMENT}:
+            raise ValueError("Only budget and investment accounts can be reconciled")
+        cutoff = payload["cutoff"]
+        if isinstance(cutoff, str):
+            cutoff = date.fromisoformat(cutoff)
+        period_start = payload.get("period_start") or date.min
+        if isinstance(period_start, str):
+            period_start = date.fromisoformat(period_start)
+        source_kind = payload["source_kind"]
+        source_records = [
+            SourceRecord(
+                source_record_id=str(item["source_record_id"]),
+                posted_date=item["posted_date"],
+                cleared_date=item.get("cleared_date"),
+                signed_amount_minor=(
+                    -int(item["signed_amount_minor"])
+                    if account.get("budget_account_type") == BUDGET_ACCOUNT_TYPE_CREDIT_CARD
+                    else int(item["signed_amount_minor"])
+                ),
+                status=str(item["source_status"]),
+                description=str(item.get("description", "")),
+                transaction_id=(
+                    str(item["transaction_id"]) if item.get("transaction_id") else None
+                ),
+            )
+            for item in payload.get("source_records", [])
+        ]
+        evidence_id = str(uuid4())
+        evidence_digest = self._source_evidence_digest(source_records)
+        period_records = self._reconciliation_local_records(account_id, period_start, cutoff)
+        baseline_records = self._reconciliation_local_records(account_id, date.min, cutoff)
+        digest = baseline_digest(
+            baseline_records,
+            account_id=account_id,
+            cutoff=cutoff,
+            source_evidence_id=evidence_id,
+            source_evidence_digest=evidence_digest,
+            settings_versions=self._reconciliation_settings_versions(account_id, cutoff),
+        )
+        local_balance = self._reconciliation_ending_value(
+            account_id=account_id,
+            account_class=str(account["account_class"]),
+            cutoff=cutoff,
+            ledger_records=baseline_records,
+        )
+        ending_value = (
+            -int(payload["source_ending_value_minor"])
+            if account.get("budget_account_type") == BUDGET_ACCOUNT_TYPE_CREDIT_CARD
+            else int(payload["source_ending_value_minor"])
+        )
+        reconciliation_id = str(uuid4())
+        now = self.clock.now()
+        with self.db.transaction() as connection:
+            connection.execute(
+                load_sql("queries/insert_reconciliation_commit"),
+                (
+                    reconciliation_id,
+                    account_id,
+                    account["account_class"],
+                    source_kind,
+                    period_start,
+                    cutoff,
+                    cutoff,
+                    evidence_id,
+                    evidence_digest,
+                    digest,
+                    ending_value,
+                    now,
+                ),
+            )
+            for ordinal, item in enumerate(payload.get("source_records", [])):
+                record = source_records[ordinal]
+                connection.execute(
+                    load_sql("queries/insert_reconciliation_source_record"),
+                    (
+                        evidence_id,
+                        record.source_record_id,
+                        record.transaction_id,
+                        ordinal,
+                        account_id,
+                        record.posted_date,
+                        record.cleared_date,
+                        record.signed_amount_minor,
+                        record.status,
+                        record.description,
+                        source_digest(record),
+                        json_dumps(item.get("raw_payload")),
+                    ),
+                )
+        comparison = compare_records(period_records, source_records)
+        return {
+            "reconciliation_id": reconciliation_id,
+            "account_id": account_id,
+            "state": "DRAFT",
+            "source_kind": source_kind,
+            "cutoff": str(cutoff),
+            "source_ending_value_minor": ending_value,
+            "ledger_value_minor": local_balance,
+            "difference_minor": ending_value - local_balance,
+            "baseline_digest": digest,
+            "classifications": comparison,
+            "investment_cash_activity_minor": (
+                sum(record.signed_amount_minor for record in period_records)
+                if account["account_class"] == ACCOUNT_CLASS_INVESTMENT
+                else 0
+            ),
+        }
+
+    def apply_reconciliation(
+        self, reconciliation_id: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        draft = self.db.fetch_one(
+            load_sql("queries/reconciliation_commit_by_id"),
+            (reconciliation_id,),
+        )
+        if draft is None:
+            raise ValueError("Reconciliation not found")
+        account_id = str(draft["account_id"])
+        request = {"reconciliation_id": reconciliation_id, **payload}
+        now = self.clock.now()
+
+        def apply(connection: Any, _fingerprint: str) -> dict[str, Any]:
+            if draft["state"] != "DRAFT":
+                raise ValueError("Reconciliation is no longer a draft")
+            cutoff = draft["effective_date"]
+            local_records = self._reconciliation_local_records(account_id, date.min, cutoff)
+            current_digest = baseline_digest(
+                local_records,
+                account_id=account_id,
+                cutoff=cutoff,
+                source_evidence_id=str(draft["source_evidence_id"]),
+                source_evidence_digest=str(draft["source_evidence_digest"]),
+                settings_versions=self._reconciliation_settings_versions(account_id, cutoff),
+            )
+            if current_digest != draft["baseline_digest"]:
+                raise ValueError("Reconciliation draft is stale; create a new draft")
+            ledger_value = self._reconciliation_ending_value(
+                account_id=account_id,
+                account_class=str(draft["account_class"]),
+                cutoff=cutoff,
+                ledger_records=local_records,
+            )
+            difference = int(draft["source_ending_value_minor"]) - ledger_value
+            adjustment = payload.get("balance_adjustment_minor")
+            if adjustment is not None and draft["account_class"] == ACCOUNT_CLASS_INVESTMENT:
+                raise ValueError("Investment reconciliation cannot use a ledger balance adjustment")
+            if difference != 0 and adjustment != difference:
+                raise ValueError("Apply requires zero difference or an explicit balance adjustment")
+            adjustment_id = None
+            if adjustment is not None:
+                adjustment_id = str(uuid4())
+                insert_version(
+                    connection,
+                    "transactions",
+                    {
+                        "transaction_id": adjustment_id,
+                        "date": cutoff,
+                        "account_id": account_id,
+                        "amount_minor": int(adjustment),
+                        "category_id": None,
+                        "system_category": SYSTEM_CATEGORY_BALANCE_ADJUSTMENT,
+                        "status": "CLEARED",
+                        "memo": "Balance adjustment from reconciliation",
+                        "entry_order": int(
+                            connection.execute(load_sql("queries/max_entry_order")).fetchone()[0]
+                            or 0
+                        )
+                        + 1,
+                        "record_order": self._next_financial_event_order(connection),
+                        "valid_from": now,
+                        "valid_to": MAX_TS,
+                        "created_at": now,
+                        "created_by_user_id": None,
+                    },
+                )
+                local_records = self._reconciliation_local_records(account_id, date.min, cutoff)
+            committed_digest = baseline_digest(
+                local_records,
+                account_id=account_id,
+                cutoff=cutoff,
+                source_evidence_id=str(draft["source_evidence_id"]),
+                source_evidence_digest=str(draft["source_evidence_digest"]),
+                settings_versions=self._reconciliation_settings_versions(account_id, cutoff),
+            )
+            connection.execute(
+                load_sql("queries/update_reconciliation_commit_baseline"),
+                (now, committed_digest, reconciliation_id),
+            )
+            for record in local_records:
+                connection.execute(
+                    load_sql("queries/insert_reconciliation_transaction_ref"),
+                    (
+                        reconciliation_id,
+                        record.transaction_id,
+                        record.valid_from,
+                        account_id,
+                        transaction_digest(record),
+                    ),
+                )
+            return {
+                "reconciliation_id": reconciliation_id,
+                "state": "CURRENT",
+                "difference_minor": 0,
+                "balance_adjustment_transaction_id": adjustment_id,
+            }
+
+        return execute_financial_command(
+            self.db,
+            client_operation_id=payload["client_operation_id"],
+            command_kind="RECONCILIATION_APPLY",
+            request=request,
+            command=apply,
+            now=now,
+        )
+
+    def get_reconciliation(self, reconciliation_id: str) -> dict[str, Any]:
+        row = self.db.fetch_one(
+            load_sql("queries/reconciliation_commit_by_id"), (reconciliation_id,)
+        )
+        if row is None:
+            raise ValueError("Reconciliation not found")
+        records = self._source_records(str(row["source_evidence_id"]))
+        local = self._reconciliation_local_records(
+            str(row["account_id"]), row["period_start"], row["period_end"]
+        )
+        return row | {"source_records": records, "classifications": compare_records(local, records)}
+
+    def list_reconciliations(self, account_id: str) -> list[dict[str, Any]]:
+        self._require_account(account_id)
+        return self.db.fetch_all(
+            load_sql("queries/reconciliation_commits_by_account"),
+            (account_id,),
+        )
+
+    def reconciliation_working_set(self, account_id: str) -> dict[str, Any]:
+        self._require_account(account_id)
+        latest = self.db.fetch_one(
+            load_sql("queries/latest_current_reconciliation_by_account"),
+            (account_id,),
+        )
+        if latest is None:
+            return {"account_id": account_id, "state": "NOT_RECONCILED", "items": []}
+        local = self._reconciliation_local_records(
+            account_id, latest["period_start"], latest["period_end"]
+        )
+        source = self._source_records(str(latest["source_evidence_id"]))
+        return {
+            "account_id": account_id,
+            "state": self.get_reconciliation_status(account_id),
+            "items": compare_records(local, source),
+        }
+
+    def get_reconciliation_status(self, account_id: str) -> str:
+        latest = self.db.fetch_one(
+            load_sql("queries/latest_current_reconciliation_by_account"),
+            (account_id,),
+        )
+        if latest is None:
+            return "NOT_RECONCILED"
+        local = self._reconciliation_local_records(account_id, date.min, latest["period_end"])
+        digest = baseline_digest(
+            local,
+            account_id=account_id,
+            cutoff=latest["effective_date"],
+            source_evidence_id=str(latest["source_evidence_id"]),
+            source_evidence_digest=str(latest["source_evidence_digest"]),
+            settings_versions=self._reconciliation_settings_versions(
+                account_id, latest["effective_date"]
+            ),
+        )
+        return "CURRENT" if digest == latest["baseline_digest"] else "REOPENED"
+
+    def _reconciliation_ending_value(
+        self,
+        *,
+        account_id: str,
+        account_class: str,
+        cutoff: date,
+        ledger_records: list[LocalRecord],
+    ) -> int:
+        if account_class != ACCOUNT_CLASS_INVESTMENT:
+            return sum(record.signed_amount_minor for record in ledger_records)
+        investment_value = self._investment_values(
+            self.db.fetch_all(load_sql("queries/list_accounts")), cutoff
+        ).get(account_id)
+        if investment_value is None:
+            raise ValueError("Investment account needs a statement before reconciliation")
+        return int(investment_value[0])
+
+    def _reconciliation_local_records(
+        self, account_id: str, start: date, cutoff: date
+    ) -> list[LocalRecord]:
+        rows = self.db.fetch_all(
+            load_sql("queries/current_reconciliation_transactions_for_period"),
+            (account_id, start, cutoff),
+        )
+        return [
+            LocalRecord(
+                transaction_id=str(row["transaction_id"]),
+                valid_from=str(row["valid_from"]),
+                account_id=str(row["account_id"]),
+                posted_date=row["date"],
+                signed_amount_minor=int(row["amount_minor"]),
+                status=str(row["status"]),
+                category_id=str(row["category_id"]) if row.get("category_id") else None,
+                system_category=row.get("system_category"),
+                memo=str(row.get("memo") or ""),
+                source_record_id=None,
+            )
+            for row in rows
+        ]
+
+    def _reconciliation_settings_versions(self, account_id: str, cutoff: date) -> list[str]:
+        rows = self.db.fetch_all(
+            load_sql("queries/budget_account_setting_version_at_date"),
+            (account_id, cutoff, cutoff),
+        )
+        versions = [str(row["row_id"]) for row in rows]
+        versions.extend(
+            str(row["row_id"])
+            for row in self.db.fetch_all(
+                load_sql("queries/account_budget_link_version_at_date"),
+                (account_id, cutoff, cutoff, cutoff),
+            )
+        )
+        return versions
+
+    @staticmethod
+    def _source_evidence_digest(records: list[SourceRecord]) -> str:
+        return sha256(
+            "".join(sorted(source_digest(record) for record in records)).encode()
+        ).hexdigest()
+
+    def _source_records(self, evidence_id: str) -> list[SourceRecord]:
+        return [
+            SourceRecord(
+                source_record_id=str(row["source_record_id"]),
+                posted_date=row["posted_date"],
+                cleared_date=row["cleared_date"],
+                signed_amount_minor=int(row["signed_amount_minor"]),
+                status=str(row["source_status"]),
+                description=str(row["description"]),
+                transaction_id=(str(row["transaction_id"]) if row.get("transaction_id") else None),
+            )
+            for row in self.db.fetch_all(
+                load_sql("queries/reconciliation_source_records_by_evidence"),
+                (evidence_id,),
+            )
+        ]
 
     def create_tracking_snapshot(self, account_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         self._require_account_class(account_id, ACCOUNT_CLASS_TRACKING)
@@ -3573,13 +3997,24 @@ class DojoService:
                 SYSTEM_CATEGORY_ATB,
                 SYSTEM_CATEGORY_STARTING_BALANCE,
                 SYSTEM_CATEGORY_BALANCE_ADJUSTMENT,
-                SYSTEM_CATEGORY_TRANSFER,
-                ACCOUNT_CLASS_INVESTMENT,
             ),
         )
         allocations = self.db.fetch_all(load_sql("queries/current_allocations_amount_only"))
-        total = 0
+        transfer_facts = [
+            TransferBoundaryFact(
+                transaction_id=str(row["transaction_id"]),
+                account_class=str(row["account_class"]),
+                system_category=row["system_category"],
+                amount_minor=int(row["amount_minor"]),
+                effective_date=row["effective_date"],
+                status=str(row["status"]),
+            )
+            for row in self.db.fetch_all(load_sql("queries/current_transfer_boundary_facts"))
+        ]
+        total = compute_transfer_boundary_adjustment(transfer_facts, as_of=self.clock.today())
         for transaction in transactions:
+            if transaction["system_category"] == SYSTEM_CATEGORY_TRANSFER:
+                continue
             if transaction["system_category"] == SYSTEM_CATEGORY_STARTING_BALANCE:
                 if transaction["amount_minor"] > 0:
                     total += int(transaction["amount_minor"])
@@ -3880,6 +4315,133 @@ class DojoService:
         if from_account_id == to_account_id:
             raise ValueError("Transfer accounts must be different")
 
+    def _create_rich_account_operation(
+        self, *, endpoint_account_id: str, payload: dict[str, Any], operation_kind: str
+    ) -> dict[str, Any]:
+        if int(payload["amount_minor"]) <= 0:
+            raise ValueError("Operation amount must be positive")
+        source_id = str(payload["source_account_id"])
+        destination_id = str(payload["destination_account_id"])
+        source = self._require_account(source_id)
+        destination = self._require_account(destination_id)
+        if not source["is_active"] or not destination["is_active"]:
+            raise ValueError("Operation accounts must be active")
+        if endpoint_account_id not in {source_id, destination_id}:
+            raise ValueError("Operation endpoint account does not match its leg")
+        if operation_kind == "INVESTMENT_CONTRIBUTION":
+            self._require_deposit_account(source_id)
+            if destination["account_class"] != ACCOUNT_CLASS_INVESTMENT:
+                raise ValueError("Contribution destination must be an investment account")
+        elif operation_kind == "INVESTMENT_WITHDRAWAL":
+            if source["account_class"] != ACCOUNT_CLASS_INVESTMENT:
+                raise ValueError("Withdrawal source must be an investment account")
+            self._require_deposit_account(destination_id)
+            current_value = self._investment_values(
+                self.db.fetch_all(load_sql("queries/list_accounts")), self.clock.today()
+            ).get(source_id)
+            if current_value is None or current_value[0] < int(payload["amount_minor"]):
+                raise ValueError("Withdrawal exceeds the current investment value")
+        elif operation_kind == "CREDIT_CARD_PAYMENT":
+            self._require_deposit_account(source_id)
+            settings = self.db.fetch_one(
+                load_sql("queries/current_budget_account_settings_by_account"), (destination_id,)
+            )
+            if (
+                destination_id != endpoint_account_id
+                or settings is None
+                or settings["budget_account_type"] != BUDGET_ACCOUNT_TYPE_CREDIT_CARD
+            ):
+                raise ValueError("Payment destination must be the credit-card account")
+        else:
+            raise ValueError("Unsupported rich operation")
+
+        source_date = payload["source_posted_date"]
+        destination_date = payload["destination_posted_date"]
+        if isinstance(source_date, str):
+            source_date = date.fromisoformat(source_date)
+        if isinstance(destination_date, str):
+            destination_date = date.fromisoformat(destination_date)
+        request = payload | {
+            "endpoint_account_id": endpoint_account_id,
+            "operation_kind": operation_kind,
+        }
+        now = self.clock.now()
+
+        def apply(connection: Any, fingerprint: str) -> dict[str, Any]:
+            linked_category_id = None
+            if operation_kind == "INVESTMENT_CONTRIBUTION":
+                link = self._effective_account_budget_link(
+                    destination_id, LINK_BEHAVIOR_INVESTMENT_CONTRIBUTION, destination_date
+                )
+                if link is None:
+                    raise ValueError(
+                        "Configure an investment contribution category before contributing"
+                    )
+                linked_category_id = str(link["category_id"])
+            operation_id = str(uuid4())
+            result = self._insert_transfer(
+                connection,
+                from_account_id=source_id,
+                to_account_id=destination_id,
+                amount_minor=payload["amount_minor"],
+                source_date=source_date,
+                destination_date=destination_date,
+                source_status=payload["source_status"],
+                destination_status=payload["destination_status"],
+                memo=payload.get("memo", ""),
+                now=now,
+            )
+            create_transaction_operation(
+                connection,
+                operation_id=operation_id,
+                operation_kind=operation_kind,
+                origin="ACCOUNT_DETAIL",
+                client_operation_id=payload["client_operation_id"],
+                request_fingerprint=fingerprint,
+                created_at=now,
+            )
+            link_transaction_operation(
+                connection,
+                operation_id=operation_id,
+                transaction_id=result["source_transaction_id"],
+                leg_role="SOURCE",
+                now=now,
+            )
+            link_transaction_operation(
+                connection,
+                operation_id=operation_id,
+                transaction_id=result["destination_transaction_id"],
+                leg_role="DESTINATION",
+                now=now,
+            )
+            return result | {
+                "operation_id": operation_id,
+                "operation_kind": operation_kind,
+                "linked_category_id": linked_category_id,
+            }
+
+        return execute_financial_command(
+            self.db,
+            client_operation_id=payload["client_operation_id"],
+            command_kind=operation_kind,
+            request=request,
+            command=apply,
+            now=now,
+        )
+
+    def _require_deposit_account(self, account_id: str) -> None:
+        account = self._require_account(account_id)
+        settings = self.db.fetch_one(
+            load_sql("queries/current_budget_account_settings_by_account"), (account_id,)
+        )
+        if (
+            account["account_class"] != ACCOUNT_CLASS_BUDGET
+            or not account["is_active"]
+            or settings is None
+            or settings["budget_account_type"] != BUDGET_ACCOUNT_TYPE_DEPOSIT
+        ):
+            raise ValueError("Operation requires a budget deposit account")
+
     def _insert_transfer(
         self,
         connection: Any,
@@ -3887,34 +4449,50 @@ class DojoService:
         from_account_id: str,
         to_account_id: str,
         amount_minor: int,
-        transfer_date: date,
+        transfer_date: date | None = None,
+        source_date: date | None = None,
+        destination_date: date | None = None,
         memo: str,
-        status: str,
+        status: str | None = None,
+        source_status: str | None = None,
+        destination_status: str | None = None,
         now: datetime,
     ) -> dict[str, Any]:
         self._require_distinct_accounts(from_account_id, to_account_id)
-        transfer_id = str(uuid4())
         source_transaction_id = str(uuid4())
         destination_transaction_id = str(uuid4())
         max_row = connection.execute(load_sql("queries/max_entry_order")).fetchone()
         next_order = int(max_row[0]) + 1 if max_row else 1
         record_order = self._next_financial_event_order(connection)
-        for transaction_id, account_id, signed_amount in (
-            (source_transaction_id, from_account_id, -amount_minor),
-            (destination_transaction_id, to_account_id, amount_minor),
+        for index, (transaction_id, account_id, signed_amount) in enumerate(
+            (
+                (source_transaction_id, from_account_id, -amount_minor),
+                (destination_transaction_id, to_account_id, amount_minor),
+            )
         ):
             insert_version(
                 connection,
                 "transactions",
                 {
                     "transaction_id": transaction_id,
-                    "transfer_id": transfer_id,
-                    "date": transfer_date,
+                    "date": (
+                        source_date
+                        if index == 0 and source_date is not None
+                        else destination_date
+                        if index == 1 and destination_date is not None
+                        else transfer_date
+                    ),
                     "account_id": account_id,
                     "amount_minor": signed_amount,
                     "category_id": None,
                     "system_category": SYSTEM_CATEGORY_TRANSFER,
-                    "status": status,
+                    "status": (
+                        source_status
+                        if index == 0 and source_status is not None
+                        else destination_status
+                        if index == 1 and destination_status is not None
+                        else status
+                    ),
                     "memo": memo,
                     "entry_order": next_order,
                     "record_order": record_order,
@@ -3926,7 +4504,6 @@ class DojoService:
             )
             next_order += 1
         return {
-            "transfer_id": transfer_id,
             "source_transaction_id": source_transaction_id,
             "destination_transaction_id": destination_transaction_id,
         }
@@ -4017,8 +4594,9 @@ class DojoService:
                 if price is None:
                     complete = False
                     break
-                product = int(position["quantity_micros"]) * int(price["price_minor"])
-                holdings_value += (product + 500_000) // 1_000_000
+                holdings_value += position_amount_minor(
+                    int(position["quantity_micros"]), int(price["price_minor"])
+                )
             if not complete:
                 continue
             transfer_row = self.db.fetch_one(
@@ -4076,11 +4654,39 @@ class DojoService:
             },
         )
 
-    def _validate_transaction_payload(self, payload: dict[str, Any]) -> None:
+    def _validate_transaction_payload(
+        self, payload: dict[str, Any], *, new_entry: bool = False
+    ) -> None:
         has_category = payload.get("category_id") is not None
         has_system = payload.get("system_category") is not None
         if has_category == has_system:
             raise ValueError("Exactly one of category_id or system_category must be set")
+        if not new_entry:
+            return
+
+        account = self._require_account(str(payload["account_id"]))
+        if not account["is_active"]:
+            raise ValueError("Account is not active")
+        account_class = account["account_class"]
+        system_category = payload.get("system_category")
+        if system_category == SYSTEM_CATEGORY_TRANSFER:
+            if account_class not in {ACCOUNT_CLASS_BUDGET, ACCOUNT_CLASS_INVESTMENT}:
+                raise ValueError("Account transfers require a budget or investment account")
+            return
+        if account_class != ACCOUNT_CLASS_BUDGET:
+            raise ValueError("Only budget accounts can use categories or Available to budget")
+        if system_category == SYSTEM_CATEGORY_ATB:
+            return
+        if system_category is not None:
+            raise ValueError("This system category is not available for new entries")
+
+        category = self.db.fetch_one(
+            load_sql("queries/current_category_by_id"), (payload["category_id"],)
+        )
+        if category is None or not category["is_active"]:
+            raise ValueError("Category is not active")
+        if category["category_kind"] != CATEGORY_KIND_STANDARD:
+            raise ValueError("New entries require a standard category")
 
     def _create_credit_card_payment_category(
         self, connection: Any, account_name: str, now: datetime
@@ -4127,8 +4733,7 @@ class DojoService:
     def _cutover_successor_value(self, successor: dict[str, Any]) -> int:
         if successor["account_class"] == ACCOUNT_CLASS_INVESTMENT:
             holdings_value = sum(
-                (int(holding["quantity_micros"]) * int(holding["price_minor"]) + 500_000)
-                // 1_000_000
+                position_amount_minor(int(holding["quantity_micros"]), int(holding["price_minor"]))
                 for holding in successor["holdings"]
             )
             return int(successor["cash_balance_minor"]) + holdings_value
@@ -4206,7 +4811,7 @@ class DojoService:
                         "ticker": ticker,
                         "effective_date": cutover_date,
                         "quantity_micros": holding["quantity_micros"],
-                        "average_basis_minor": holding.get("average_basis_minor"),
+                        "average_basis_minor": holding["average_basis_minor"],
                         "valid_from": now,
                         "valid_to": MAX_TS,
                         "created_at": now,

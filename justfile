@@ -45,7 +45,7 @@ test-web:
 
 test-unit:
 	@printf '==> running backend unit tests\n'
-	cd api && uv run python -m pytest tests/test_money.py tests/test_settings.py tests/test_importer.py tests/test_loan_projection.py
+	cd api && uv run python -m pytest tests/test_money.py tests/test_settings.py tests/test_importer.py tests/test_loan_projection.py tests/test_operations.py
 
 test-property:
 	@printf '==> running backend property tests\n'
@@ -53,7 +53,7 @@ test-property:
 
 test-integration:
 	@printf '==> running backend integration tests\n'
-	cd api && uv run python -m pytest tests/test_health.py tests/test_api_endpoints.py tests/test_budget_formulas.py tests/test_account_values.py tests/test_scd.py tests/test_migrations.py tests/test_e2e.py
+	cd api && uv run python -m pytest tests/test_health.py tests/test_api_endpoints.py tests/test_budget_formulas.py tests/test_account_values.py tests/test_reconciliation.py tests/test_scd.py tests/test_migrations.py tests/test_e2e.py
 
 test-e2e:
 	web/scripts/run-e2e.sh

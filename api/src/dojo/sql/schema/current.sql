@@ -190,7 +190,7 @@ CREATE TABLE IF NOT EXISTS investment_positions (
     ticker TEXT NOT NULL,
     effective_date DATE NOT NULL,
     quantity_micros BIGINT NOT NULL,
-    average_basis_minor BIGINT,
+    average_basis_minor BIGINT NOT NULL,
     valid_from TIMESTAMPTZ NOT NULL,
     valid_to TIMESTAMPTZ NOT NULL DEFAULT TIMESTAMPTZ '9999-12-31 23:59:59+00',
     created_at TIMESTAMPTZ NOT NULL,
@@ -277,7 +277,6 @@ CREATE TABLE IF NOT EXISTS budget_buckets (
 CREATE TABLE IF NOT EXISTS transactions (
     row_id UUID PRIMARY KEY,
     transaction_id UUID NOT NULL,
-    transfer_id UUID,
     date DATE NOT NULL,
     account_id UUID NOT NULL,
     amount_minor BIGINT NOT NULL,
@@ -294,6 +293,79 @@ CREATE TABLE IF NOT EXISTS transactions (
     CHECK (
         NOT (category_id IS NOT NULL AND system_category IS NOT NULL)
     )
+);
+
+CREATE TABLE IF NOT EXISTS financial_command_receipts (
+    client_operation_id UUID PRIMARY KEY,
+    command_kind TEXT NOT NULL,
+    request_fingerprint TEXT NOT NULL,
+    result JSON NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS transaction_operations (
+    operation_id UUID PRIMARY KEY,
+    operation_kind TEXT NOT NULL,
+    origin TEXT NOT NULL,
+    client_operation_id UUID NOT NULL UNIQUE,
+    request_fingerprint TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    created_by_user_id UUID
+);
+
+CREATE TABLE IF NOT EXISTS transaction_operation_legs (
+    row_id UUID PRIMARY KEY,
+    operation_id UUID NOT NULL,
+    transaction_id UUID NOT NULL,
+    leg_role TEXT NOT NULL,
+    valid_from TIMESTAMPTZ NOT NULL,
+    valid_to TIMESTAMPTZ NOT NULL DEFAULT TIMESTAMPTZ '9999-12-31 23:59:59+00',
+    created_at TIMESTAMPTZ NOT NULL,
+    created_by_user_id UUID,
+    CHECK (leg_role IN ('SOURCE', 'DESTINATION'))
+);
+
+CREATE TABLE IF NOT EXISTS reconciliation_commits (
+    reconciliation_id UUID PRIMARY KEY,
+    account_id UUID NOT NULL,
+    account_class TEXT NOT NULL,
+    source_kind TEXT NOT NULL,
+    period_start DATE NOT NULL,
+    period_end DATE NOT NULL,
+    effective_date DATE NOT NULL,
+    verified_at TIMESTAMPTZ,
+    state TEXT NOT NULL,
+    source_evidence_id UUID NOT NULL,
+    source_evidence_digest TEXT NOT NULL,
+    baseline_digest TEXT NOT NULL,
+    source_ending_value_minor BIGINT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    created_by_user_id UUID
+);
+
+CREATE TABLE IF NOT EXISTS reconciliation_source_records (
+    source_evidence_id UUID NOT NULL,
+    source_record_id TEXT NOT NULL,
+    transaction_id UUID,
+    ordinal BIGINT NOT NULL,
+    account_id UUID NOT NULL,
+    posted_date DATE NOT NULL,
+    cleared_date DATE,
+    signed_amount_minor BIGINT NOT NULL,
+    source_status TEXT NOT NULL,
+    description TEXT NOT NULL,
+    normalized_digest TEXT NOT NULL,
+    raw_payload JSON,
+    PRIMARY KEY (source_evidence_id, ordinal)
+);
+
+CREATE TABLE IF NOT EXISTS reconciliation_transaction_refs (
+    reconciliation_id UUID NOT NULL,
+    transaction_id UUID NOT NULL,
+    valid_from TIMESTAMPTZ NOT NULL,
+    account_id UUID NOT NULL,
+    canonical_row_digest TEXT NOT NULL,
+    PRIMARY KEY (reconciliation_id, transaction_id)
 );
 
 CREATE TABLE IF NOT EXISTS allocations (
@@ -374,6 +446,10 @@ SELECT * FROM budget_buckets WHERE valid_to = TIMESTAMPTZ '9999-12-31 23:59:59+0
 
 CREATE OR REPLACE VIEW current_transactions AS
 SELECT * FROM transactions WHERE valid_to = TIMESTAMPTZ '9999-12-31 23:59:59+00';
+
+CREATE OR REPLACE VIEW current_transaction_operation_legs AS
+SELECT * FROM transaction_operation_legs
+WHERE valid_to = TIMESTAMPTZ '9999-12-31 23:59:59+00';
 
 CREATE OR REPLACE VIEW current_allocations AS
 SELECT * FROM allocations WHERE valid_to = TIMESTAMPTZ '9999-12-31 23:59:59+00';

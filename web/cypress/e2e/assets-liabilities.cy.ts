@@ -408,6 +408,7 @@ describe("Tracking cutover", () => {
 
     cy.get('input[name="cutover-name-0"]').clear().type("Brokerage");
     cy.get('input[name="cutover-opening-0"]').clear().type("200000");
+    cy.get('input[name="cutover-final-tracking-value"]').type("500000");
 
     cy.get('[data-cy="form-modal-root"]')
       .contains("button", "Add successor")

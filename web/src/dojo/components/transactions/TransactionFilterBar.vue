@@ -12,6 +12,7 @@ const props = defineProps<{
   categoryFilter: string;
   amountFilter: string;
   statusFilter: string;
+  activityFilter?: "all" | "spending" | "transfers";
   lockedAccountId?: string;
 }>();
 
@@ -21,6 +22,7 @@ const emit = defineEmits<{
   "update:categoryFilter": [value: string];
   "update:amountFilter": [value: string];
   "update:statusFilter": [value: string];
+  "update:activityFilter": [value: "all" | "spending" | "transfers"];
 }>();
 
 const accountOptions = computed(() => [
@@ -63,6 +65,12 @@ const statusOptions = [
   { value: "pending", label: "Pending" },
 ];
 
+const activityOptions = [
+  { value: "all", label: "All activity" },
+  { value: "spending", label: "Spending & income" },
+  { value: "transfers", label: "Transfers" },
+];
+
 function updateAccountFilter(value: string) {
   emit("update:accountFilter", value);
 }
@@ -81,6 +89,14 @@ function updateAmountFilter(value: string) {
 
 function updateStatusFilter(value: string) {
   emit("update:statusFilter", value);
+}
+
+function updateActivityFilter(value: string) {
+  if (value === "spending" || value === "transfers") {
+    emit("update:activityFilter", value);
+  } else {
+    emit("update:activityFilter", "all");
+  }
 }
 </script>
 
@@ -121,6 +137,12 @@ function updateStatusFilter(value: string) {
         label="Status"
         :options="statusOptions"
         @update:model-value="updateStatusFilter"
+      />
+      <SelectField
+        :model-value="props.activityFilter ?? 'all'"
+        label="Activity"
+        :options="activityOptions"
+        @update:model-value="updateActivityFilter"
       />
     </div>
   </div>

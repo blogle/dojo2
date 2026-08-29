@@ -54,6 +54,28 @@ const mockAccounts = [
     cleared_balance_minor: 100000,
     display_balance_minor: 100000,
   },
+  {
+    account_id: "investment-1",
+    name: "Brokerage",
+    account_class: "INVESTMENT",
+    is_hidden: false,
+    is_active: true,
+    actual_balance_minor: 0,
+    pending_balance_minor: 0,
+    cleared_balance_minor: 0,
+    display_balance_minor: 0,
+  },
+  {
+    account_id: "tracking-1",
+    name: "Legacy Loan",
+    account_class: "TRACKING",
+    is_hidden: false,
+    is_active: true,
+    actual_balance_minor: 0,
+    pending_balance_minor: 0,
+    cleared_balance_minor: 0,
+    display_balance_minor: 0,
+  },
 ];
 
 const mockTransactions = [
@@ -68,6 +90,19 @@ const mockTransactions = [
     system_category: null,
     status: "CLEARED",
     memo: "Market",
+    is_hidden_entity: false,
+  },
+  {
+    transaction_id: "t2",
+    date: `${currentMonth}-04`,
+    account_id: "investment-1",
+    account_name: "Brokerage",
+    amount_minor: 10_000,
+    category_id: null,
+    category_name: null,
+    system_category: "TX_ACCOUNT_TRANSFER",
+    status: "PENDING",
+    memo: "Investment contribution",
     is_hidden_entity: false,
   },
 ];
@@ -101,11 +136,11 @@ function stubFetch() {
         new Response(
           JSON.stringify({
             items: mockTransactions,
-            total: 1,
+            total: 2,
             offset: 0,
             limit: 10000,
             has_more: false,
-            status_counts: { PENDING: 0, CLEARED: 1 },
+            status_counts: { PENDING: 1, CLEARED: 1 },
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),
@@ -187,5 +222,40 @@ describe("TransactionsPage", () => {
   it("shows the filter bar", () => {
     mountPage();
     cy.get("[data-cy=transaction-filter-bar]").should("be.visible");
+  });
+
+  it("offers investment accounts only for transfer entry", () => {
+    mountPage();
+    cy.get("[data-cy=transaction-entry-form]").within(() => {
+      cy.contains("label", "Account")
+        .find("option")
+        .should("contain.text", "Checking");
+      cy.contains("label", "Account")
+        .find("option")
+        .should("not.contain.text", "Brokerage");
+      cy.contains("label", "Entry type")
+        .find("select")
+        .select("ACCOUNT_TRANSFER");
+      cy.contains("label", "Account")
+        .find("option")
+        .should("contain.text", "Brokerage");
+      cy.contains("label", "Account")
+        .find("option")
+        .should("not.contain.text", "Legacy Loan");
+    });
+  });
+
+  it("filters the all-activity ledger without hiding transfers by default", () => {
+    mountPage();
+    cy.get("[data-cy=transaction-row]").should("have.length", 2);
+    cy.get("[data-cy=transaction-filter-bar]")
+      .contains("label", "Activity")
+      .find("select")
+      .select("transfers");
+    cy.get("[data-cy=transaction-row]").should("have.length", 1);
+    cy.get("[data-cy=transaction-ledger]").should(
+      "contain.text",
+      "Investment contribution",
+    );
   });
 });
