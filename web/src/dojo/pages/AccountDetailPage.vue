@@ -477,6 +477,43 @@ function newCutoverSuccessor(
   };
 }
 
+function cutoverHoldingValue(holding: CutoverHoldingDraft): number {
+  const quantityMicros = Math.round(Number(holding.quantity) * 1_000_000);
+  const price = parseCurrencyMinor(holding.price) ?? 0;
+  return Math.floor((quantityMicros * price + 500_000) / 1_000_000);
+}
+
+const cutoverInvestmentCashTotal = computed(() =>
+  cutoverSuccessors.value.reduce(
+    (total, successor) =>
+      successor.accountClass === "INVESTMENT"
+        ? total + (parseCurrencyMinor(successor.openingValue) ?? 0)
+        : total,
+    0,
+  ),
+);
+
+const cutoverInvestmentHoldingsTotal = computed(() =>
+  cutoverSuccessors.value.reduce(
+    (total, successor) =>
+      successor.accountClass === "INVESTMENT"
+        ? total +
+          successor.holdings.reduce(
+            (holdingTotal, holding) =>
+              holdingTotal + cutoverHoldingValue(holding),
+            0,
+          )
+        : total,
+    0,
+  ),
+);
+
+const hasCutoverInvestmentSuccessor = computed(() =>
+  cutoverSuccessors.value.some(
+    (successor) => successor.accountClass === "INVESTMENT",
+  ),
+);
+
 const cutoverSuccessorTotal = computed(() =>
   cutoverSuccessors.value.reduce((total, successor) => {
     const opening = parseCurrencyMinor(successor.openingValue) ?? 0;
@@ -493,16 +530,11 @@ const cutoverSuccessorTotal = computed(() =>
       return (
         total +
         opening +
-        successor.holdings.reduce((holdingTotal, holding) => {
-          const quantityMicros = Math.round(
-            Number(holding.quantity) * 1_000_000,
-          );
-          const price = parseCurrencyMinor(holding.price) ?? 0;
-          return (
-            holdingTotal +
-            Math.floor((quantityMicros * price + 500_000) / 1_000_000)
-          );
-        }, 0)
+        successor.holdings.reduce(
+          (holdingTotal, holding) =>
+            holdingTotal + cutoverHoldingValue(holding),
+          0,
+        )
       );
     }
     return total + opening;
@@ -515,6 +547,14 @@ const cutoverExpectedSignedValue = computed(() => {
 const cutoverVariance = computed(
   () => cutoverSuccessorTotal.value - cutoverExpectedSignedValue.value,
 );
+const cutoverDifferenceDescription = computed(() => {
+  if (cutoverVariance.value === 0) return "Exact match";
+  const amount = formatCurrency(Math.abs(cutoverVariance.value));
+  if (cutoverVariance.value > 0) {
+    return `Successor total is ${amount} above the final tracking value. Reduce asset or cash values, or increase liability values, by ${amount}.`;
+  }
+  return `Successor total is ${amount} below the final tracking value. Increase asset or cash values, or reduce liability values, by ${amount}.`;
+});
 const cutoverCanSave = computed(
   () =>
     cutoverRepresentationConfirmed.value &&
@@ -3067,12 +3107,19 @@ function formatTaxTreatment(value: string | null | undefined): string {
               Add successor
             </Button>
             <div class="account-detail-page__cutover-info">
-              <span>
-                Final tracking value:
-                {{ formatCurrency(cutoverExpectedSignedValue) }} · Successor
-                total: {{ formatCurrency(cutoverSuccessorTotal) }} · Variance:
-                {{ formatCurrency(cutoverVariance) }}
-              </span>
+              <div data-cy="cutover-value-reconciliation">
+                <span>
+                  Final tracking value:
+                  {{ formatCurrency(cutoverExpectedSignedValue) }} · Successor
+                  total: {{ formatCurrency(cutoverSuccessorTotal) }}
+                </span>
+                <span v-if="hasCutoverInvestmentSuccessor">
+                  Investment breakdown: cash
+                  {{ formatCurrency(cutoverInvestmentCashTotal) }} + holdings
+                  {{ formatCurrency(cutoverInvestmentHoldingsTotal) }}
+                </span>
+                <strong>{{ cutoverDifferenceDescription }}</strong>
+              </div>
             </div>
             <label class="account-detail-page__cutover-checkbox">
               <input v-model="cutoverRepresentationConfirmed" type="checkbox" />
@@ -3821,6 +3868,11 @@ function formatTaxTreatment(value: string | null | undefined): string {
   font-family: var(--text-body-sm-font-family);
   font-size: var(--text-body-sm-font-size);
   line-height: var(--text-body-sm-line-height);
+}
+
+.account-detail-page__cutover-info > div {
+  display: grid;
+  gap: var(--space-xs);
 }
 
 .account-detail-page__cutover-info-icon {

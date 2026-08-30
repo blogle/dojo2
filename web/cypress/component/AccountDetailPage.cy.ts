@@ -654,6 +654,24 @@ describe("AccountDetailPage — tracking account", () => {
       );
     });
   });
+
+  it("explains a cutover difference with the investment breakdown", () => {
+    mountTrackingPage();
+    cy.get("[data-cy=account-detail-create-richer]").click();
+    cy.get('input[name="cutover-final-tracking-value"]').type("98432.21");
+    cy.contains("button", "Add holding").click();
+    cy.get('input[name="cutover-ticker-0-0"]').type("VTI");
+    cy.get('input[name="cutover-quantity-0-0"]').type("0.001");
+    cy.get('input[name="cutover-price-0-0"]').type("250");
+    cy.get('input[name="cutover-basis-0-0"]').type("200");
+
+    cy.get("[data-cy=cutover-value-reconciliation]")
+      .should("contain.text", "Final tracking value: $98,432.21")
+      .and("contain.text", "Successor total: $98,432.46")
+      .and("contain.text", "cash $98,432.21 + holdings $0.25")
+      .and("contain.text", "Successor total is $0.25 above")
+      .and("contain.text", "Reduce asset or cash values");
+  });
 });
 
 const tangibleAccount = {
