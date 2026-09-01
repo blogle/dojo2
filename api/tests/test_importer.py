@@ -565,6 +565,18 @@ def test_net_worth_row_zipping_and_debt_classification() -> None:
     assert car_loan.amount_minor == -1_000_000
 
 
+def test_net_worth_notes_without_financial_fields_are_skipped() -> None:
+    named_ranges = copy_named_ranges()
+    named_ranges["ntw_Notes"].append(["Leftover note outside the valuation rows"])
+    access = build_named_range_access(named_ranges)
+    categories, _ = parse_configuration_categories_and_groups(access)
+    accounts = parse_configuration_accounts(access, categories)
+
+    valuations = parse_net_worth_named_ranges(access, accounts)
+
+    assert len(valuations) == 5
+
+
 def test_unused_broken_named_range_is_ignored() -> None:
     named_ranges = copy_named_ranges()
     named_ranges["UnknownBrokenRange"] = [["#REF!"]]

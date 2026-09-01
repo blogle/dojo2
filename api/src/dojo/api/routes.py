@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import secrets
 from typing import Any, cast
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
@@ -70,6 +72,15 @@ def get_or_create_oauth_session_id(request: Request) -> str:
     return session_id
 
 
+def get_frontend_origin(request: Request) -> str:
+    configured_origin = get_settings(request).frontend_base_url
+    candidate = request.headers.get("origin", configured_origin)
+    parsed = urlsplit(candidate)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return configured_origin
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
 def oauth_status_payload(request: Request) -> dict[str, Any]:
     settings = get_settings(request)
     session_id = get_or_create_oauth_session_id(request)
@@ -98,7 +109,12 @@ def start_google_onboarding(request: Request) -> dict[str, Any]:
     if not settings.oauth_configured:
         return payload | {"auth_url": None}
     state = secrets.token_urlsafe(24)
-    request.session["google_oauth_state"] = state
+    get_oauth_token_store(request).begin_authorization(
+        state=state,
+        session_id=get_or_create_oauth_session_id(request),
+        frontend_origin=get_frontend_origin(request),
+    )
+    callback = urlsplit(settings.google_oauth_redirect_uri)
     return payload | {
         "auth_url": build_google_auth_url(
             client_id=settings.google_oauth_client_id,
@@ -106,6 +122,7 @@ def start_google_onboarding(request: Request) -> dict[str, Any]:
             scopes=settings.google_oauth_scopes,
             state=state,
         ),
+        "callback_origin": f"{callback.scheme}://{callback.netloc}",
     }
 
 
@@ -117,7 +134,9 @@ def google_onboarding_status(request: Request) -> dict[str, Any]:
 @router.get("/onboarding/google/callback")
 def google_callback(request: Request, code: str, state: str) -> HTMLResponse:
     settings = get_settings(request)
-    if request.session.get("google_oauth_state") != state:
+    token_store = get_oauth_token_store(request)
+    pending = token_store.consume_authorization(state)
+    if pending is None:
         raise HTTPException(status_code=400, detail="Invalid OAuth state")
     token = exchange_google_code(
         client_id=settings.google_oauth_client_id,
@@ -125,10 +144,10 @@ def google_callback(request: Request, code: str, state: str) -> HTMLResponse:
         redirect_uri=settings.google_oauth_redirect_uri,
         code=code,
     )
-    session_id = get_or_create_oauth_session_id(request)
-    get_oauth_token_store(request).set(session_id, token)
+    token_store.set(pending.session_id, token)
+    target_origin = json.dumps(pending.frontend_origin).replace("<", "\\u003c")
     return HTMLResponse(
-        f"<html><body><script>window.opener?.postMessage({{type:'dojo-google-oauth',ok:true}}, {settings.frontend_base_url!r});window.close();</script>Google access granted.</body></html>"
+        f"<html><body><script>window.opener?.postMessage({{type:'dojo-google-oauth',ok:true}}, {target_origin});window.close();</script>Google access granted.</body></html>"
     )
 
 
@@ -222,14 +241,17 @@ def analyze_google_sheet(request: Request, payload: ImportRequest) -> dict[str, 
         )
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Failed to fetch Google Sheet: {exc}") from exc
-    return service.analyze_import_draft(
-        source=raw,
-        source_kind="google_sheets",
-        spreadsheet_title=title,
-        named_ranges=named_ranges,
-        available_named_ranges=available_named_ranges,
-        expected=None,
-    )
+    try:
+        return service.analyze_import_draft(
+            source=raw,
+            source_kind="google_sheets",
+            spreadsheet_title=title,
+            named_ranges=named_ranges,
+            available_named_ranges=available_named_ranges,
+            expected=None,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Could not parse Aspire sheet: {exc}") from exc
 
 
 @router.post("/import/google-sheet/commit")

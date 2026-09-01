@@ -377,6 +377,7 @@ def test_google_callback_stores_token_in_memory_and_updates_status(monkeypatch, 
         assert start.status_code == 200
         auth_url = start.json()["auth_url"]
         assert isinstance(auth_url, str)
+        assert start.json()["callback_origin"] == "http://localhost:8000"
         state = parse_qs(urlparse(auth_url).query)["state"][0]
 
         callback = client.get(
@@ -389,6 +390,40 @@ def test_google_callback_stores_token_in_memory_and_updates_status(monkeypatch, 
         status = client.get("/api/onboarding/google/status")
         assert status.status_code == 200
         assert status.json()["authorized"] is True
+
+
+def test_google_callback_completes_for_the_initiating_frontend_origin(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setenv("SESSION_SECRET", "test-secret")
+    monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_ID", "client-id")
+    monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_SECRET", "client-secret")
+    monkeypatch.setenv("FRONTEND_BASE_URL", "http://localhost:5173")
+    monkeypatch.setenv(
+        "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
+    )
+    provisioned_main_module(monkeypatch, tmp_path, "api-test.duckdb")
+    monkeypatch.setattr(
+        routes_module,
+        "exchange_google_code",
+        lambda **_: {"access_token": "token-123", "token_type": "Bearer"},
+    )
+
+    with TestClient(main_module.app) as client:
+        start = client.post(
+            "/api/onboarding/google/start",
+            headers={"Origin": "http://192.0.2.1:5173"},
+        )
+        state = parse_qs(urlparse(start.json()["auth_url"]).query)["state"][0]
+        client.cookies.clear()
+
+        callback = client.get(
+            "/api/onboarding/google/callback",
+            params={"code": "abc", "state": state},
+        )
+
+        assert callback.status_code == 200
+        assert "http://192.0.2.1:5173" in callback.text
 
 
 def test_delete_then_restore_preserves_transaction_id(monkeypatch, tmp_path) -> None:

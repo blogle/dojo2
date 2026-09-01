@@ -252,6 +252,22 @@ class TestFetchSheetNamedRanges:
 
 
 class TestOAuthTokenStore:
+    def test_pending_authorization_is_consumed_once(self) -> None:
+        from dojo.google import OAuthTokenStore
+
+        store = OAuthTokenStore()
+        store.begin_authorization(
+            state="state-1",
+            session_id="session-1",
+            frontend_origin="http://192.0.2.1:5173",
+        )
+
+        pending = store.consume_authorization("state-1")
+        assert pending is not None
+        assert pending.session_id == "session-1"
+        assert pending.frontend_origin == "http://192.0.2.1:5173"
+        assert store.consume_authorization("state-1") is None
+
     def test_set_and_get(self) -> None:
         from dojo.google import OAuthTokenStore
 

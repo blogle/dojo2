@@ -1298,12 +1298,11 @@ def parse_net_worth_named_ranges(
 
     records: list[ParsedValuation] = []
     for offset, row in enumerate(rows, start=1):
-        if _row_is_blank(row):
-            continue
-
         date_raw = row["date"].strip()
         amount_raw = row["amount"].strip()
         raw_name = row["raw_name"].strip()
+        if not date_raw and not amount_raw and not raw_name:
+            continue
         if not date_raw or not amount_raw or not raw_name:
             raise ValueError(f"Meaningful net worth row {offset} is missing required fields")
 

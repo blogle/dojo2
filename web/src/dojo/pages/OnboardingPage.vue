@@ -111,14 +111,19 @@ async function handleStartEmpty() {
 }
 
 async function handleSubmitSheet() {
-  if (!sheetId.value.trim()) return;
-  step.value = "progress";
+  const submittedSheetId = sheetId.value.trim();
+  if (!submittedSheetId) return;
   errorMessage.value = "";
   formError.value = "";
+  if (!/^[A-Za-z0-9_-]+$/.test(submittedSheetId)) {
+    formError.value = "Enter a valid Google Sheet ID.";
+    return;
+  }
+  step.value = "progress";
 
   try {
     await beginGoogleOnboarding();
-    await analyzeSheet(sheetId.value.trim());
+    await analyzeSheet(submittedSheetId);
     if (state.importPreview) {
       step.value = "net-worth-review";
     } else {
@@ -216,8 +221,7 @@ const isAuthDenied = computed(
 );
 
 const showInvalidSheetId = computed(
-  () =>
-    errorMessage.value && !isAuthDenied.value && step.value === "migrate-form",
+  () => formError.value && !isAuthDenied.value && step.value === "migrate-form",
 );
 </script>
 
@@ -294,6 +298,21 @@ const showInvalidSheetId = computed(
           Dojo will request read access to the specified Google Sheet in order
           to import your budgets, actuals, and related data.
         </p>
+
+        <Surface
+          v-if="errorMessage"
+          variant="muted"
+          padding="var(--space-lg)"
+          :border="true"
+          class="onboarding__error-banner"
+        >
+          <Inline gap="var(--space-md)" align="start">
+            <span class="onboarding__error-icon" aria-hidden="true">
+              <PhWarningCircle :size="20" weight="fill" />
+            </span>
+            <p class="onboarding__error-desc">{{ errorMessage }}</p>
+          </Inline>
+        </Surface>
 
         <TextField
           v-model="sheetId"

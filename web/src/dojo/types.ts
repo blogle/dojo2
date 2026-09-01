@@ -264,6 +264,7 @@ export type GoogleOnboardingStatus = {
   authorized: boolean;
   message: string;
   auth_url?: string | null;
+  callback_origin?: string | null;
 };
 
 export type TransactionSystemCategory =

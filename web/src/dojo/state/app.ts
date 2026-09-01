@@ -241,7 +241,10 @@ async function beginGoogleOnboarding(): Promise<void> {
     }
 
     const apiOrigin = new URL(
-      import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000",
+      onboarding.callback_origin ??
+        import.meta.env.VITE_API_BASE_URL ??
+        window.location.origin,
+      window.location.origin,
     ).origin;
     const popup = window.open(
       onboarding.auth_url,

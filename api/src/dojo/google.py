@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from threading import RLock
 from typing import Any, cast
 
@@ -81,10 +82,28 @@ def exchange_google_code(
     return dict(token)
 
 
+@dataclass(frozen=True)
+class PendingOAuthAuthorization:
+    session_id: str
+    frontend_origin: str
+
+
 class OAuthTokenStore:
     def __init__(self) -> None:
         self._tokens_by_session_id: dict[str, dict[str, Any]] = {}
+        self._pending_by_state: dict[str, PendingOAuthAuthorization] = {}
         self._lock = RLock()
+
+    def begin_authorization(self, *, state: str, session_id: str, frontend_origin: str) -> None:
+        with self._lock:
+            self._pending_by_state[state] = PendingOAuthAuthorization(
+                session_id=session_id,
+                frontend_origin=frontend_origin,
+            )
+
+    def consume_authorization(self, state: str) -> PendingOAuthAuthorization | None:
+        with self._lock:
+            return self._pending_by_state.pop(state, None)
 
     def set(self, session_id: str, token: dict[str, Any]) -> None:
         with self._lock:
