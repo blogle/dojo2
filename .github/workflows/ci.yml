@@ -17,6 +17,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
 
+      - name: Install project dependencies
+        run: nix develop --command just setup
       - name: Run canonical CI command
         run: nix develop --command just ci
 
