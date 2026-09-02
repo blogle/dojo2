@@ -69,6 +69,7 @@
           tag = "latest";
           contents = [
             pkgs.bash
+            pkgs.coreutils
             apiPython
             apiSource
             apiLauncher
