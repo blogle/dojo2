@@ -46,16 +46,16 @@ jobs:
       - name: Build container
         run: |
           nix develop --command just build-web
-          nix build --impure .#container
+          nix build .#container
+          docker load < "$(readlink -f result)"
+          docker build --tag dojo-release:latest .
       - name: Publish staging image
         if: github.ref == 'refs/tags/staging' || github.ref == 'refs/heads/master'
         run: |
-          docker load < "$(readlink -f result)"
-          docker tag dojo:latest ghcr.io/blogle/dojo2:staging
+          docker tag dojo-release:latest ghcr.io/blogle/dojo2:staging
           docker push ghcr.io/blogle/dojo2:staging
       - name: Publish production image
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
-          docker load < "$(readlink -f result)"
-          docker tag dojo:latest "ghcr.io/blogle/dojo2:${GITHUB_REF_NAME}"
+          docker tag dojo-release:latest "ghcr.io/blogle/dojo2:${GITHUB_REF_NAME}"
           docker push "ghcr.io/blogle/dojo2:${GITHUB_REF_NAME}"
