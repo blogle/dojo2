@@ -46,7 +46,7 @@ jobs:
       - name: Build container
         run: |
           nix develop --command just build-web
-          nix build .#container
+          nix build --impure .#container
       - name: Publish staging image
         if: github.ref == 'refs/tags/staging' || github.ref == 'refs/heads/master'
         run: |
