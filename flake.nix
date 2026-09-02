@@ -33,6 +33,10 @@
           export PYTHONPATH=${apiSource}/app
           exec ${apiPython}/bin/uvicorn dojo.api.main:app --host 0.0.0.0 --port 8000
         '';
+        migrationLauncher = pkgs.writeShellScriptBin "dojo-migrate" ''
+          export PYTHONPATH=${apiSource}/app
+          exec ${apiPython}/bin/python -m dojo.migrations "$@"
+        '';
       in
       {
         devShells.default = pkgs.mkShell {
@@ -73,6 +77,7 @@
             apiPython
             apiSource
             apiLauncher
+            migrationLauncher
           ];
           config = {
             Cmd = [ "/bin/dojo-api" ];
