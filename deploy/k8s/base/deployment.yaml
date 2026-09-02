@@ -24,6 +24,9 @@ spec:
         env:
         - name: APP_ENV
           value: production
+        securityContext:
+          runAsUser: 1000
+          runAsGroup: 1000
         volumeMounts:
         - name: data
           mountPath: /data
