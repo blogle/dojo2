@@ -1,11 +1,11 @@
 FROM node:22-alpine AS frontend
 
-WORKDIR /build
+WORKDIR /build/web
 RUN corepack enable && corepack prepare pnpm@9.15.9 --activate
 COPY web/package.json web/pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
-COPY web/ ./web/
-RUN cd web && pnpm build
+COPY web/ ./
+RUN pnpm build
 
 FROM dojo:latest
 
