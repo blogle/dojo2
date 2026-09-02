@@ -47,11 +47,11 @@ jobs:
         if: github.ref == 'refs/tags/staging' || github.ref == 'refs/heads/master'
         run: |
           docker load < "$(readlink -f result)"
-          docker tag dojo:latest ghcr.io/blogle/dojo:staging
-          docker push ghcr.io/blogle/dojo:staging
+          docker tag dojo:latest ghcr.io/blogle/dojo2:staging
+          docker push ghcr.io/blogle/dojo2:staging
       - name: Publish production image
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
           docker load < "$(readlink -f result)"
-          docker tag dojo:latest "ghcr.io/blogle/dojo:${GITHUB_REF_NAME}"
-          docker push "ghcr.io/blogle/dojo:${GITHUB_REF_NAME}"
+          docker tag dojo:latest "ghcr.io/blogle/dojo2:${GITHUB_REF_NAME}"
+          docker push "ghcr.io/blogle/dojo2:${GITHUB_REF_NAME}"

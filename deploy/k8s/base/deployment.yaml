@@ -18,7 +18,7 @@ spec:
     spec:
       initContainers:
       - name: migrate
-        image: ghcr.io/blogle/dojo
+        image: ghcr.io/blogle/dojo2
         imagePullPolicy: IfNotPresent
         command: ["python", "-m", "dojo.migrations", "/data/dojo.duckdb"]
         env:
@@ -29,7 +29,7 @@ spec:
           mountPath: /data
       containers:
       - name: dojo
-        image: ghcr.io/blogle/dojo
+        image: ghcr.io/blogle/dojo2
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8000
