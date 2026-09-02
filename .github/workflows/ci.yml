@@ -42,7 +42,9 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build container
-        run: nix build .#container
+        run: |
+          nix develop --command just build-web
+          nix build .#container
       - name: Publish staging image
         if: github.ref == 'refs/tags/staging' || github.ref == 'refs/heads/master'
         run: |

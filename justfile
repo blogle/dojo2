@@ -139,5 +139,5 @@ check: format-check lint typecheck architecture-check migration-check test-unit 
 
 ci: check test-e2e container
 
-container:
+container: build-web
 	env -u LD_LIBRARY_PATH nix build .#container
