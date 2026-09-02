@@ -37,6 +37,10 @@
           export PYTHONPATH=${apiSource}/app
           exec ${apiPython}/bin/python -m dojo.migrations "$@"
         '';
+        frontendSource = pkgs.runCommand "dojo-frontend" { } ''
+          mkdir -p "$out/share/dojo"
+          ${pkgs.lib.optionalString (builtins.pathExists ./web/dist) "cp -r ${./web/dist}/. \"$out/share/dojo/\""}
+        '';
       in
       {
         devShells.default = pkgs.mkShell {
@@ -78,6 +82,7 @@
             apiSource
             apiLauncher
             migrationLauncher
+            frontendSource
           ];
           config = {
             Cmd = [ "/bin/dojo-api" ];

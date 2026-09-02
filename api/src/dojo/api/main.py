@@ -6,6 +6,7 @@ from pathlib import Path
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
+from starlette.staticfiles import StaticFiles
 
 from dojo.api.e2e import router as e2e_router
 from dojo.api.health import router as health_router
@@ -66,6 +67,9 @@ def create_app(app_settings: Settings | None = None) -> FastAPI:
         and settings.e2e_run_dir
     ):
         app.include_router(e2e_router)
+    frontend_dir = Path("/share/dojo")
+    if frontend_dir.is_dir():
+        app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="frontend")
     return app
 
 

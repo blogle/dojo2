@@ -42,6 +42,8 @@ spec:
           value: production
         - name: DUCKDB_PATH
           value: /data/dojo.duckdb
+        - name: FRONTEND_BASE_URL
+          value: http://localhost:8000
         volumeMounts:
         - name: data
           mountPath: /data
