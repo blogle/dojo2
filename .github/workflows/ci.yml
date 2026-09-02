@@ -41,6 +41,8 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install project dependencies
+        run: nix develop --command just setup
       - name: Build container
         run: |
           nix develop --command just build-web
