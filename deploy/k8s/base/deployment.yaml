@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dojo
+  labels:
+    app: dojo
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: dojo
+  template:
+    metadata:
+      labels:
+        app: dojo
+    spec:
+      initContainers:
+      - name: migrate
+        image: ghcr.io/blogle/dojo
+        imagePullPolicy: IfNotPresent
+        command: ["python", "-m", "dojo.migrations", "/data/dojo.duckdb"]
+        env:
+        - name: APP_ENV
+          value: production
+        volumeMounts:
+        - name: data
+          mountPath: /data
+      containers:
+      - name: dojo
+        image: ghcr.io/blogle/dojo
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8000
+          name: http
+        env:
+        - name: APP_ENV
+          value: production
+        - name: DUCKDB_PATH
+          value: /data/dojo.duckdb
+        volumeMounts:
+        - name: data
+          mountPath: /data
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 1000m
+            memory: 1Gi
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          runAsGroup: 1000
+          readOnlyRootFilesystem: true
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: dojo-data
+      securityContext:
+        fsGroup: 1000

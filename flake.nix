@@ -17,11 +17,13 @@
           ps.duckdb
           ps.fastapi
           ps.httpx
+          ps.authlib
           ps.itsdangerous
           ps.pydantic
           ps.pydantic-settings
           ps.pytz
           ps.uvicorn
+          ps.tenacity
         ]);
         apiSource = pkgs.runCommand "dojo-api-source" { } ''
           mkdir -p "$out/app"
@@ -63,7 +65,7 @@
         };
 
         packages.container = pkgs.dockerTools.buildLayeredImage {
-          name = "dojo-api";
+          name = "dojo";
           tag = "latest";
           contents = [
             pkgs.bash
