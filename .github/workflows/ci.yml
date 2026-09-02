@@ -8,7 +8,7 @@ on:
   pull_request:
   push:
     branches: [master]
-    tags: ["v*"]
+    tags: ["staging", "v*"]
 
 jobs:
   verify:
