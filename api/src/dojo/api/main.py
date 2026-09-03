@@ -5,8 +5,10 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.staticfiles import StaticFiles
+from starlette.types import Scope
 
 from dojo.api.e2e import router as e2e_router
 from dojo.api.health import router as health_router
@@ -15,6 +17,16 @@ from dojo.api.settings import Settings, get_settings
 from dojo.e2e import fixed_e2e_clock
 from dojo.google import OAuthTokenStore
 from dojo.service import DojoService
+
+
+class SPAStaticFiles(StaticFiles):
+    async def get_response(self, path: str, scope: Scope) -> Response:
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            if exc.status_code == 404 and "." not in Path(path).name:
+                return await super().get_response("index.html", scope)
+            raise
 
 
 def create_app(app_settings: Settings | None = None) -> FastAPI:
@@ -69,7 +81,7 @@ def create_app(app_settings: Settings | None = None) -> FastAPI:
         app.include_router(e2e_router)
     frontend_dir = Path("/share/dojo")
     if frontend_dir.is_dir():
-        app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="frontend")
+        app.mount("/", SPAStaticFiles(directory=frontend_dir, html=True), name="frontend")
     return app
 
 
