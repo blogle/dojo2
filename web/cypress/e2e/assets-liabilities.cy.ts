@@ -430,7 +430,7 @@ describe("Tracking cutover", () => {
     cy.get('[data-cy="cutover-successor"]').should("have.length", 3);
     cy.get('[data-cy="form-modal-root"]')
       .should("contain", "Successor total: $500,000.00")
-      .and("contain", "Variance: $0.00");
+      .and("contain", "Exact match");
 
     cy.intercept("POST", "**/cutovers").as("applyCutover");
     cy.get('[data-cy="form-modal-root"]')
