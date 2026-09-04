@@ -69,12 +69,34 @@ class AllocationRequest(BaseModel):
     to_bucket_id: str
 
 
+class MoveAllocationRequest(AllocationRequest):
+    client_operation_id: UUID
+
+    @model_validator(mode="after")
+    def validate_distinct_buckets(self) -> "MoveAllocationRequest":
+        if self.from_bucket_id == self.to_bucket_id:
+            raise ValueError("Move requires distinct buckets")
+        return self
+
+
 class FundCategoryRequest(BaseModel):
     client_operation_id: UUID
     date: date
     category_id: str
     amount_minor: int = Field(gt=0)
     memo: str = ""
+
+
+class GroupFundingItem(BaseModel):
+    category_id: str
+    amount_minor: int = Field(gt=0)
+
+
+class FundGroupRequest(BaseModel):
+    client_operation_id: UUID
+    date: date
+    group_id: str
+    items: list[GroupFundingItem] = Field(min_length=1)
 
 
 class TransactionPayload(BaseModel):
@@ -93,6 +115,10 @@ class TransactionPayload(BaseModel):
         if (self.category_id is None) == (self.system_category is None):
             raise ValueError("Exactly one of category_id or system_category must be set")
         return self
+
+
+class TransactionUpdatePayload(TransactionPayload):
+    expected_version: UUID
 
 
 class TransferPayload(BaseModel):

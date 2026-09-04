@@ -67,6 +67,7 @@ const emit = defineEmits<{
   toggle: [key: string];
   select: [key: string];
   reorder: [key: string, targetKey: string, position: "before" | "after"];
+  hierarchyChange: [groups: Array<{ groupId: string; categoryIds: string[] }>];
 }>();
 
 const expandedState = ref<Record<string, boolean>>({});
@@ -141,6 +142,18 @@ const rowsFromDom = (container: HTMLElement): DragRow[] => {
     if (childKey) return [{ kind: "child", key: childKey }];
     return [];
   });
+};
+
+const emitHierarchyFromDom = (container: HTMLElement) => {
+  const groups: Array<{ groupId: string; categoryIds: string[] }> = [];
+  for (const row of rowsFromDom(container)) {
+    if (row.kind === "group") {
+      groups.push({ groupId: row.key, categoryIds: [] });
+    } else if (groups.length > 0) {
+      groups[groups.length - 1].categoryIds.push(row.key);
+    }
+  }
+  emit("hierarchyChange", groups);
 };
 
 const flatRows = ref<HierarchicalCategoryRow[]>([]);
@@ -228,27 +241,33 @@ const setupDraggable = async () => {
             }
           }
         } else {
-          let srcParent: string | undefined;
-          for (const [parentKey, children] of Object.entries(
-            childOrder.value,
-          )) {
-            if (children.includes(src)) {
-              srcParent = parentKey;
-              break;
+          const container = movedEl.parentElement;
+          if (container) {
+            const hierarchy: Array<{
+              groupId: string;
+              categoryIds: string[];
+            }> = [];
+            for (const row of rowsFromDom(container)) {
+              if (row.kind === "group") {
+                hierarchy.push({ groupId: row.key, categoryIds: [] });
+              } else if (hierarchy.length > 0) {
+                hierarchy[hierarchy.length - 1].categoryIds.push(row.key);
+              }
             }
-          }
-          if (srcParent) {
-            const siblings = childOrder.value[srcParent];
-            const srcIdx = siblings.indexOf(src);
-            if (srcIdx !== -1) siblings.splice(srcIdx, 1);
-            const insertIdx = newIndex > srcIdx ? newIndex - 1 : newIndex;
-            siblings.splice(insertIdx, 0, src);
-            const tgt = siblings[newIndex];
-            emit("reorder", src, tgt, pos);
+            topOrder.value = hierarchy.map((group) => group.groupId);
+            childOrder.value = Object.fromEntries(
+              hierarchy.map((group) => [group.groupId, group.categoryIds]),
+            );
+            const target = hierarchy
+              .flatMap((group) => group.categoryIds)
+              .find((categoryId) => categoryId !== src);
+            if (target) emit("reorder", src, target, pos);
           }
         }
 
         rebuildFlatRows();
+        const container = movedEl.parentElement;
+        if (container) emitHierarchyFromDom(container);
       },
     });
   } catch {
@@ -262,7 +281,11 @@ onMounted(() => {
 
 watch(
   () => props.reorderable,
-  () => {
+  (reorderable) => {
+    if (!reorderable) {
+      initState();
+      rebuildFlatRows();
+    }
     void setupDraggable();
   },
 );

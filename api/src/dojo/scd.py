@@ -28,7 +28,7 @@ def insert_version(
     connection: DuckDBPyConnection,
     table: str,
     values: dict[str, Any],
-) -> None:
+) -> str:
     data = dict(values)
     data.setdefault("row_id", str(uuid4()))
     columns = ", ".join(data.keys())
@@ -42,6 +42,7 @@ def insert_version(
         ),
         tuple(data.values()),
     )
+    return str(data["row_id"])
 
 
 def _sql_literal(value: Any) -> str:
@@ -118,3 +119,24 @@ def close_current_version(
         ),
         (now, logical_id),
     )
+
+
+def close_current_version_if_expected(
+    connection: DuckDBPyConnection,
+    table: str,
+    logical_column: str,
+    logical_id: str,
+    expected_row_id: str,
+    *,
+    now: datetime,
+) -> bool:
+    result = connection.execute(
+        render_sql(
+            "templates/close_current_version_if_expected",
+            table=table,
+            logical_column=logical_column,
+            max_ts=MAX_TS,
+        ),
+        (now, logical_id, expected_row_id),
+    )
+    return result.fetchone() is not None

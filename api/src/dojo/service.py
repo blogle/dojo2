@@ -66,6 +66,7 @@ from dojo.reconciliation import (
 from dojo.scd import (
     batch_insert_versions,
     close_current_version,
+    close_current_version_if_expected,
     insert_version,
     replace_current_version,
 )
@@ -77,6 +78,14 @@ class ImportValidationError(Exception):
     def __init__(self, report: dict[str, Any]) -> None:
         super().__init__("Import validation failed")
         self.report = report
+
+
+class TransactionNotFoundError(ValueError):
+    pass
+
+
+class TransactionVersionConflictError(ValueError):
+    pass
 
 
 _TREND_DAYS = {"7d": 7, "1m": 31, "3m": 93, "6m": 186, "1y": 366, "all": 36500}
@@ -607,15 +616,16 @@ class DojoService:
         tracking_account_rows: list[dict[str, Any]] = []
         tracking_detail_rows: list[dict[str, Any]] = []
         valuation_rows: list[dict[str, Any]] = []
+        tracking_account_ids_by_name: dict[str, str] = {}
 
         def prepare_valuations() -> None:
             for valuation in bundle.valuations:
                 account_id: str | None = None
                 if valuation.account_name is not None:
                     account_id = account_ids_by_name[valuation.account_name]
-                elif valuation.raw_name not in account_ids_by_name:
+                elif valuation.raw_name not in tracking_account_ids_by_name:
                     new_account_id = self._tracking_account_id(valuation.raw_name)
-                    account_ids_by_name[valuation.raw_name] = new_account_id
+                    tracking_account_ids_by_name[valuation.raw_name] = new_account_id
                     tracking_account_rows.append(
                         {
                             "row_id": str(uuid4()),
@@ -652,7 +662,7 @@ class DojoService:
                     )
                     account_id = new_account_id
                 else:
-                    account_id = account_ids_by_name[valuation.raw_name]
+                    account_id = tracking_account_ids_by_name[valuation.raw_name]
 
                 valuation_rows.append(
                     {
@@ -896,13 +906,11 @@ class DojoService:
         review_items = preview["review_items"]
 
         item_by_name = {item["raw_name"]: item for item in review_items}
-        decision_by_name = {d["raw_name"]: d for d in decisions}
+        decision_by_name = self._parse_import_decisions(review_items, decisions)
 
         low_count = 0
         for item in review_items:
-            decision = decision_by_name.get(item["raw_name"])
-            if decision is None:
-                continue
+            decision = decision_by_name[item["raw_name"]]
             is_unchanged = (
                 decision.get("treatment", item["suggested_treatment"])
                 == item["suggested_treatment"]
@@ -959,27 +967,15 @@ class DojoService:
         committed_valuations = []
 
         for valuation in bundle.valuations:
-            decision = decision_by_name.get(valuation.raw_name)
-            treatment = (
-                decision.get("treatment")
-                if decision
-                else item_by_name.get(valuation.raw_name, {}).get("suggested_treatment")
-            )
-            if treatment is None:
-                continue
+            decision = decision_by_name[valuation.raw_name]
+            treatment = decision["treatment"]
 
             if treatment == "DO_NOT_IMPORT":
                 skipped_categories.add(valuation.raw_name)
                 continue
 
             if treatment == "DUPLICATE_BUDGET_ACCOUNT":
-                matched_account_id = (
-                    decision.get("matched_account_id")
-                    if decision
-                    else item_by_name.get(valuation.raw_name, {}).get(
-                        "suggested_matched_account_id"
-                    )
-                )
+                matched_account_id = decision.get("matched_account_id")
                 matched_account_name = (
                     account_names_by_id.get(matched_account_id)
                     if isinstance(matched_account_id, str)
@@ -992,15 +988,16 @@ class DojoService:
                     continue
 
             if treatment == "IMPORT_TRACKING_ACCOUNT":
+                original_raw_name = valuation.raw_name
                 suggested_polarity = item_by_name.get(valuation.raw_name, {}).get(
                     "suggested_polarity", "ASSET"
                 )
-                polarity = (
-                    decision.get("polarity", suggested_polarity) if decision else suggested_polarity
-                )
-                tracking_categories.add(valuation.raw_name)
+                polarity = decision.get("polarity", suggested_polarity)
+                tracking_categories.add(original_raw_name)
 
                 valuation.account_name = None
+                if original_raw_name in account_ids_by_name:
+                    valuation.raw_name = f"{original_raw_name} (tracking)"
                 valuation.is_debt = polarity == "LIABILITY"
                 committed_valuations.append(valuation)
 
@@ -1018,34 +1015,115 @@ class DojoService:
         }
 
         imported_at = self.clock.now()
-        with self.db.transaction() as connection:
-            self._clear_domain_tables(connection)
-            self._insert_bundle(connection, bundle, imported_at)
-            connection.execute(
-                load_sql("queries/insert_import_batch"),
-                (
-                    str(uuid4()),
-                    bundle.spreadsheet_id,
-                    bundle.spreadsheet_title,
-                    imported_at,
-                    imported_at,
-                    json_dumps(import_summary | {"decisions_summary": decisions_summary}),
-                ),
+        import_run_id = str(uuid4())
+        try:
+            with self.db.transaction() as connection:
+                claimed = connection.execute(
+                    load_sql("queries/claim_import_draft"), (draft_id,)
+                ).fetchone()
+                if claimed is None:
+                    raise ValueError("Draft not found or already used")
+                self._clear_domain_tables(connection)
+                self._insert_bundle(connection, bundle, imported_at)
+                validation_report = self._validate_bundle(bundle)
+                if validation_report["hard_failures"]:
+                    raise ImportValidationError(validation_report)
+                connection.execute(
+                    load_sql("queries/insert_import_batch"),
+                    (
+                        str(uuid4()),
+                        bundle.spreadsheet_id,
+                        bundle.spreadsheet_title,
+                        imported_at,
+                        imported_at,
+                        json_dumps(
+                            validation_report["summary"] | {"decisions_summary": decisions_summary}
+                        ),
+                    ),
+                )
+        except ImportValidationError as exc:
+            self._record_import_run(
+                import_run_id=import_run_id,
+                spreadsheet_id=bundle.spreadsheet_id,
+                spreadsheet_title=bundle.spreadsheet_title,
+                started_at=imported_at,
+                completed_at=self.clock.now(),
+                status="failed",
+                source_kind=source_kind,
+                validation_passed=False,
+                summary={
+                    "hard_failures": len(exc.report["hard_failures"]),
+                    "warnings": len(exc.report["warnings"]),
+                },
+                validation_report=exc.report,
+                error_message="validation failed",
             )
+            return {
+                "ok": False,
+                "validation_report": exc.report,
+                "import_status": self.get_import_status(),
+            }
 
-        self.db.execute(
-            load_sql("queries/mark_import_draft_committed"),
-            (draft_id,),
+        self._record_import_run(
+            import_run_id=import_run_id,
+            spreadsheet_id=bundle.spreadsheet_id,
+            spreadsheet_title=bundle.spreadsheet_title,
+            started_at=imported_at,
+            completed_at=self.clock.now(),
+            status="succeeded",
+            source_kind=source_kind,
+            validation_passed=True,
+            summary=validation_report["summary"],
+            validation_report=validation_report,
+            error_message=None,
         )
 
         return {
             "ok": True,
             "import_summary": import_summary,
             "decisions_summary": decisions_summary,
+            "validation_report": validation_report,
             "import_batch": self.db.fetch_one(load_sql("queries/latest_import_batch")),
             "app_status": self.get_app_status(),
             "import_status": self.get_import_status(),
         }
+
+    @staticmethod
+    def _parse_import_decisions(
+        review_items: list[dict[str, Any]], decisions: list[dict[str, Any]]
+    ) -> dict[str, dict[str, Any]]:
+        expected_names = {str(item["raw_name"]) for item in review_items}
+        decision_names = [str(decision["raw_name"]) for decision in decisions]
+        if len(decision_names) != len(set(decision_names)):
+            raise ValueError("Import review contains duplicate decisions")
+        provided_names = set(decision_names)
+        if provided_names != expected_names:
+            missing = sorted(expected_names - provided_names)
+            unknown = sorted(provided_names - expected_names)
+            details = []
+            if missing:
+                details.append(f"missing: {', '.join(missing)}")
+            if unknown:
+                details.append(f"unknown: {', '.join(unknown)}")
+            raise ValueError(f"Import review decisions do not match preview ({'; '.join(details)})")
+
+        items_by_name = {str(item["raw_name"]): item for item in review_items}
+        parsed = {str(decision["raw_name"]): decision for decision in decisions}
+        for raw_name, decision in parsed.items():
+            treatment = decision["treatment"]
+            if treatment == "DUPLICATE_BUDGET_ACCOUNT":
+                matched_account_id = decision.get("matched_account_id")
+                candidates = set(items_by_name[raw_name].get("candidate_account_ids", []))
+                if not matched_account_id or matched_account_id not in candidates:
+                    raise ValueError(
+                        f"Duplicate decision for {raw_name} needs a valid account match"
+                    )
+            if treatment == "IMPORT_TRACKING_ACCOUNT" and decision.get("polarity") not in {
+                "ASSET",
+                "LIABILITY",
+            }:
+                raise ValueError(f"Tracking decision for {raw_name} needs a polarity")
+        return parsed
 
     def _validate_bundle(self, bundle: ParsedImportBundle) -> dict[str, Any]:
         return build_validation_report(self, bundle)
@@ -1495,8 +1573,9 @@ class DojoService:
             )
             counterpart = operation_counterpart
             results.append(
-                row
+                {key: value for key, value in row.items() if key != "row_id"}
                 | {
+                    "version": str(row["row_id"]),
                     "account_name": account["name"],
                     "category_name": category["name"] if category else None,
                     "is_hidden_entity": hidden,
@@ -2058,6 +2137,67 @@ class DojoService:
             )
         return {"allocation_id": allocation_id}
 
+    def move_allocation(
+        self,
+        *,
+        client_operation_id: str,
+        from_bucket_id: str,
+        to_bucket_id: str,
+        amount_minor: int,
+        memo: str,
+        allocation_date: date,
+    ) -> dict[str, Any]:
+        if amount_minor <= 0:
+            raise ValueError("Allocation amount must be positive")
+        if from_bucket_id == to_bucket_id:
+            raise ValueError("Move requires distinct buckets")
+        now = self.clock.now()
+        request = {
+            "from_bucket_id": from_bucket_id,
+            "to_bucket_id": to_bucket_id,
+            "amount_minor": amount_minor,
+            "memo": memo,
+            "date": allocation_date,
+        }
+
+        def apply_move(connection: duckdb.DuckDBPyConnection, _fingerprint: str) -> dict[str, Any]:
+            for bucket_id in (from_bucket_id, to_bucket_id):
+                if (
+                    connection.execute(
+                        load_sql("queries/current_allocatable_budget_bucket_by_id"),
+                        (bucket_id,),
+                    ).fetchone()
+                    is None
+                ):
+                    raise ValueError("Move requires active allocatable buckets")
+            allocation_id = str(uuid4())
+            insert_version(
+                connection,
+                "allocations",
+                {
+                    "allocation_id": allocation_id,
+                    "date": allocation_date,
+                    "from_bucket_id": from_bucket_id,
+                    "to_bucket_id": to_bucket_id,
+                    "amount_minor": amount_minor,
+                    "memo": memo,
+                    "valid_from": now,
+                    "valid_to": MAX_TS,
+                    "created_at": now,
+                    "created_by_user_id": None,
+                },
+            )
+            return {"allocation_id": allocation_id}
+
+        return execute_financial_command(
+            self.db,
+            client_operation_id=client_operation_id,
+            command_kind="MOVE_ALLOCATION",
+            request=request,
+            command=apply_move,
+            now=now,
+        )
+
     def fund_category(
         self,
         *,
@@ -2132,6 +2272,114 @@ class DojoService:
             now=now,
         )
 
+    def fund_group(
+        self,
+        *,
+        client_operation_id: str,
+        group_id: str,
+        items: list[dict[str, Any]],
+        allocation_date: date,
+    ) -> dict[str, Any]:
+        category_ids = [str(item["category_id"]) for item in items]
+        if len(category_ids) != len(set(category_ids)):
+            raise ValueError("Group funding categories must be unique")
+        now = self.clock.now()
+        request = {
+            "group_id": group_id,
+            "items": items,
+            "date": allocation_date,
+        }
+
+        def apply_group_funding(
+            connection: duckdb.DuckDBPyConnection, _fingerprint: str
+        ) -> dict[str, Any]:
+            planned: list[tuple[dict[str, Any], int, str]] = []
+            for item in items:
+                cursor = connection.execute(
+                    load_sql("queries/current_category_by_id"),
+                    (item["category_id"],),
+                )
+                row = cursor.fetchone()
+                if row is None:
+                    raise ValueError("Group funding category not found")
+                category = dict(zip([column[0] for column in cursor.description], row, strict=True))
+                if (
+                    str(category["group_id"]) != group_id
+                    or not category["is_active"]
+                    or category["is_hidden"]
+                    or category["category_kind"] != CATEGORY_KIND_STANDARD
+                ):
+                    raise ValueError(
+                        "Group funding requires active categories in the selected group"
+                    )
+                bucket = connection.execute(
+                    load_sql("queries/current_allocatable_budget_bucket_by_category"),
+                    (item["category_id"],),
+                ).fetchone()
+                if bucket is None:
+                    raise ValueError("Category does not have an allocatable budget bucket")
+                planned.append((category, int(item["amount_minor"]), str(bucket[0])))
+
+            def priority(entry: tuple[dict[str, Any], int, str]) -> tuple[Any, ...]:
+                category = entry[0]
+                due_date = str(category["goal_due_date"] or "9999-12-31")
+                recurring_rank = 0 if category.get("goal_frequency") else 1
+                discretionary_rank = 1 if category.get("goal_type") == "DISCRETIONARY" else 0
+                return (
+                    category["goal_due_date"] is None,
+                    due_date,
+                    recurring_rank,
+                    discretionary_rank,
+                    int(category["sort_order"]),
+                    str(category["category_id"]),
+                )
+
+            remaining = max(0, int(self.compute_available_to_budget()))
+            results = []
+            for category, requested, bucket_id in sorted(planned, key=priority):
+                funded = min(requested, remaining)
+                status = "unfunded"
+                allocation_id = None
+                if funded > 0:
+                    allocation_id = str(uuid4())
+                    insert_version(
+                        connection,
+                        "allocations",
+                        {
+                            "allocation_id": allocation_id,
+                            "date": allocation_date,
+                            "from_bucket_id": str(SYSTEM_ATB_BUCKET_ID),
+                            "to_bucket_id": bucket_id,
+                            "amount_minor": funded,
+                            "memo": f"Fund {category['name']}",
+                            "valid_from": now,
+                            "valid_to": MAX_TS,
+                            "created_at": now,
+                            "created_by_user_id": None,
+                        },
+                    )
+                    remaining -= funded
+                    status = "fully_funded" if funded == requested else "partially_funded"
+                results.append(
+                    {
+                        "category_id": str(category["category_id"]),
+                        "requested_minor": requested,
+                        "funded_minor": funded,
+                        "status": status,
+                        "allocation_id": allocation_id,
+                    }
+                )
+            return {"items": results, "remaining_available_to_budget_minor": remaining}
+
+        return execute_financial_command(
+            self.db,
+            client_operation_id=client_operation_id,
+            command_kind="FUND_GROUP",
+            request=request,
+            command=apply_group_funding,
+            now=now,
+        )
+
     def create_transaction(self, payload: dict[str, Any]) -> dict[str, Any]:
         now = self.clock.now()
         transaction_id = str(uuid4())
@@ -2159,7 +2407,7 @@ class DojoService:
                 if payload.get("system_category") == SYSTEM_CATEGORY_TRANSFER
                 else None
             )
-            insert_version(
+            version = insert_version(
                 connection,
                 "transactions",
                 {
@@ -2187,23 +2435,38 @@ class DojoService:
                 explicit_loan_account_id=payload.get("loan_account_id"),
                 now=now,
             )
-        return {"transaction_id": transaction_id}
+        return {"transaction_id": transaction_id, "version": version}
 
     def update_transaction(self, transaction_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         self._validate_transaction_payload(payload)
-        current = self.db.fetch_one(
-            load_sql("queries/current_transaction_by_id"),
-            (transaction_id,),
-        )
-        if current is None:
-            raise ValueError("Transaction not found")
         now = self.clock.now()
         with self.db.transaction() as connection:
-            replace_current_version(
+            cursor = connection.execute(
+                load_sql("queries/current_transaction_by_id"),
+                (transaction_id,),
+            )
+            current_row = cursor.fetchone()
+            if current_row is None:
+                raise TransactionNotFoundError("Transaction not found")
+            current = dict(
+                zip(
+                    [column[0] for column in cursor.description],
+                    current_row,
+                    strict=True,
+                )
+            )
+            if not close_current_version_if_expected(
                 connection,
                 "transactions",
                 "transaction_id",
                 transaction_id,
+                str(payload["expected_version"]),
+                now=now,
+            ):
+                raise TransactionVersionConflictError("Transaction version conflict")
+            version = insert_version(
+                connection,
+                "transactions",
                 {
                     "row_id": str(uuid4()),
                     "transaction_id": transaction_id,
@@ -2218,8 +2481,9 @@ class DojoService:
                     "record_order": current.get("record_order"),
                     "created_at": current["created_at"],
                     "created_by_user_id": None,
+                    "valid_from": now,
+                    "valid_to": MAX_TS,
                 },
-                now=now,
             )
             self._insert_loan_attribution_if_applicable(
                 connection,
@@ -2229,18 +2493,26 @@ class DojoService:
                 explicit_loan_account_id=payload.get("loan_account_id"),
                 now=now,
             )
-        return {"transaction_id": transaction_id}
+        return {"transaction_id": transaction_id, "version": version}
 
-    def delete_transaction(self, transaction_id: str) -> None:
+    def delete_transaction(self, transaction_id: str, expected_version: str) -> None:
         now = self.clock.now()
         with self.db.transaction() as connection:
-            close_current_version(
+            current = connection.execute(
+                load_sql("queries/current_transaction_by_id"),
+                (transaction_id,),
+            ).fetchone()
+            if current is None:
+                raise TransactionNotFoundError("Transaction not found")
+            if not close_current_version_if_expected(
                 connection,
                 "transactions",
                 "transaction_id",
                 transaction_id,
+                expected_version,
                 now=now,
-            )
+            ):
+                raise TransactionVersionConflictError("Transaction version conflict")
 
     def restore_transaction(self, transaction_id: str) -> dict[str, Any]:
         now = self.clock.now()
@@ -2268,7 +2540,7 @@ class DojoService:
                 raise ValueError("Transaction not found or not deleted")
 
             latest_closed = rows[0]
-            insert_version(
+            version = insert_version(
                 connection,
                 "transactions",
                 {
@@ -2288,7 +2560,7 @@ class DojoService:
                     "created_by_user_id": latest_closed["created_by_user_id"],
                 },
             )
-        return {"transaction_id": transaction_id}
+        return {"transaction_id": transaction_id, "version": version}
 
     def create_transfer(
         self,

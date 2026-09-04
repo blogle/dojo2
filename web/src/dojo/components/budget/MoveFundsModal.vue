@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 
 import type { Category } from "../../types";
 import { formatCurrency, parseMoneyInput } from "../../utils/currency";
@@ -70,10 +70,17 @@ function handleSubmit() {
     to: toCategoryId.value,
     amountMinor: amountMinor.value,
   });
-  fromCategoryId.value = "";
-  toCategoryId.value = "";
-  amountString.value = "";
 }
+
+watch(
+  () => props.visible,
+  (visible) => {
+    if (visible) return;
+    fromCategoryId.value = "";
+    toCategoryId.value = "";
+    amountString.value = "";
+  },
+);
 </script>
 
 <template>

@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import json
 import secrets
-from typing import Any, cast
+from typing import Annotated, Any, cast
 from urllib.parse import urlsplit
+from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
@@ -19,6 +20,7 @@ from dojo.api.models import (
     CategoryUpdatePayload,
     CreditCardPaymentPayload,
     FundCategoryRequest,
+    FundGroupRequest,
     GoalPayload,
     ImportCommitRequest,
     ImportRequest,
@@ -29,12 +31,14 @@ from dojo.api.models import (
     InvestmentTransferPayload,
     LoanBalanceSnapshotPayload,
     LoanPaymentPayload,
+    MoveAllocationRequest,
     ReconciliationApplyPayload,
     ReconciliationDraftPayload,
     TangibleAssetValuationPayload,
     TrackingAccountSnapshotPayload,
     TrackingCutoverPayload,
     TransactionPayload,
+    TransactionUpdatePayload,
     TransferPayload,
 )
 from dojo.api.settings import Settings
@@ -46,7 +50,11 @@ from dojo.google import (
     fetch_sheet_named_ranges,
 )
 from dojo.importer import consumed_named_range_aliases, extract_sheet_id
-from dojo.service import DojoService
+from dojo.service import (
+    DojoService,
+    TransactionNotFoundError,
+    TransactionVersionConflictError,
+)
 
 router = APIRouter(prefix="/api")
 
@@ -296,15 +304,36 @@ def fund_category(request: Request, payload: FundCategoryRequest) -> dict[str, A
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.post("/allocations/fund-group")
+def fund_group(request: Request, payload: FundGroupRequest) -> dict[str, Any]:
+    try:
+        return get_service(request).fund_group(
+            client_operation_id=str(payload.client_operation_id),
+            group_id=payload.group_id,
+            items=[item.model_dump() for item in payload.items],
+            allocation_date=payload.date,
+        )
+    except CommandConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.post("/allocations/move")
-def move_money(request: Request, payload: AllocationRequest) -> dict[str, Any]:
-    return get_service(request).create_allocation(
-        from_bucket_id=payload.from_bucket_id,
-        to_bucket_id=payload.to_bucket_id,
-        amount_minor=payload.amount_minor,
-        memo=payload.memo,
-        allocation_date=payload.date,
-    )
+def move_money(request: Request, payload: MoveAllocationRequest) -> dict[str, Any]:
+    try:
+        return get_service(request).move_allocation(
+            client_operation_id=str(payload.client_operation_id),
+            from_bucket_id=payload.from_bucket_id,
+            to_bucket_id=payload.to_bucket_id,
+            amount_minor=payload.amount_minor,
+            memo=payload.memo,
+            allocation_date=payload.date,
+        )
+    except CommandConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/allocations/return-to-atb")
@@ -368,17 +397,45 @@ def create_transaction(request: Request, payload: TransactionPayload) -> dict[st
 
 @router.put("/transactions/{transaction_id}")
 def update_transaction(
-    request: Request, transaction_id: str, payload: TransactionPayload
+    request: Request, transaction_id: str, payload: TransactionUpdatePayload
 ) -> dict[str, Any]:
     try:
         return get_service(request).update_transaction(transaction_id, payload.model_dump())
+    except TransactionVersionConflictError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "transaction_version_conflict",
+                "message": "This transaction changed after it was loaded.",
+            },
+        ) from exc
+    except TransactionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.delete("/transactions/{transaction_id}")
-def delete_transaction(request: Request, transaction_id: str) -> dict[str, Any]:
-    get_service(request).delete_transaction(transaction_id)
+def delete_transaction(
+    request: Request,
+    transaction_id: str,
+    *,
+    expected_version: Annotated[UUID, Query()],
+) -> dict[str, Any]:
+    try:
+        get_service(request).delete_transaction(transaction_id, str(expected_version))
+    except TransactionVersionConflictError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "transaction_version_conflict",
+                "message": "This transaction changed after it was loaded.",
+            },
+        ) from exc
+    except TransactionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"ok": True}
 
 

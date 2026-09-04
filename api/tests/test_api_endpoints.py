@@ -450,7 +450,9 @@ def test_delete_then_restore_preserves_transaction_id(monkeypatch, tmp_path) -> 
         tx_id = tx["transaction_id"]
 
         # Delete it
-        delete_resp = client.delete(f"/api/transactions/{tx_id}")
+        delete_resp = client.delete(
+            f"/api/transactions/{tx_id}", params={"expected_version": tx["version"]}
+        )
         assert delete_resp.status_code == 200
         assert delete_resp.json()["ok"] is True
 
@@ -657,8 +659,78 @@ def test_commit_import_draft_imports_data(monkeypatch, tmp_path) -> None:
         assert commit_result.status_code == 200
         commit_body = commit_result.json()
         assert commit_body["ok"] is True
+        assert commit_body["validation_report"]["passed"] is True
         assert commit_body["decisions_summary"]["tracking_created"] > 0
 
         status = client.get("/api/app/status")
         assert status.status_code == 200
         assert status.json()["ready"] is True
+
+
+def test_transaction_update_rejects_stale_version(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("SESSION_SECRET", "test-secret")
+    monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
+    monkeypatch.setenv(
+        "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
+    )
+    provisioned_main_module(monkeypatch, tmp_path, "api-test.duckdb")
+
+    with TestClient(main_module.app) as client:
+        assert (
+            client.post(
+                "/api/import/google-sheet", json={"sheet_url_or_id": "fixture://default"}
+            ).status_code
+            == 200
+        )
+        tx = client.get("/api/transactions", params={"show_hidden": "true", "limit": 1}).json()[
+            "items"
+        ][0]
+        payload = {
+            "date": tx["date"],
+            "account_id": tx["account_id"],
+            "amount_minor": tx["amount_minor"],
+            "category_id": tx["category_id"],
+            "system_category": tx["system_category"],
+            "status": tx["status"],
+            "memo": "first edit",
+            "expected_version": tx["version"],
+        }
+        first = client.put(f"/api/transactions/{tx['transaction_id']}", json=payload)
+        assert first.status_code == 200
+        assert first.json()["version"] != tx["version"]
+
+        stale = client.put(
+            f"/api/transactions/{tx['transaction_id']}",
+            json=payload | {"memo": "stale edit"},
+        )
+        assert stale.status_code == 409
+        assert stale.json()["detail"]["code"] == "transaction_version_conflict"
+        current = client.get(
+            "/api/transactions", params={"show_hidden": "true", "limit": 100}
+        ).json()["items"]
+        updated = next(item for item in current if item["transaction_id"] == tx["transaction_id"])
+        assert updated["memo"] == "first edit"
+
+
+def test_reviewed_import_requires_complete_decisions(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("SESSION_SECRET", "test-secret")
+    monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
+    monkeypatch.setenv(
+        "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
+    )
+    provisioned_main_module(monkeypatch, tmp_path, "api-test.duckdb")
+
+    with TestClient(main_module.app) as client:
+        analysis = client.post(
+            "/api/import/google-sheet/analyze", json={"sheet_url_or_id": "fixture://default"}
+        ).json()
+        response = client.post(
+            "/api/import/google-sheet/commit",
+            json={
+                "draft_id": analysis["draft_id"],
+                "decisions": [],
+                "low_confidence_confirmed": False,
+            },
+        )
+        assert response.status_code == 400
+        assert "missing" in response.json()["detail"]

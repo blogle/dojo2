@@ -162,7 +162,7 @@ function stubFetch(
       path === "/api/categories" ||
       path.startsWith("/api/categories?")
     ) {
-      body = mockCategories;
+      body = { groups: mockGroups, items: mockCategories };
     } else if (path.startsWith("/api/category-groups")) {
       body = mockGroups;
     } else if (path === "/api/category-activity") {
@@ -410,6 +410,37 @@ describe("BudgetsPage", () => {
       expect(secondBody.client_operation_id).to.equal(
         firstBody.client_operation_id,
       );
+    });
+  });
+
+  it("moves funds through one persisted allocation", () => {
+    mountPage();
+    cy.contains("Groceries").click();
+    cy.contains("button", "Move funds").click();
+    cy.get("[data-cy=form-modal-root]").within(() => {
+      cy.contains("label", "From").find("select").select("c1");
+      cy.contains("label", "To").find("select").select("c2");
+      cy.contains("label", "Amount").find("input").type("10");
+      cy.contains("button", "Move funds").click();
+    });
+    cy.window().then((win) => {
+      const calls = (
+        win.fetch as unknown as {
+          getCalls: () => Array<{ args: [string, RequestInit?] }>;
+        }
+      ).getCalls();
+      const move = calls.find((call) => {
+        const requestUrl = new URL(call.args[0], "http://localhost");
+        return requestUrl.pathname === "/api/allocations/move";
+      });
+      expect(move).not.to.eq(undefined);
+      const body = JSON.parse(move?.args[1]?.body as string);
+      expect(body).to.include({
+        from_bucket_id: "b1",
+        to_bucket_id: "b2",
+        amount_minor: 1_000,
+      });
+      expect(body.client_operation_id).to.be.a("string");
     });
   });
 

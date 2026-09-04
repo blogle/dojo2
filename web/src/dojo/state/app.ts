@@ -222,11 +222,22 @@ async function commitSheetImport(
 ): Promise<void> {
   await withSaving(async () => {
     if (!state.importPreview) return;
-    state.importResult = await commitGoogleSheetImport({
+    const result = await commitGoogleSheetImport({
       draft_id: state.importPreview.draft_id,
       decisions,
       low_confidence_confirmed: lowConfidenceConfirmed,
     });
+    if (!result.ok) {
+      throw new Error(
+        "The import did not pass validation. Review the details and try again.",
+      );
+    }
+    if (!result.validation_report?.passed) {
+      throw new Error(
+        "The import response did not include passing validation results.",
+      );
+    }
+    state.importResult = result;
     state.importPreview = null;
     await initialize();
   });
@@ -350,7 +361,15 @@ async function submitAllocation(payload: {
 async function submitTransaction(payload: TransactionPayload): Promise<void> {
   await withSaving(async () => {
     if (state.editingTransactionId) {
-      await updateTransaction(state.editingTransactionId, payload);
+      const transaction = state.transactions.find(
+        (item) => item.transaction_id === state.editingTransactionId,
+      );
+      if (!transaction) throw new Error("Transaction is no longer available.");
+      await updateTransaction(
+        state.editingTransactionId,
+        payload,
+        transaction.version,
+      );
       state.editingTransactionId = null;
     } else {
       await createTransaction(payload);
@@ -367,7 +386,11 @@ async function submitTransaction(payload: TransactionPayload): Promise<void> {
 
 async function removeTransaction(transactionId: string): Promise<void> {
   await withSaving(async () => {
-    await deleteTransaction(transactionId);
+    const transaction = state.transactions.find(
+      (item) => item.transaction_id === transactionId,
+    );
+    if (!transaction) throw new Error("Transaction is no longer available.");
+    await deleteTransaction(transactionId, transaction.version);
     await Promise.all([
       refreshTransactions(),
       refreshAllocations(),
@@ -434,7 +457,9 @@ async function saveCategoryGroup(
     if (groupId) {
       await updateCategoryGroup(groupId, payload);
     } else {
-      await createCategoryGroup(payload);
+      await createCategoryGroup(
+        payload as Parameters<typeof createCategoryGroup>[0],
+      );
     }
     await refreshCategories();
   });
@@ -448,7 +473,7 @@ async function saveCategory(
     if (categoryId) {
       await updateCategory(categoryId, payload);
     } else {
-      await createCategory(payload);
+      await createCategory(payload as Parameters<typeof createCategory>[0]);
     }
     await Promise.all([refreshCategories(), refreshBudget()]);
   });

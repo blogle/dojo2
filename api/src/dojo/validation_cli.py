@@ -24,6 +24,11 @@ def main() -> int:
         "--duckdb-path",
         help="Optional DuckDB path to reuse instead of a temporary file",
     )
+    parser.add_argument(
+        "--reviewed",
+        action="store_true",
+        help="Exercise the analyze/review/commit path instead of direct import",
+    )
     args = parser.parse_args()
 
     if bool(args.fixture) == bool(args.fetch_dump):
@@ -45,6 +50,10 @@ def run_validation(args: argparse.Namespace, duckdb_path: Path) -> dict[str, Any
     service = DojoService(str(duckdb_path))
     try:
         if args.fixture:
+            if args.reviewed:
+                return _run_reviewed_validation(
+                    service, source="fixture://default", source_kind="fixture"
+                )
             result = service.import_sheet_data(source="fixture://default", source_kind="fixture")
             return dict(result["validation_report"])
 
@@ -56,6 +65,15 @@ def run_validation(args: argparse.Namespace, duckdb_path: Path) -> dict[str, Any
             available_named_ranges=payload.get("available_named_ranges"),
             source_kind="google_sheets",
         )
+        if args.reviewed:
+            return _run_reviewed_validation(
+                service,
+                source=payload["spreadsheet_id"],
+                source_kind="google_sheets",
+                spreadsheet_title=bundle.spreadsheet_title,
+                named_ranges=payload["named_ranges"],
+                available_named_ranges=payload.get("available_named_ranges"),
+            )
         result = service.import_sheet_data(
             source=payload["spreadsheet_id"],
             source_kind="google_sheets",
@@ -66,6 +84,39 @@ def run_validation(args: argparse.Namespace, duckdb_path: Path) -> dict[str, Any
         return dict(result["validation_report"])
     finally:
         service.close()
+
+
+def _run_reviewed_validation(
+    service: DojoService,
+    *,
+    source: str,
+    source_kind: str,
+    spreadsheet_title: str | None = None,
+    named_ranges: dict[str, list[list[str]]] | None = None,
+    available_named_ranges: list[str] | None = None,
+) -> dict[str, Any]:
+    preview = service.analyze_import_draft(
+        source=source,
+        source_kind=source_kind,
+        spreadsheet_title=spreadsheet_title,
+        named_ranges=named_ranges,
+        available_named_ranges=available_named_ranges,
+    )
+    decisions = [
+        {
+            "raw_name": item["raw_name"],
+            "treatment": item["suggested_treatment"],
+            "matched_account_id": item["suggested_matched_account_id"],
+            "polarity": item["suggested_polarity"],
+        }
+        for item in preview["review_items"]
+    ]
+    result = service.commit_import_draft(
+        draft_id=str(preview["draft_id"]),
+        decisions=decisions,
+        low_confidence_confirmed=True,
+    )
+    return dict(result["validation_report"])
 
 
 if __name__ == "__main__":

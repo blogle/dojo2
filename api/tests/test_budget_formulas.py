@@ -101,6 +101,76 @@ def test_fund_category_persists_allocation_and_allows_negative_atb(
         )
 
 
+def test_move_allocation_is_idempotent(imported_service: DojoService) -> None:
+    categories = [
+        category
+        for category in imported_service.list_categories(month="2026-02", show_hidden=False)
+        if category["category_kind"] == "STANDARD"
+    ]
+    source, destination = categories[:2]
+    operation_id = str(uuid4())
+    request = {
+        "client_operation_id": operation_id,
+        "from_bucket_id": source["bucket_id"],
+        "to_bucket_id": destination["bucket_id"],
+        "amount_minor": 123,
+        "memo": "Move test",
+        "allocation_date": date(2026, 2, 1),
+    }
+
+    first = imported_service.move_allocation(**request)
+    second = imported_service.move_allocation(**request)
+
+    assert second == first
+    matching = [
+        allocation
+        for allocation in imported_service.list_allocations(show_hidden=True)
+        if allocation["allocation_id"] == first["allocation_id"]
+    ]
+    assert len(matching) == 1
+
+
+def test_group_funding_caps_at_available_to_budget(imported_service: DojoService) -> None:
+    category = next(
+        category
+        for category in imported_service.list_categories(month="2026-02", show_hidden=False)
+        if category["category_kind"] == "STANDARD" and category["is_active"]
+    )
+    before_atb = imported_service.compute_available_to_budget()
+    operation_id = str(uuid4())
+
+    result = imported_service.fund_group(
+        client_operation_id=operation_id,
+        group_id=str(category["group_id"]),
+        items=[
+            {
+                "category_id": str(category["category_id"]),
+                "amount_minor": before_atb + 1_000,
+            }
+        ],
+        allocation_date=date(2026, 2, 1),
+    )
+
+    assert result["items"][0]["funded_minor"] == before_atb
+    assert result["items"][0]["status"] == "partially_funded"
+    assert result["remaining_available_to_budget_minor"] == 0
+    assert imported_service.compute_available_to_budget() == 0
+    assert (
+        imported_service.fund_group(
+            client_operation_id=operation_id,
+            group_id=str(category["group_id"]),
+            items=[
+                {
+                    "category_id": str(category["category_id"]),
+                    "amount_minor": before_atb + 1_000,
+                }
+            ],
+            allocation_date=date(2026, 2, 1),
+        )
+        == result
+    )
+
+
 def test_category_update_rejects_derived_available_balance() -> None:
     with pytest.raises(ValidationError, match="available_minor"):
         CategoryUpdatePayload.model_validate({"available_minor": 100_000})
@@ -157,6 +227,7 @@ def test_status_toggle_changes_pending_and_cleared_without_changing_actual(
             "system_category": None,
             "status": "CLEARED",
             "memo": transaction["memo"],
+            "expected_version": transaction["version"],
         },
     )
     after = next(
@@ -202,7 +273,7 @@ def test_transaction_edit_and_delete_preserve_history(
     original_valid_from = original["valid_from"]
 
     clock.advance(seconds=1)
-    imported_service.update_transaction(
+    updated = imported_service.update_transaction(
         transaction_id,
         {
             "date": date(2026, 3, 1),
@@ -212,6 +283,7 @@ def test_transaction_edit_and_delete_preserve_history(
             "system_category": "TX_ACCOUNT_TRANSFER",
             "status": "CLEARED",
             "memo": "history-test-updated",
+            "expected_version": created["version"],
         },
     )
 
@@ -237,7 +309,7 @@ def test_transaction_edit_and_delete_preserve_history(
     assert current == {"amount_minor": -999, "status": "CLEARED"}
 
     clock.advance(seconds=1)
-    imported_service.delete_transaction(transaction_id)
+    imported_service.delete_transaction(transaction_id, updated["version"])
     assert (
         imported_service.db.fetch_one(
             render_sql(

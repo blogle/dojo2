@@ -8,11 +8,18 @@ import {
   fetchBudget,
   fetchAllocations,
   fetchCategoryActivity,
+  fetchCategories,
   fundCategory,
+  fundGroup,
+  createAllocation,
   createCategory,
   updateCategory,
   createCategoryGroup,
   updateCategoryGroup,
+  type CategoryCreatePayload,
+  type CategoryUpdatePayload,
+  type CategoryGroupCreatePayload,
+  type CategoryGroupUpdatePayload,
 } from "../api/client";
 
 import Button from "../components/actions/Button.vue";
@@ -55,6 +62,9 @@ const isReordering = ref(false);
 const reorderChanges = ref<
   Array<{ key: string; targetKey: string; position: "before" | "after" }>
 >([]);
+type ReorderGroup = { groupId: string; categoryIds: string[] };
+const reorderDraft = ref<ReorderGroup[]>([]);
+const mutationError = ref("");
 const activeModal = ref<
   | null
   | "add-group"
@@ -71,6 +81,8 @@ const selectedCategory = ref<Category | null>(null);
 const selectedGroup = ref<CategoryGroup | null>(null);
 const fundingCategory = ref<Category | null>(null);
 const fundingOperationId = ref("");
+const moveOperationId = ref("");
+const groupFundingOperationId = ref("");
 
 const groupName = ref("");
 const categoryName = ref("");
@@ -185,6 +197,11 @@ const { data: categoryActivity } = useQuery({
   queryFn: fetchCategoryActivity,
 });
 
+const { data: hiddenCategoriesResponse } = useQuery({
+  queryKey: computed(() => ["categories", selectedMonth.value, "with-hidden"]),
+  queryFn: () => fetchCategories(selectedMonth.value, true),
+});
+
 const budget = computed(() => budgetResponse.value ?? null);
 const categoryGroups = computed(() => budget.value?.groups ?? []);
 const categories = computed(
@@ -198,30 +215,36 @@ function invalidateBudgetQueries() {
   queryClient.invalidateQueries({ queryKey: QUERY_KEYS.allocations });
 }
 
+type CategoryMutationRequest =
+  | { payload: CategoryCreatePayload; categoryId?: undefined }
+  | { payload: CategoryUpdatePayload; categoryId: string };
+
 const categoryMutation = useMutation({
-  mutationFn: ({
-    payload,
-    categoryId,
-  }: {
-    payload: Record<string, unknown>;
-    categoryId?: string;
-  }) =>
-    categoryId ? updateCategory(categoryId, payload) : createCategory(payload),
+  mutationFn: (request: CategoryMutationRequest) =>
+    "categoryId" in request
+      ? updateCategory(request.categoryId!, request.payload)
+      : createCategory(request.payload),
   onSuccess: () => invalidateBudgetQueries(),
+  onError: (error) => {
+    mutationError.value =
+      error instanceof Error ? error.message : "Category change failed.";
+  },
 });
 
+type CategoryGroupMutationRequest =
+  | { payload: CategoryGroupCreatePayload; groupId?: undefined }
+  | { payload: CategoryGroupUpdatePayload; groupId: string };
+
 const categoryGroupMutation = useMutation({
-  mutationFn: ({
-    payload,
-    groupId,
-  }: {
-    payload: Record<string, unknown>;
-    groupId?: string;
-  }) =>
-    groupId
-      ? updateCategoryGroup(groupId, payload)
-      : createCategoryGroup(payload),
+  mutationFn: (request: CategoryGroupMutationRequest) =>
+    "groupId" in request
+      ? updateCategoryGroup(request.groupId!, request.payload)
+      : createCategoryGroup(request.payload),
   onSuccess: () => invalidateBudgetQueries(),
+  onError: (error) => {
+    mutationError.value =
+      error instanceof Error ? error.message : "Category group change failed.";
+  },
 });
 
 const fundCategoryMutation = useMutation({
@@ -332,7 +355,7 @@ const negativeAtb = computed(
 );
 
 const retiredCategories = computed(() =>
-  categories.value.filter((c) => c.is_hidden),
+  (hiddenCategoriesResponse.value?.items ?? []).filter((c) => c.is_hidden),
 );
 
 const selectedGroupDetail = computed<Category | null>(() => {
@@ -396,7 +419,15 @@ const firstUnconfiguredGoalCategory = computed(
 // --- Actions ---
 
 function restoreCategory(categoryId: string) {
-  categoryMutation.mutate({ payload: { is_hidden: false }, categoryId });
+  mutationError.value = "";
+  categoryMutation.mutate(
+    { payload: { is_hidden: false }, categoryId },
+    {
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: ["categories"] });
+      },
+    },
+  );
 }
 
 function handleAdd(key: string) {
@@ -405,8 +436,15 @@ function handleAdd(key: string) {
 }
 
 function toggleReorder() {
-  isReordering.value = !isReordering.value;
-  if (!isReordering.value) reorderChanges.value = [];
+  if (isReordering.value) {
+    cancelReorder();
+    return;
+  }
+  reorderDraft.value = categoryGroups.value.map((group) => ({
+    groupId: group.group_id,
+    categoryIds: group.categories.map((category) => category.category_id),
+  }));
+  isReordering.value = true;
 }
 
 function handleReorder(
@@ -418,6 +456,64 @@ function handleReorder(
     ...reorderChanges.value,
     { key, targetKey, position },
   ];
+}
+
+function handleHierarchyChange(groups: ReorderGroup[]) {
+  reorderDraft.value = groups;
+  reorderChanges.value = groups.flatMap((group, groupIndex) =>
+    group.categoryIds.map((categoryId, categoryIndex) => ({
+      key: categoryId,
+      targetKey: group.groupId,
+      position: (groupIndex + categoryIndex === 0 ? "before" : "after") as
+        | "before"
+        | "after",
+    })),
+  );
+}
+
+function cancelReorder() {
+  isReordering.value = false;
+  reorderDraft.value = [];
+  reorderChanges.value = [];
+}
+
+async function saveReorder() {
+  mutationError.value = "";
+  const groupById = new Map(
+    categoryGroups.value.map((group) => [group.group_id, group]),
+  );
+  try {
+    for (const [groupIndex, draftGroup] of reorderDraft.value.entries()) {
+      const group = groupById.get(draftGroup.groupId);
+      if (!group) continue;
+      if (!group.is_system && group.sort_order !== groupIndex) {
+        await updateCategoryGroup(group.group_id, { sort_order: groupIndex });
+      }
+      for (const [
+        categoryIndex,
+        categoryId,
+      ] of draftGroup.categoryIds.entries()) {
+        const category = categories.value.find(
+          (item) => item.category_id === categoryId,
+        );
+        if (!category || category.category_kind !== "STANDARD") continue;
+        if (
+          category.group_id !== draftGroup.groupId ||
+          category.sort_order !== categoryIndex
+        ) {
+          await updateCategory(categoryId, {
+            group_id: draftGroup.groupId,
+            sort_order: categoryIndex,
+          });
+        }
+      }
+    }
+    invalidateBudgetQueries();
+    cancelReorder();
+  } catch (error) {
+    mutationError.value =
+      error instanceof Error ? error.message : "Reordering failed.";
+  }
 }
 
 function handleRowSelect(key: string) {
@@ -447,6 +543,7 @@ function handleReviewCategories() {
 
 function handleFundCategory() {
   if (selectedGroup.value) {
+    groupFundingOperationId.value = crypto.randomUUID();
     activeModal.value = "fund-group";
     return;
   }
@@ -456,6 +553,7 @@ function handleFundCategory() {
 }
 
 function handleMoveFundsFromDetail() {
+  moveOperationId.value = crypto.randomUUID();
   activeModal.value = "move-funds";
 }
 
@@ -497,6 +595,8 @@ function closeModal() {
   selectedGroup.value = null;
   fundingCategory.value = null;
   fundingOperationId.value = "";
+  moveOperationId.value = "";
+  groupFundingOperationId.value = "";
   groupName.value = "";
   categoryName.value = "";
   categoryGroupId.value = "";
@@ -509,28 +609,42 @@ function closeModal() {
 
 function submitAddGroup() {
   if (!groupName.value.trim()) return;
-  categoryGroupMutation.mutate({
-    payload: { name: groupName.value.trim() },
-  });
-  closeModal();
+  mutationError.value = "";
+  const sortOrder =
+    Math.max(
+      -1,
+      ...categoryGroups.value
+        .filter((group) => !group.is_system)
+        .map((g) => g.sort_order),
+    ) + 1;
+  categoryGroupMutation.mutate(
+    { payload: { name: groupName.value.trim(), sort_order: sortOrder } },
+    { onSuccess: closeModal },
+  );
 }
 
 function submitAddCategory() {
   if (!categoryName.value.trim() || !categoryGroupId.value) return;
-  const sort_order = Date.now();
-  categoryMutation.mutate({
-    payload: {
-      group_id: categoryGroupId.value,
-      name: categoryName.value.trim(),
-      icon: categoryIcon.value.trim() || null,
-      sort_order,
-      goal_type: goalType.value,
-      goal_amount_minor: goalAmountMinor.value,
-      goal_frequency: goalFrequency.value,
-      goal_due_date: goalDueDate.value,
+  const groupCategories = categories.value.filter(
+    (item) => item.group_id === categoryGroupId.value,
+  );
+  const sort_order =
+    Math.max(-1, ...groupCategories.map((item) => item.sort_order)) + 1;
+  categoryMutation.mutate(
+    {
+      payload: {
+        group_id: categoryGroupId.value,
+        name: categoryName.value.trim(),
+        icon: categoryIcon.value.trim() || null,
+        sort_order,
+        goal_type: goalType.value,
+        goal_amount_minor: goalAmountMinor.value,
+        goal_frequency: goalFrequency.value,
+        goal_due_date: goalDueDate.value,
+      },
     },
-  });
-  closeModal();
+    { onSuccess: closeModal },
+  );
 }
 
 function submitEditCategory() {
@@ -541,31 +655,35 @@ function submitEditCategory() {
   ) {
     return;
   }
-  categoryMutation.mutate({
-    payload: {
-      group_id: categoryGroupId.value,
-      name: categoryName.value.trim(),
-      icon: categoryIcon.value.trim() || null,
-      goal_type: goalType.value,
-      goal_amount_minor: goalAmountMinor.value,
-      goal_frequency: goalFrequency.value,
-      goal_due_date: goalDueDate.value,
+  categoryMutation.mutate(
+    {
+      payload: {
+        group_id: categoryGroupId.value,
+        name: categoryName.value.trim(),
+        icon: categoryIcon.value.trim() || null,
+        goal_type: goalType.value,
+        goal_amount_minor: goalAmountMinor.value,
+        goal_frequency: goalFrequency.value,
+        goal_due_date: goalDueDate.value,
+      },
+      categoryId: selectedCategory.value.category_id,
     },
-    categoryId: selectedCategory.value.category_id,
-  });
-  closeModal();
+    { onSuccess: closeModal },
+  );
 }
 
 function retireSelectedCategory() {
   if (!selectedCategory.value) return;
-  categoryMutation.mutate({
-    payload: { is_hidden: true },
-    categoryId: selectedCategory.value.category_id,
-  });
-  closeModal();
+  categoryMutation.mutate(
+    {
+      payload: { is_hidden: true },
+      categoryId: selectedCategory.value.category_id,
+    },
+    { onSuccess: closeModal },
+  );
 }
 
-function submitMoveFunds(payload: {
+async function submitMoveFunds(payload: {
   from: string;
   to: string;
   amountMinor: number;
@@ -573,30 +691,52 @@ function submitMoveFunds(payload: {
   const fromCat = categories.value.find((c) => c.category_id === payload.from);
   const toCat = categories.value.find((c) => c.category_id === payload.to);
   if (!fromCat || !toCat) return;
-  const available = fromCat.available_minor;
-  const newAvailable = available - payload.amountMinor;
-  categoryMutation.mutate({
-    payload: { available_minor: newAvailable },
-    categoryId: payload.from,
-  });
-  const toAvailable = toCat.available_minor + payload.amountMinor;
-  categoryMutation.mutate({
-    payload: { available_minor: toAvailable },
-    categoryId: payload.to,
-  });
-  closeModal();
+  mutationError.value = "";
+  if (!moveOperationId.value) moveOperationId.value = crypto.randomUUID();
+  try {
+    await createAllocation(
+      {
+        client_operation_id: moveOperationId.value,
+        date: `${selectedMonth.value}-01`,
+        amount_minor: payload.amountMinor,
+        memo: `Move funds from ${fromCat.name} to ${toCat.name}`,
+        from_bucket_id: fromCat.bucket_id,
+        to_bucket_id: toCat.bucket_id,
+      },
+      "/api/allocations/move",
+    );
+    invalidateBudgetQueries();
+    closeModal();
+  } catch (error) {
+    mutationError.value =
+      error instanceof Error ? error.message : "Move funds failed.";
+  }
 }
 
-function submitFundGroup(
+async function submitFundGroup(
   items: Array<{ categoryId: string; monthlyGoalMinor: number }>,
 ) {
-  for (const item of items) {
-    categoryMutation.mutate({
-      payload: { monthly_funding_minor: item.monthlyGoalMinor },
-      categoryId: item.categoryId,
-    });
+  mutationError.value = "";
+  if (!groupFundingOperationId.value) {
+    groupFundingOperationId.value = crypto.randomUUID();
   }
-  closeModal();
+  try {
+    if (!selectedGroup.value) return;
+    await fundGroup({
+      client_operation_id: groupFundingOperationId.value,
+      date: `${selectedMonth.value}-01`,
+      group_id: selectedGroup.value.group_id,
+      items: items.map((item) => ({
+        category_id: item.categoryId,
+        amount_minor: item.monthlyGoalMinor,
+      })),
+    });
+    invalidateBudgetQueries();
+    closeModal();
+  } catch (error) {
+    mutationError.value =
+      error instanceof Error ? error.message : "Group funding failed.";
+  }
 }
 </script>
 
@@ -610,6 +750,14 @@ function submitFundGroup(
     />
 
     <main class="budgets-page__main">
+      <PersistentWarningBanner
+        v-if="mutationError"
+        severity="error"
+        title="Budget change failed"
+        :description="mutationError"
+        dismissible
+        @dismiss="mutationError = ''"
+      />
       <PersistentWarningBanner
         v-if="unconfiguredGoalCount > 0"
         severity="warning"
@@ -664,8 +812,8 @@ function submitFundGroup(
       <ReorderModeBanner
         v-if="isReordering"
         :pending-count="reorderChanges.length"
-        @cancel="toggleReorder"
-        @save="toggleReorder"
+        @cancel="cancelReorder"
+        @save="saveReorder"
       />
 
       <HierarchicalCategoryTable
@@ -676,6 +824,7 @@ function submitFundGroup(
         :reorderable="isReordering"
         @select="handleRowSelect"
         @reorder="handleReorder"
+        @hierarchy-change="handleHierarchyChange"
       />
     </main>
 

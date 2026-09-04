@@ -55,7 +55,6 @@ function handleSubmit() {
     .filter((e) => e.monthlyGoalMinor > 0);
   if (entries.length === 0) return;
   emit("submit", entries);
-  fundingAmounts.value = {};
 }
 </script>
 

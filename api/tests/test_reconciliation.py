@@ -34,7 +34,7 @@ def test_budget_reconciliation_applies_explicit_adjustment_and_reopens(imported_
     account_id = imported_service.create_account(
         {"name": "Checking", "account_class": "BUDGET", "budget_account_type": "DEPOSIT"}
     )["account_id"]
-    transaction_id = imported_service.create_transaction(
+    transaction = imported_service.create_transaction(
         {
             "date": date(2026, 8, 20),
             "account_id": account_id,
@@ -43,7 +43,8 @@ def test_budget_reconciliation_applies_explicit_adjustment_and_reopens(imported_
             "status": "CLEARED",
             "memo": "Opening",
         }
-    )["transaction_id"]
+    )
+    transaction_id = transaction["transaction_id"]
     draft = imported_service.create_reconciliation_draft(
         account_id,
         {
@@ -91,6 +92,7 @@ def test_budget_reconciliation_applies_explicit_adjustment_and_reopens(imported_
             "system_category": "TX_AVAILABLE_TO_BUDGET",
             "status": "CLEARED",
             "memo": "bad",
+            "expected_version": transaction["version"],
         },
     )
     assert imported_service.get_reconciliation_status(account_id) == "REOPENED"

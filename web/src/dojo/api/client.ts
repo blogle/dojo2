@@ -18,6 +18,35 @@ import type {
 
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
 
+export class ApiError extends Error {
+  readonly status: number;
+  readonly code: string | null;
+  readonly detail: unknown;
+
+  constructor(status: number, detail: unknown) {
+    const message =
+      typeof detail === "string"
+        ? detail
+        : typeof detail === "object" &&
+            detail !== null &&
+            "message" in detail &&
+            typeof detail.message === "string"
+          ? detail.message
+          : `Request failed with status ${status}`;
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.detail = detail;
+    this.code =
+      typeof detail === "object" &&
+      detail !== null &&
+      "code" in detail &&
+      typeof detail.code === "string"
+        ? detail.code
+        : null;
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${apiBaseUrl}${path}`, {
     credentials: "include",
@@ -30,16 +59,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
 
   if (!response.ok) {
-    let detail = `Request failed with status ${response.status}`;
+    let detail: unknown = `Request failed with status ${response.status}`;
     try {
-      const payload = (await response.json()) as { detail?: string };
-      if (payload.detail) {
+      const payload = (await response.json()) as { detail?: unknown };
+      if (payload.detail !== undefined) {
         detail = payload.detail;
       }
     } catch {
       // ignore non-JSON error bodies
     }
-    throw new Error(detail);
+    throw new ApiError(response.status, detail);
   }
 
   return (await response.json()) as T;
@@ -241,6 +270,7 @@ export async function commitGoogleSheetImport(payload: {
 
 export async function createAllocation(
   payload: {
+    client_operation_id?: string;
     date: string;
     amount_minor: number;
     memo: string;
@@ -265,10 +295,30 @@ export async function fundCategory(payload: {
   });
 }
 
+export async function fundGroup(payload: {
+  client_operation_id: string;
+  date: string;
+  group_id: string;
+  items: Array<{ category_id: string; amount_minor: number }>;
+}): Promise<{
+  items: Array<{
+    category_id: string;
+    requested_minor: number;
+    funded_minor: number;
+    status: "fully_funded" | "partially_funded" | "unfunded";
+  }>;
+  remaining_available_to_budget_minor: number;
+}> {
+  return request("/api/allocations/fund-group", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function createTransaction(
   payload: TransactionPayload,
-): Promise<void> {
-  await request("/api/transactions", {
+): Promise<{ transaction_id: string; version: string }> {
+  return request("/api/transactions", {
     method: "POST",
     body: JSON.stringify(payload),
   });
@@ -277,19 +327,28 @@ export async function createTransaction(
 export async function updateTransaction(
   transactionId: string,
   payload: TransactionPayload,
-): Promise<void> {
-  await request(`/api/transactions/${transactionId}`, {
+  expectedVersion: string,
+): Promise<{ transaction_id: string; version: string }> {
+  return request(`/api/transactions/${transactionId}`, {
     method: "PUT",
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ ...payload, expected_version: expectedVersion }),
   });
 }
 
-export async function deleteTransaction(transactionId: string): Promise<void> {
-  await request(`/api/transactions/${transactionId}`, { method: "DELETE" });
+export async function deleteTransaction(
+  transactionId: string,
+  expectedVersion: string,
+): Promise<void> {
+  const params = new URLSearchParams({ expected_version: expectedVersion });
+  await request(`/api/transactions/${transactionId}?${params}`, {
+    method: "DELETE",
+  });
 }
 
-export async function restoreTransaction(transactionId: string): Promise<void> {
-  await request(`/api/transactions/${transactionId}/restore`, {
+export async function restoreTransaction(
+  transactionId: string,
+): Promise<{ transaction_id: string; version: string }> {
+  return request(`/api/transactions/${transactionId}/restore`, {
     method: "POST",
   });
 }
@@ -736,8 +795,32 @@ export async function fetchLoanPayments(
   return response.items;
 }
 
+export type CategoryGroupCreatePayload = {
+  name: string;
+  sort_order: number;
+  is_hidden?: boolean;
+};
+
+export type CategoryGroupUpdatePayload = Partial<CategoryGroupCreatePayload>;
+
+export type CategoryCreatePayload = {
+  group_id: string;
+  name: string;
+  sort_order: number;
+  icon?: string | null;
+  goal_type?: string | null;
+  goal_amount_minor?: number | null;
+  goal_frequency?: string | null;
+  goal_due_date?: string | null;
+};
+
+export type CategoryUpdatePayload = Partial<CategoryCreatePayload> & {
+  is_hidden?: boolean;
+  is_active?: boolean;
+};
+
 export async function createCategoryGroup(
-  payload: Record<string, unknown>,
+  payload: CategoryGroupCreatePayload,
 ): Promise<void> {
   await request("/api/category-groups", {
     method: "POST",
@@ -747,7 +830,7 @@ export async function createCategoryGroup(
 
 export async function updateCategoryGroup(
   groupId: string,
-  payload: Record<string, unknown>,
+  payload: CategoryGroupUpdatePayload,
 ): Promise<void> {
   await request(`/api/category-groups/${groupId}`, {
     method: "PUT",
@@ -756,7 +839,7 @@ export async function updateCategoryGroup(
 }
 
 export async function createCategory(
-  payload: Record<string, unknown>,
+  payload: CategoryCreatePayload,
 ): Promise<void> {
   await request("/api/categories", {
     method: "POST",
@@ -766,7 +849,7 @@ export async function createCategory(
 
 export async function updateCategory(
   categoryId: string,
-  payload: Record<string, unknown>,
+  payload: CategoryUpdatePayload,
 ): Promise<void> {
   await request(`/api/categories/${categoryId}`, {
     method: "PUT",

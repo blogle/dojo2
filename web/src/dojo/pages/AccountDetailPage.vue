@@ -1010,13 +1010,26 @@ const handleMoreAction = (key: string) => {
 };
 
 const updateTransactionMutation = useMutation({
-  mutationFn: ({ id, payload }: { id: string; payload: TransactionPayload }) =>
-    updateTransaction(id, payload),
+  mutationFn: ({
+    id,
+    payload,
+    expectedVersion,
+  }: {
+    id: string;
+    payload: TransactionPayload;
+    expectedVersion: string;
+  }) => updateTransaction(id, payload, expectedVersion),
   onSuccess: () => invalidateAccountDetailQueries(),
 });
 
 const deleteTransactionMutation = useMutation({
-  mutationFn: deleteTransaction,
+  mutationFn: ({
+    id,
+    expectedVersion,
+  }: {
+    id: string;
+    expectedVersion: string;
+  }) => deleteTransaction(id, expectedVersion),
   onSuccess: () => invalidateAccountDetailQueries(),
 });
 
@@ -1438,11 +1451,23 @@ const investmentStatementCanSave = computed(() => {
 });
 
 function handleCommitEdit(id: string, payload: TransactionPayload) {
-  updateTransactionMutation.mutate({ id, payload });
+  const transaction = transactions.value.find(
+    (item) => item.transaction_id === id,
+  );
+  if (transaction) {
+    updateTransactionMutation.mutate({
+      id,
+      payload,
+      expectedVersion: transaction.version,
+    });
+  }
 }
 
 function handleRemoveTransaction(transaction: Transaction) {
-  deleteTransactionMutation.mutate(transaction.transaction_id);
+  deleteTransactionMutation.mutate({
+    id: transaction.transaction_id,
+    expectedVersion: transaction.version,
+  });
 }
 
 function loadMoreTransactions() {

@@ -13,6 +13,7 @@ import {
   updateTransaction,
   deleteTransaction,
   restoreTransaction,
+  ApiError,
 } from "../api/client";
 
 import NavigationRail from "../components/navigation/NavigationRail.vue";
@@ -23,8 +24,11 @@ import Button from "../components/actions/Button.vue";
 import TransactionEntryForm from "../components/transactions/TransactionEntryForm.vue";
 import TransactionFilterBar from "../components/transactions/TransactionFilterBar.vue";
 import TransactionLedger from "../components/transactions/TransactionLedger.vue";
+import PersistentWarningBanner from "../components/feedback/PersistentWarningBanner.vue";
 
 const queryClient = useQueryClient();
+const entryForm = ref<InstanceType<typeof TransactionEntryForm> | null>(null);
+const mutationError = ref("");
 
 const PAGE_SIZE = 10_000;
 const QUERY_KEYS = {
@@ -38,7 +42,12 @@ const QUERY_KEYS = {
 } as const;
 
 type UndoEntry =
-  | { kind: "edit"; id: string; previous: TransactionPayload }
+  | {
+      kind: "edit";
+      id: string;
+      previous: TransactionPayload;
+      expectedVersion: string;
+    }
   | { kind: "remove"; snapshot: Transaction };
 
 const undoStack = ref<UndoEntry[]>([]);
@@ -108,29 +117,60 @@ function invalidateRelatedQueries() {
 
 const createMutation = useMutation({
   mutationFn: createTransaction,
-  onSuccess: () => invalidateRelatedQueries(),
+  onMutate: () => (mutationError.value = ""),
+  onSuccess: () => {
+    entryForm.value?.resetForm();
+    invalidateRelatedQueries();
+  },
+  onError: (error) => handleMutationError(error),
 });
 
 const updateMutation = useMutation({
   mutationFn: ({
     id,
     payload,
+    expectedVersion,
   }: {
     id: string;
     payload: Parameters<typeof updateTransaction>[1];
-  }) => updateTransaction(id, payload),
+    expectedVersion: string;
+  }) => updateTransaction(id, payload, expectedVersion),
+  onMutate: () => (mutationError.value = ""),
   onSuccess: () => invalidateRelatedQueries(),
+  onError: (error) => handleMutationError(error),
 });
 
 const deleteMutation = useMutation({
-  mutationFn: deleteTransaction,
+  mutationFn: ({
+    id,
+    expectedVersion,
+  }: {
+    id: string;
+    expectedVersion: string;
+  }) => deleteTransaction(id, expectedVersion),
+  onMutate: () => (mutationError.value = ""),
   onSuccess: () => invalidateRelatedQueries(),
+  onError: (error) => handleMutationError(error),
 });
 
 const restoreMutation = useMutation({
-  mutationFn: restoreTransaction,
+  mutationFn: (id: string) => restoreTransaction(id),
+  onMutate: () => (mutationError.value = ""),
   onSuccess: () => invalidateRelatedQueries(),
+  onError: (error) => handleMutationError(error),
 });
+
+function handleMutationError(error: unknown) {
+  mutationError.value =
+    error instanceof ApiError && error.status === 409
+      ? "This transaction changed elsewhere. Refreshing to resolve the conflict."
+      : error instanceof Error
+        ? error.message
+        : "Transaction change failed.";
+  if (error instanceof ApiError && error.status === 409) {
+    invalidateRelatedQueries();
+  }
+}
 
 const inflow = computed(() =>
   transactions.value
@@ -212,22 +252,29 @@ function handleCommitEdit(
   payload: Parameters<typeof updateTransaction>[1],
 ) {
   const tx = transactions.value.find((t) => t.transaction_id === id);
-  if (tx) {
-    undoStack.value.push({
-      kind: "edit",
-      id,
-      previous: {
-        date: tx.date,
-        account_id: tx.account_id,
-        amount_minor: tx.amount_minor,
-        category_id: tx.category_id,
-        system_category: tx.system_category,
-        status: tx.status,
-        memo: tx.memo,
+  if (!tx) return;
+  const previous: TransactionPayload = {
+    date: tx.date,
+    account_id: tx.account_id,
+    amount_minor: tx.amount_minor,
+    category_id: tx.category_id,
+    system_category: tx.system_category,
+    status: tx.status,
+    memo: tx.memo,
+  };
+  updateMutation.mutate(
+    { id, payload, expectedVersion: tx.version },
+    {
+      onSuccess: (result) => {
+        undoStack.value.push({
+          kind: "edit",
+          id,
+          previous,
+          expectedVersion: result.version,
+        });
       },
-    });
-  }
-  updateMutation.mutate({ id, payload });
+    },
+  );
 }
 
 function handleSubmit(payload: {
@@ -243,31 +290,50 @@ function handleSubmit(payload: {
 }
 
 function handleRemove(tx: Transaction) {
-  undoStack.value.push({ kind: "remove", snapshot: { ...tx } });
-  lastRemovedSnapshot.value = { ...tx };
-  deleteMutation.mutate(tx.transaction_id);
-  showUndoToast.value = true;
-  setTimeout(() => {
-    showUndoToast.value = false;
-  }, 8000);
+  deleteMutation.mutate(
+    { id: tx.transaction_id, expectedVersion: tx.version },
+    {
+      onSuccess: () => {
+        undoStack.value.push({ kind: "remove", snapshot: { ...tx } });
+        lastRemovedSnapshot.value = { ...tx };
+        showUndoToast.value = true;
+        setTimeout(() => (showUndoToast.value = false), 8000);
+      },
+    },
+  );
 }
 
 function handleUndoRemove() {
   if (!lastRemovedSnapshot.value) return;
   const tx = lastRemovedSnapshot.value;
-  restoreMutation.mutate(tx.transaction_id);
-  showUndoToast.value = false;
-  lastRemovedSnapshot.value = null;
+  restoreMutation.mutate(tx.transaction_id, {
+    onSuccess: () => {
+      if (undoStack.value[undoStack.value.length - 1]?.kind === "remove") {
+        undoStack.value.pop();
+      }
+      showUndoToast.value = false;
+      lastRemovedSnapshot.value = null;
+    },
+  });
 }
 
 function handleUndo() {
-  const entry = undoStack.value.pop();
+  const entry = undoStack.value[undoStack.value.length - 1];
   if (!entry) return;
   if (entry.kind === "edit") {
-    updateMutation.mutate({ id: entry.id, payload: entry.previous });
+    updateMutation.mutate(
+      {
+        id: entry.id,
+        payload: entry.previous,
+        expectedVersion: entry.expectedVersion,
+      },
+      { onSuccess: () => undoStack.value.pop() },
+    );
   } else if (entry.kind === "remove") {
     const tx = entry.snapshot;
-    restoreMutation.mutate(tx.transaction_id);
+    restoreMutation.mutate(tx.transaction_id, {
+      onSuccess: () => undoStack.value.pop(),
+    });
   }
   showUndoToast.value = false;
   lastRemovedSnapshot.value = null;
@@ -351,6 +417,15 @@ onUnmounted(() => {
         :accounts="accounts ?? []"
         :categories="categories"
         @submit="handleSubmit"
+      />
+
+      <PersistentWarningBanner
+        v-if="mutationError"
+        severity="error"
+        title="Transaction change failed"
+        :description="mutationError"
+        dismissible
+        @dismiss="mutationError = ''"
       />
 
       <TransactionFilterBar

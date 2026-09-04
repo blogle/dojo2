@@ -185,6 +185,7 @@ def test_status_changes_do_not_change_actual_account_balance(
                 "system_category": None,
                 "status": STATUS_CLEARED if initial_status == STATUS_PENDING else STATUS_PENDING,
                 "memo": "status-property",
+                "expected_version": tx["version"],
             },
         )
         after = next(
@@ -267,7 +268,7 @@ def test_transaction_edits_and_voids_preserve_scd_history(
         assert original_row is not None
 
         clock.advance(seconds=1)
-        imported_service.update_transaction(
+        updated = imported_service.update_transaction(
             transaction_id,
             {
                 "date": date(2026, 2, 15),
@@ -277,6 +278,7 @@ def test_transaction_edits_and_voids_preserve_scd_history(
                 "system_category": None,
                 "status": updated_status,
                 "memo": "history-property-updated",
+                "expected_version": created["version"],
             },
         )
         assert_history_preserved_after_edit(
@@ -296,7 +298,7 @@ def test_transaction_edits_and_voids_preserve_scd_history(
         )
 
         clock.advance(seconds=1)
-        imported_service.delete_transaction(transaction_id)
+        imported_service.delete_transaction(transaction_id, updated["version"])
         assert_history_preserved_after_void(
             imported_service.db,
             "transactions",

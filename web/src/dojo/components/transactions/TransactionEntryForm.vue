@@ -73,8 +73,9 @@ function handleSubmit() {
     status: "PENDING",
     memo: memo.value,
   });
-  resetForm();
 }
+
+defineExpose({ resetForm });
 
 function handleKeyDown(event: KeyboardEvent) {
   if (event.key === "Enter" && !event.shiftKey) {

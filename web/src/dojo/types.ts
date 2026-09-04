@@ -9,6 +9,7 @@ export type AppStatus = {
 
 export type Transaction = {
   transaction_id: string;
+  version: string;
   date: string;
   account_id: string;
   account_name: string;

@@ -81,6 +81,7 @@ const mockAccounts = [
 const mockTransactions = [
   {
     transaction_id: "t1",
+    version: "11111111-1111-4111-8111-111111111111",
     date: `${currentMonth}-03`,
     account_id: "acc1",
     account_name: "Checking",
@@ -94,6 +95,7 @@ const mockTransactions = [
   },
   {
     transaction_id: "t2",
+    version: "22222222-2222-4222-8222-222222222222",
     date: `${currentMonth}-04`,
     account_id: "investment-1",
     account_name: "Brokerage",
@@ -257,5 +259,29 @@ describe("TransactionsPage", () => {
       "contain.text",
       "Investment contribution",
     );
+  });
+
+  it("retains a transaction draft until creation succeeds", () => {
+    mountPage((path, init) => {
+      if (path === "/api/transactions" && init?.method === "POST") {
+        return new Response(JSON.stringify({ detail: "Temporary failure" }), {
+          status: 503,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return undefined;
+    });
+    cy.get("[data-cy=transaction-entry-form]").within(() => {
+      cy.contains("label", "Account").find("select").select("acc1");
+      cy.contains("label", "Category").find("select").select("c1");
+      cy.contains("label", "Amount").find("input").type("12.34");
+      cy.contains("label", "Memo").find("input").type("Keep this draft{enter}");
+      cy.contains("label", "Amount")
+        .find("input")
+        .should("have.value", "12.34");
+      cy.contains("label", "Memo")
+        .find("input")
+        .should("have.value", "Keep this draft");
+    });
   });
 });
