@@ -45,7 +45,7 @@ test-web:
 
 test-unit:
 	@printf '==> running backend unit tests\n'
-	cd api && uv run python -m pytest tests/test_money.py tests/test_settings.py tests/test_importer.py tests/test_loan_projection.py tests/test_operations.py
+	cd api && uv run python -m pytest tests/test_money.py tests/test_settings.py tests/test_importer.py tests/test_loan_projection.py tests/test_operations.py tests/test_backup.py
 
 test-property:
 	@printf '==> running backend property tests\n'
@@ -110,8 +110,29 @@ docs-serve:
 validate-aggregates-fixture:
 	cd api && uv run python -m dojo.validation_cli --fixture
 
+validate-reviewed-aggregates-fixture:
+	cd api && uv run python -m dojo.validation_cli --fixture --reviewed
+
 validate-aggregates-dump dump:
 	cd api && uv run python -m dojo.validation_cli --fetch-dump {{dump}}
+
+validate-reviewed-aggregates-dump dump:
+	cd api && uv run python -m dojo.validation_cli --fetch-dump {{dump}} --reviewed
+
+backup-prepare source destination image_digest source_snapshot:
+	cd api && uv run python -m dojo.backup prepare "{{source}}" "{{destination}}" --image-digest "{{image_digest}}" --source-snapshot "{{source_snapshot}}"
+
+backup-verify database manifest:
+	cd api && uv run python -m dojo.backup verify "{{database}}" "{{manifest}}"
+
+backup-restore database manifest target:
+	cd api && uv run python -m dojo.backup restore "{{database}}" "{{manifest}}" "{{target}}"
+
+k8s-snapshot-backup:
+	ops/k8s/snapshot-backup.sh
+
+k8s-render:
+	kubectl kustomize deploy/k8s/base
 
 # --- Benchmarks ---
 

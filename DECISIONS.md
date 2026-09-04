@@ -1,5 +1,33 @@
 # Decisions
 
+## 2026-09-03 — Use SCD2 row identities for optimistic concurrency
+
+### Context
+
+Transaction updates previously accepted only a logical transaction ID, so two browsers could both edit the same observed row and the later request silently replaced the earlier request.
+
+### Decision
+
+Expose each current transaction's physical SCD2 `row_id` as an opaque `version`. Require the observed version for update and delete, close only that exact current row, and return HTTP 409 for stale versions.
+
+### Consequence
+
+No schema migration is required. Frontends must retain and submit versions, handle conflicts without retrying stale payloads, and refresh current state before another edit.
+
+## 2026-09-03 — Layer OpenEBS snapshots with encrypted Google Drive backups
+
+### Context
+
+The production PVC was the only durable database copy, and migration ran before creating a recoverable snapshot. Copying a live DuckDB file from another process is unsafe, while ZFS snapshots alone remain in the cluster's failure domain.
+
+### Decision
+
+Use OpenEBS ZFS CSI snapshots for no-downtime local recovery. Restore each scheduled snapshot to a temporary PVC, recover and verify the clone, then use restic encryption and retention over rclone's Google Drive backend with a service account. Before migration, require a verified off-site backup while the old application is stopped. Restore only to a new PVC.
+
+### Consequence
+
+Operators must retain the restic password outside the cluster, restrict and rotate the Google service-account credential, bind the deployment to immutable image digests, and regularly rehearse restoration. A failed pre-migration off-site backup blocks migration by design.
+
 ## 2026-06-13 — Make DuckDB provisioning explicit and route domain time through an injected clock
 
 ### Context

@@ -17,6 +17,37 @@ spec:
         app: dojo
     spec:
       initContainers:
+      - name: backup-before-migrate
+        image: ghcr.io/blogle/dojo2
+        imagePullPolicy: IfNotPresent
+        command: [/bin/bash, -cu]
+        args:
+        - |
+          if [[ ! -f /data/dojo.duckdb ]]; then exit 0; fi
+          /bin/dojo-backup prepare /data/dojo.duckdb /stage/dojo.duckdb --image-digest "${DOJO_RELEASE_IMAGE}" --source-snapshot pre-migration
+          restic backup /stage --tag dojo --tag pre-migration --tag "${DOJO_RELEASE_IMAGE}"
+          restic check
+        env:
+        - name: DOJO_RELEASE_IMAGE
+          value: ghcr.io/blogle/dojo2
+        - name: RESTIC_REPOSITORY
+          value: rclone:gdrive:dojo/restic
+        - name: RESTIC_PASSWORD_FILE
+          value: /backup-secrets/restic-password
+        - name: RCLONE_CONFIG
+          value: /backup-secrets/rclone.conf
+        securityContext:
+          runAsUser: 1000
+          runAsGroup: 1000
+        volumeMounts:
+        - name: data
+          mountPath: /data
+          readOnly: true
+        - name: backup-stage
+          mountPath: /stage
+        - name: backup-secrets
+          mountPath: /backup-secrets
+          readOnly: true
       - name: migrate
         image: ghcr.io/blogle/dojo2
         imagePullPolicy: IfNotPresent
@@ -75,5 +106,10 @@ spec:
       - name: data
         persistentVolumeClaim:
           claimName: dojo-data
+      - name: backup-stage
+        emptyDir: {}
+      - name: backup-secrets
+        secret:
+          secretName: dojo-backup-credentials
       securityContext:
         fsGroup: 1000

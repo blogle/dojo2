@@ -41,6 +41,11 @@ Use the root `justfile` as the only routine command interface.
 | `just check` | Run the normal pre-completion local quality gate |
 | `just ci` | Run the canonical CI command |
 | `just container` | Build the Nix container image |
+| `just backup-prepare ...` | Recover and checkpoint a staged DuckDB backup with a manifest |
+| `just backup-verify ...` | Verify a staged database against its manifest |
+| `just backup-restore ...` | Restore a verified database without overwriting an existing target |
+| `just k8s-render` | Render the Kubernetes base manifests |
+| `just k8s-snapshot-backup` | Run one OpenEBS snapshot-to-Google-Drive backup |
 
 ## Narrow Versus Complete Checks
 
@@ -70,6 +75,8 @@ Before finishing a change, run `just check`. For CI-equivalent verification, run
 ## Database Provisioning And Migrations
 
 The repository uses explicit provisioning.
+
+Production migration must follow the backup gate described in `docs/src/backup-and-restore.md`. Do not copy `/data/dojo.duckdb` while the API owns it, and never test restoration over the production PVC.
 
 - Schema creation lives in `api/src/dojo/sql/schema/current.sql`.
 - The provisioning entrypoint is `api/src/dojo/migrations.py`.

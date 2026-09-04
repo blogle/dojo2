@@ -1,0 +1,61 @@
+# Copy this file, replace every REPLACE_* value, and restore only to a newly
+# created PVC. Never point the Job at dojo-data.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: dojo-restore-REPLACE_ID
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      initContainers:
+      - name: materialize
+        image: REPLACE_IMAGE_DIGEST
+        command: [/bin/bash, -cu]
+        args:
+        - |
+          restic restore 'REPLACE_RESTIC_SNAPSHOT_ID' --target /materialized
+          /bin/dojo-backup restore /materialized/stage/dojo.duckdb /materialized/stage/dojo.duckdb.manifest.json /data/dojo.duckdb
+        env:
+        - name: RESTIC_REPOSITORY
+          value: rclone:gdrive:dojo/restic
+        - name: RESTIC_PASSWORD_FILE
+          value: /backup-secrets/restic-password
+        - name: RCLONE_CONFIG
+          value: /backup-secrets/rclone.conf
+        volumeMounts:
+        - name: data
+          mountPath: /data
+        - name: materialized
+          mountPath: /materialized
+        - name: backup-secrets
+          mountPath: /backup-secrets
+          readOnly: true
+      - name: migrate
+        image: REPLACE_IMAGE_DIGEST
+        command: [/bin/dojo-migrate, /data/dojo.duckdb]
+        volumeMounts:
+        - name: data
+          mountPath: /data
+      containers:
+      - name: verify
+        image: REPLACE_IMAGE_DIGEST
+        command: [/bin/dojo-backup, prepare, /data/dojo.duckdb, /verify/dojo.duckdb, --image-digest, REPLACE_IMAGE_DIGEST, --source-snapshot, REPLACE_RESTIC_SNAPSHOT_ID]
+        volumeMounts:
+        - name: data
+          mountPath: /data
+          readOnly: true
+        - name: verify
+          mountPath: /verify
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: REPLACE_NEW_RESTORE_PVC
+      - name: materialized
+        emptyDir: {}
+      - name: verify
+        emptyDir: {}
+      - name: backup-secrets
+        secret:
+          secretName: dojo-backup-credentials

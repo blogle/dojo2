@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Rewired Budget move, group funding, category/group creation, reorder saving, and retired-category restoration to persistent API operations with failure-visible UI behavior.
+- Added aggregate validation and complete decision parsing to reviewed Aspire commits, including an executable reviewed-path fixture rehearsal.
+- Added transaction version tokens, stale-write conflicts, and success-only transaction form, undo, and removal feedback.
+- Added manifest-verified DuckDB backup/restore commands, OpenEBS ZFS snapshot orchestration, encrypted rotating restic backups through rclone to Google Drive, and new-PVC restore resources.
+
 - Added account-local reconciliation drafts, persisted source evidence, digest-checked idempotent apply with explicit balance adjustments, reopening status, working-set/history endpoints, and a balance-first budget-account action.
 - Fixed first-run onboarding and Aspire migration when the development frontend is opened from a non-localhost address by routing default browser API traffic through Vite's same-origin proxy and binding OAuth callbacks to the initiating session and frontend origin, with regression coverage for both paths.
 - Added a deterministic Cypress browser-acceptance harness with API-owned scenario resets, XDG-cached DuckDB baselines, Chromium execution, per-phase timing reports, and initial cross-surface Assets & Liabilities coverage.

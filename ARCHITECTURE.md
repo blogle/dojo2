@@ -39,6 +39,13 @@ The backend intentionally does not run migrations as a side effect of Python imp
 - `api/src/dojo/migrations.py` applies the current schema explicitly.
 - The current implementation uses one process-local connection protected by an `RLock`.
 - There is no custom read/write lock and no claimed concurrent-read support yet.
+- Transaction writes use the current SCD2 physical `row_id` as an opaque API version. Updates and deletes conditionally close exactly that version, so a stale browser receives HTTP 409 instead of replacing a newer edit.
+
+## Backup And Recovery
+
+`api/src/dojo/backup.py` prepares a recoverable copy rather than copying over a live database. It copies the database and any WAL into staging, opens the staged copy with DuckDB to perform recovery and checkpointing, and writes a hash- and runtime-bearing manifest. Restore verifies that manifest and refuses to overwrite an existing target.
+
+Production uses two layers. OpenEBS ZFS CSI `VolumeSnapshot` resources provide fast, no-downtime local recovery points. A temporary PVC restored from each snapshot is opened and verified before restic encrypts and uploads it through rclone to a service-account-owned Google Drive folder. Local snapshots are not considered off-site backups. Restore always targets a new PVC, which is migrated and verified before the Deployment is switched to it.
 
 ## SCD2 Model
 

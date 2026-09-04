@@ -37,6 +37,13 @@
           export PYTHONPATH=${apiSource}/app
           exec ${apiPython}/bin/python -m dojo.migrations "$@"
         '';
+        backupLauncher = pkgs.writeShellScriptBin "dojo-backup" ''
+          export PYTHONPATH=${apiSource}/app
+          exec ${apiPython}/bin/python -m dojo.backup "$@"
+        '';
+        snapshotBackupLauncher = pkgs.writeShellScriptBin "dojo-snapshot-backup" ''
+          exec ${pkgs.bash}/bin/bash ${./ops/k8s/snapshot-backup.sh} "$@"
+        '';
       in
       {
         devShells.default = pkgs.mkShell {
@@ -51,6 +58,9 @@
             ruff
             duckdb
             mdbook
+            restic
+            rclone
+            kubectl
             git
             pkg-config
             openssl
@@ -78,6 +88,12 @@
             apiSource
             apiLauncher
             migrationLauncher
+            backupLauncher
+            snapshotBackupLauncher
+            pkgs.restic
+            pkgs.rclone
+            pkgs.kubectl
+            pkgs.gnused
           ];
           config = {
             Cmd = [ "/bin/dojo-api" ];

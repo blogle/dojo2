@@ -15,6 +15,7 @@ APPROVED_SQL_ROOT = SRC_ROOT / "sql"
 APPROVED_DUCKDB_CONNECT = {
     "api/src/dojo/database.py",
     "api/src/dojo/migrations.py",
+    "api/src/dojo/backup.py",
 }
 
 APPROVED_WALL_CLOCK = {
