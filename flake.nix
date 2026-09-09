@@ -48,10 +48,6 @@
           export PYTHONPATH=${apiSource}/app
           exec ${apiPython}/bin/python -m dojo.backup_status "$@"
         '';
-        backupStatusLauncher = pkgs.writeShellScriptBin "dojo-backup-status" ''
-          export PYTHONPATH=${apiSource}/app
-          exec ${apiPython}/bin/python -m dojo.backup_status "$@"
-        '';
       in
       {
         devShells.default = pkgs.mkShell {
@@ -99,7 +95,6 @@
             migrationLauncher
             backupLauncher
             snapshotBackupLauncher
-            backupStatusLauncher
             backupStatusLauncher
             pkgs.restic
             pkgs.rclone
