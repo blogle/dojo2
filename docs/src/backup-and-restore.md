@@ -4,6 +4,8 @@ dojo protects production DuckDB data with OpenEBS ZFS snapshots for fast local r
 
 ## One-time setup
 
+See the [Deployment and provisioning guide](deployment-provisioning.md) for the complete provisioning sequence. The summary:
+
 Discover the installed storage classes before deployment:
 
     kubectl get storageclass
