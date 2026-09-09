@@ -37,6 +37,8 @@ def test_current_migration_set_provisions_fresh_database(tmp_path) -> None:
             "reconciliation_commits",
             "reconciliation_source_records",
             "reconciliation_transaction_refs",
+            "backup_configurations",
+            "backup_runs",
         } <= tables
 
         receipt_columns = {

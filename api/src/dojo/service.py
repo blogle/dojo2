@@ -39,6 +39,7 @@ from dojo.constants import (
     LINK_BEHAVIOR_LOAN_PAYMENT,
     MAX_TS,
     SYSTEM_ATB_BUCKET_ID,
+    SYSTEM_BACKUP_CONFIGURATION_ID,
     SYSTEM_CATEGORY_ATB,
     SYSTEM_CATEGORY_BALANCE_ADJUSTMENT,
     SYSTEM_CATEGORY_STARTING_BALANCE,
@@ -173,14 +174,165 @@ class DojoService:
     def get_app_status(self) -> dict[str, Any]:
         latest_batch = self.db.fetch_one(load_sql("queries/latest_import_batch"))
         latest_run = self.get_import_status()
+        backup_configuration = self.get_backup_configuration()
+        latest_backup_run = self.get_latest_backup_run()
+        if backup_configuration and backup_configuration["status"] == "PENDING":
+            ready = False
+            mode = "backup_setup"
+            backup_state = "required"
+        elif backup_configuration and backup_configuration["status"] == "CONFIGURED":
+            ready = True
+            mode = "ready"
+            backup_state = (
+                "configured"
+                if latest_backup_run and latest_backup_run["status"] == "SUCCEEDED"
+                else "degraded"
+            )
+        elif latest_batch is not None:
+            ready = True
+            mode = "ready"
+            backup_state = "degraded"
+        else:
+            ready = False
+            mode = "onboarding"
+            backup_state = "required"
         return {
             "app": "dojo",
-            "ready": latest_batch is not None,
-            "mode": "ready" if latest_batch else "onboarding",
-            "needs_onboarding": latest_batch is None,
+            "ready": ready,
+            "mode": mode,
+            "needs_onboarding": mode == "onboarding",
+            "needs_backup_setup": mode == "backup_setup",
+            "backup": {
+                "state": backup_state,
+                "message": (
+                    latest_backup_run.get("error_message")
+                    if backup_state == "degraded" and latest_backup_run
+                    else (
+                        "No successful off-site backup has been recorded yet."
+                        if backup_state == "degraded"
+                        else None
+                    )
+                ),
+            },
             "latest_import_batch": latest_batch,
             "latest_import_run": latest_run,
         }
+
+    def get_backup_configuration(self) -> dict[str, Any] | None:
+        return self.db.fetch_one(load_sql("queries/current_backup_configuration"))
+
+    def get_latest_backup_run(self) -> dict[str, Any] | None:
+        return self.db.fetch_one(load_sql("queries/latest_backup_run"))
+
+    def get_backup_settings(self) -> dict[str, Any]:
+        configuration = self.get_backup_configuration()
+        return {
+            "configuration": (
+                {
+                    "status": configuration["status"],
+                    "folder_id": configuration["drive_folder_id"],
+                    "verified_at": configuration["verified_at"],
+                }
+                if configuration
+                else None
+            ),
+            "latest_run": self.get_latest_backup_run(),
+        }
+
+    def start_empty_onboarding(self) -> dict[str, Any]:
+        if self.get_backup_configuration() is None:
+            now = self.clock.now()
+            with self.db.transaction() as connection:
+                self._insert_pending_backup_configuration(connection, now)
+        return self.get_app_status()
+
+    def configure_backup_folder(self, folder_id: str) -> dict[str, Any]:
+        current = self.get_backup_configuration()
+        now = self.clock.now()
+        with self.db.transaction() as connection:
+            if current is not None:
+                close_current_version(
+                    connection,
+                    "backup_configurations",
+                    "configuration_id",
+                    str(SYSTEM_BACKUP_CONFIGURATION_ID),
+                    now=now,
+                )
+                created_at = current["created_at"]
+            else:
+                created_at = now
+            insert_version(
+                connection,
+                "backup_configurations",
+                {
+                    "configuration_id": str(SYSTEM_BACKUP_CONFIGURATION_ID),
+                    "status": "CONFIGURED",
+                    "drive_folder_id": folder_id,
+                    "verified_at": now,
+                    "last_error": None,
+                    "valid_from": now,
+                    "valid_to": MAX_TS,
+                    "created_at": created_at,
+                    "created_by_user_id": None,
+                },
+            )
+        return self.get_backup_settings()
+
+    def _insert_pending_backup_configuration(
+        self, connection: duckdb.DuckDBPyConnection, now: datetime
+    ) -> None:
+        if (
+            connection.execute(load_sql("queries/current_backup_configuration")).fetchone()
+            is not None
+        ):
+            return
+        insert_version(
+            connection,
+            "backup_configurations",
+            {
+                "configuration_id": str(SYSTEM_BACKUP_CONFIGURATION_ID),
+                "status": "PENDING",
+                "drive_folder_id": None,
+                "verified_at": None,
+                "last_error": None,
+                "valid_from": now,
+                "valid_to": MAX_TS,
+                "created_at": now,
+                "created_by_user_id": None,
+            },
+        )
+
+    def report_backup_run(self, run_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        now = self.clock.now()
+        current = self.db.fetch_one(load_sql("queries/backup_run_by_id"), (run_id,))
+        if current and current["status"] in {"SUCCEEDED", "FAILED"}:
+            if current["status"] == payload["status"] and current["phase"] == payload["phase"]:
+                return current
+            raise ValueError("Backup run is already complete")
+        started_at = current["started_at"] if current else now
+        completed_at = now if payload["status"] in {"SUCCEEDED", "FAILED"} else None
+        self.db.execute(
+            load_sql("queries/upsert_backup_run"),
+            (
+                run_id,
+                payload["trigger_kind"],
+                payload["status"],
+                payload["phase"],
+                started_at,
+                completed_at,
+                now,
+                payload.get("source_snapshot"),
+                payload.get("image_digest"),
+                payload.get("restic_snapshot_id"),
+                payload.get("database_sha256"),
+                payload.get("database_size_bytes"),
+                payload.get("error_message"),
+            ),
+        )
+        result = self.db.fetch_one(load_sql("queries/backup_run_by_id"), (run_id,))
+        if result is None:
+            raise RuntimeError("Backup run update did not persist")
+        return result
 
     def get_import_status(self) -> dict[str, Any] | None:
         row = self.db.fetch_one(load_sql("queries/latest_import_run"))
@@ -1016,6 +1168,10 @@ class DojoService:
 
         imported_at = self.clock.now()
         import_run_id = str(uuid4())
+        requires_backup_setup = (
+            self.db.fetch_one(load_sql("queries/latest_import_batch")) is None
+            and self.get_backup_configuration() is None
+        )
         try:
             with self.db.transaction() as connection:
                 claimed = connection.execute(
@@ -1041,6 +1197,8 @@ class DojoService:
                         ),
                     ),
                 )
+                if requires_backup_setup:
+                    self._insert_pending_backup_configuration(connection, imported_at)
         except ImportValidationError as exc:
             self._record_import_run(
                 import_run_id=import_run_id,

@@ -122,7 +122,7 @@ The layout should be simple, centered, and low-friction.
 
 ### Path 1: Start Empty
 
-Selecting **Start empty** immediately enters the application with no data populated.
+Selecting **Start empty** creates an empty workspace and advances to required backup setup.
 
 The user lands in the normal application shell and may manually begin adding:
 
@@ -132,7 +132,7 @@ The user lands in the normal application shell and may manually begin adding:
 * transactions
 * other supported records
 
-No additional setup steps are required in this path.
+Before entering the application, the user creates a private Google Drive folder, shares it with dojo's displayed backup service-account email, and submits the folder ID. dojo verifies write access before completing onboarding.
 
 ### Path 2: Migrate from Aspire
 
@@ -219,7 +219,13 @@ When migration completes successfully, the user sees a completion screen with:
 
 #### Continue to App
 
-Selecting **Continue to app** enters the normal application shell with imported data loaded.
+Selecting **Continue to app** advances to required backup setup. After dojo verifies the shared Google Drive folder, the user enters the normal application shell with imported data loaded.
+
+### Backup Setup
+
+Backup setup is required for new empty and Aspire-imported workspaces. The screen displays the deployment-specific backup service-account email and accepts a Google Drive folder ID. No human Google account identity is stored in the repository or application database.
+
+If Drive folder access is later revoked or a scheduled backup fails, dojo remains available and migrations continue. A persistent application warning prompts the user to repair backup access until a successful off-site backup is recorded.
 
 #### Details
 

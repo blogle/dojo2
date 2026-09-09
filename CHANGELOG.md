@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Decoupled migration and API startup from Google Drive, added required backup-folder onboarding, persisted backup health, authenticated CronJob status reporting, a degraded-backup UI warning, OpenTofu service-account provisioning, and an opt-in local Drive rehearsal.
+
 - Rewired Budget move, group funding, category/group creation, reorder saving, and retired-category restoration to persistent API operations with failure-visible UI behavior.
 - Added aggregate validation and complete decision parsing to reviewed Aspire commits, including an executable reviewed-path fixture rehearsal.
 - Added transaction version tokens, stale-write conflicts, and success-only transaction form, undo, and removal feedback.

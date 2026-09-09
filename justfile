@@ -45,7 +45,7 @@ test-web:
 
 test-unit:
 	@printf '==> running backend unit tests\n'
-	cd api && uv run python -m pytest tests/test_money.py tests/test_settings.py tests/test_importer.py tests/test_loan_projection.py tests/test_operations.py tests/test_backup.py
+	cd api && uv run python -m pytest tests/test_money.py tests/test_settings.py tests/test_importer.py tests/test_loan_projection.py tests/test_operations.py tests/test_backup.py tests/test_drive_backup.py
 
 test-property:
 	@printf '==> running backend property tests\n'
@@ -133,6 +133,27 @@ k8s-snapshot-backup:
 
 k8s-render:
 	kubectl kustomize deploy/k8s/base
+
+drive-infra-fmt:
+	tofu -chdir=infra/opentofu/google-backup fmt
+
+drive-infra-fmt-check:
+	tofu -chdir=infra/opentofu/google-backup fmt -check
+
+drive-infra-init:
+	tofu -chdir=infra/opentofu/google-backup init
+
+drive-infra-validate:
+	tofu -chdir=infra/opentofu/google-backup init -backend=false && tofu -chdir=infra/opentofu/google-backup validate
+
+drive-infra-plan:
+	tofu -chdir=infra/opentofu/google-backup plan
+
+drive-infra-apply:
+	tofu -chdir=infra/opentofu/google-backup apply
+
+drive-rehearsal:
+	ops/drive/rehearse.sh
 
 # --- Benchmarks ---
 

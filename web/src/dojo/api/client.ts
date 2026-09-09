@@ -2,6 +2,7 @@ import type {
   Account,
   Allocation,
   AppStatus,
+  BackupSettings,
   AssetsLiabilitiesResponse,
   BootstrapResponse,
   BudgetResponse,
@@ -76,6 +77,23 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export async function fetchAppStatus(): Promise<AppStatus> {
   return request<AppStatus>("/api/app/status");
+}
+
+export async function startEmptyOnboarding(): Promise<AppStatus> {
+  return request<AppStatus>("/api/onboarding/start-empty", { method: "POST" });
+}
+
+export async function fetchBackupSettings(): Promise<BackupSettings> {
+  return request<BackupSettings>("/api/settings/backup");
+}
+
+export async function configureBackupFolder(
+  folderId: string,
+): Promise<BackupSettings> {
+  return request<BackupSettings>("/api/settings/backup", {
+    method: "PUT",
+    body: JSON.stringify({ folder_id: folderId }),
+  });
 }
 
 export async function fetchBootstrap(): Promise<BootstrapResponse> {

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import secrets
+from pathlib import Path
 from typing import Annotated, Any, cast
 from urllib.parse import urlsplit
 from uuid import UUID
@@ -14,6 +15,7 @@ from dojo.api.models import (
     AccountPayload,
     AccountUpdatePayload,
     AllocationRequest,
+    BackupFolderPayload,
     CategoryGroupPayload,
     CategoryGroupUpdatePayload,
     CategoryPayload,
@@ -43,6 +45,7 @@ from dojo.api.models import (
 )
 from dojo.api.settings import Settings
 from dojo.commands import CommandConflictError
+from dojo.drive_backup import verify_drive_folder
 from dojo.google import (
     OAuthTokenStore,
     build_google_auth_url,
@@ -108,6 +111,39 @@ def oauth_status_payload(request: Request) -> dict[str, Any]:
 @router.get("/app/status")
 def app_status(request: Request) -> dict[str, Any]:
     return get_service(request).get_app_status()
+
+
+@router.post("/onboarding/start-empty")
+def start_empty_onboarding(request: Request) -> dict[str, Any]:
+    return get_service(request).start_empty_onboarding()
+
+
+@router.get("/settings/backup")
+def backup_settings(request: Request) -> dict[str, Any]:
+    settings = get_settings(request)
+    verification_available = bool(
+        settings.backup_service_account_email
+        and Path(settings.backup_service_account_file).is_file()
+        and Path(settings.backup_status_token_file).is_file()
+    )
+    return get_service(request).get_backup_settings() | {
+        "service_account_email": settings.backup_service_account_email,
+        "verification_available": verification_available,
+    }
+
+
+@router.put("/settings/backup")
+def configure_backup(request: Request, payload: BackupFolderPayload) -> dict[str, Any]:
+    settings = get_settings(request)
+    if not Path(settings.backup_status_token_file).is_file():
+        raise HTTPException(status_code=503, detail="Backup status reporting is not configured")
+    try:
+        verify_drive_folder(payload.folder_id, settings.backup_service_account_file)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return get_service(request).configure_backup_folder(payload.folder_id)
 
 
 @router.post("/onboarding/google/start")

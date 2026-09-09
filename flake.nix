@@ -44,6 +44,14 @@
         snapshotBackupLauncher = pkgs.writeShellScriptBin "dojo-snapshot-backup" ''
           exec ${pkgs.bash}/bin/bash ${./ops/k8s/snapshot-backup.sh} "$@"
         '';
+        backupStatusLauncher = pkgs.writeShellScriptBin "dojo-backup-status" ''
+          export PYTHONPATH=${apiSource}/app
+          exec ${apiPython}/bin/python -m dojo.backup_status "$@"
+        '';
+        backupStatusLauncher = pkgs.writeShellScriptBin "dojo-backup-status" ''
+          export PYTHONPATH=${apiSource}/app
+          exec ${apiPython}/bin/python -m dojo.backup_status "$@"
+        '';
       in
       {
         devShells.default = pkgs.mkShell {
@@ -61,6 +69,7 @@
             restic
             rclone
             kubectl
+            opentofu
             git
             pkg-config
             openssl
@@ -90,6 +99,8 @@
             migrationLauncher
             backupLauncher
             snapshotBackupLauncher
+            backupStatusLauncher
+            backupStatusLauncher
             pkgs.restic
             pkgs.rclone
             pkgs.kubectl

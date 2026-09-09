@@ -12,6 +12,7 @@ from starlette.types import Scope
 
 from dojo.api.e2e import router as e2e_router
 from dojo.api.health import router as health_router
+from dojo.api.internal_backup import router as internal_backup_router
 from dojo.api.routes import router as api_router
 from dojo.api.settings import Settings, get_settings
 from dojo.e2e import fixed_e2e_clock
@@ -72,6 +73,7 @@ def create_app(app_settings: Settings | None = None) -> FastAPI:
     app.add_middleware(SessionMiddleware, secret_key=settings.session_secret)
     app.include_router(health_router)
     app.include_router(api_router)
+    app.include_router(internal_backup_router)
     if (
         settings.app_env == "e2e"
         and settings.e2e_reset_token

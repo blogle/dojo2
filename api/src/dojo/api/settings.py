@@ -21,6 +21,9 @@ class Settings(BaseSettings):
         default="https://www.googleapis.com/auth/spreadsheets.readonly",
         alias="GOOGLE_OAUTH_SCOPES",
     )
+    backup_service_account_email: str = Field(default="", alias="BACKUP_SERVICE_ACCOUNT_EMAIL")
+    backup_service_account_file: str = Field(default="", alias="BACKUP_SERVICE_ACCOUNT_FILE")
+    backup_status_token_file: str = Field(default="", alias="BACKUP_STATUS_TOKEN_FILE")
     session_secret: str = Field(default="dev-only-change-me", alias="SESSION_SECRET")
     log_level: str = Field(default="debug", alias="LOG_LEVEL")
     cors_allowed_origins: str = Field(

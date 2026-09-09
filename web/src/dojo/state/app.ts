@@ -20,6 +20,7 @@ import {
   fetchTransactionsPage,
   importGoogleSheet,
   startGoogleOnboarding,
+  startEmptyOnboarding,
   updateAccount,
   updateCategory,
   updateCategoryGoal,
@@ -315,6 +316,13 @@ async function beginGoogleOnboarding(): Promise<void> {
   });
 }
 
+async function beginEmptyOnboarding(): Promise<void> {
+  await withSaving(async () => {
+    await startEmptyOnboarding();
+    await refreshBootstrap();
+  });
+}
+
 async function setMonth(month: string): Promise<void> {
   state.month = month;
   await withLoading(async () => {
@@ -506,6 +514,7 @@ export function useAppState() {
     commitSheetImport,
     importSheet,
     beginGoogleOnboarding,
+    beginEmptyOnboarding,
     setMonth,
     setShowHidden,
     submitAllocation,

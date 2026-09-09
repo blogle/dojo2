@@ -3,8 +3,24 @@ export type AppStatus = {
   ready: boolean;
   mode: string;
   needs_onboarding: boolean;
+  needs_backup_setup: boolean;
+  backup: {
+    state: "required" | "configured" | "degraded";
+    message: string | null;
+  };
   latest_import_batch: Record<string, unknown> | null;
   latest_import_run: Record<string, unknown> | null;
+};
+
+export type BackupSettings = {
+  service_account_email: string;
+  verification_available: boolean;
+  configuration: {
+    status: "PENDING" | "CONFIGURED";
+    folder_id: string | null;
+    verified_at: string | null;
+  } | null;
+  latest_run: Record<string, unknown> | null;
 };
 
 export type Transaction = {

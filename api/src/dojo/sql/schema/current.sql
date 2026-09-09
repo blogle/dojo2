@@ -34,6 +34,43 @@ CREATE TABLE IF NOT EXISTS import_drafts (
     status TEXT NOT NULL DEFAULT 'pending'
 );
 
+CREATE TABLE IF NOT EXISTS backup_configurations (
+    row_id UUID PRIMARY KEY,
+    configuration_id UUID NOT NULL,
+    status TEXT NOT NULL,
+    drive_folder_id TEXT,
+    verified_at TIMESTAMPTZ,
+    last_error TEXT,
+    valid_from TIMESTAMPTZ NOT NULL,
+    valid_to TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    created_by_user_id UUID,
+    CHECK (status IN ('PENDING', 'CONFIGURED'))
+);
+
+CREATE OR REPLACE VIEW current_backup_configurations AS
+SELECT * FROM backup_configurations
+WHERE valid_to = TIMESTAMPTZ '9999-12-31 23:59:59+00';
+
+CREATE TABLE IF NOT EXISTS backup_runs (
+    backup_run_id UUID PRIMARY KEY,
+    trigger_kind TEXT NOT NULL,
+    status TEXT NOT NULL,
+    phase TEXT NOT NULL,
+    started_at TIMESTAMPTZ NOT NULL,
+    completed_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ NOT NULL,
+    source_snapshot TEXT,
+    image_digest TEXT,
+    restic_snapshot_id TEXT,
+    database_sha256 TEXT,
+    database_size_bytes BIGINT,
+    error_message TEXT,
+    CHECK (trigger_kind IN ('SCHEDULED', 'MANUAL')),
+    CHECK (status IN ('RUNNING', 'SUCCEEDED', 'FAILED')),
+    CHECK (database_size_bytes IS NULL OR database_size_bytes >= 0)
+);
+
 CREATE TABLE IF NOT EXISTS accounts (
     row_id UUID PRIMARY KEY,
     account_id UUID NOT NULL,

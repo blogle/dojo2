@@ -39,6 +39,36 @@ class ImportRequest(BaseModel):
     sheet_url_or_id: str = Field(min_length=1)
 
 
+class BackupFolderPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    folder_id: str = Field(min_length=1, max_length=256, pattern=r"^[A-Za-z0-9_-]+$")
+
+
+class BackupRunEventPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    trigger_kind: Literal["SCHEDULED", "MANUAL"]
+    status: Literal["RUNNING", "SUCCEEDED", "FAILED"]
+    phase: Literal[
+        "STARTING",
+        "SNAPSHOTTING",
+        "CLONING",
+        "PREPARING",
+        "UPLOADING",
+        "VERIFYING",
+        "RETAINING",
+        "CLEANING_UP",
+        "COMPLETE",
+    ]
+    source_snapshot: str | None = Field(default=None, max_length=256)
+    image_digest: str | None = Field(default=None, max_length=512)
+    restic_snapshot_id: str | None = Field(default=None, max_length=256)
+    database_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    database_size_bytes: int | None = Field(default=None, ge=0)
+    error_message: str | None = Field(default=None, max_length=1000)
+
+
 NetWorthTreatment = Literal[
     "DUPLICATE_BUDGET_ACCOUNT",
     "IMPORT_TRACKING_ACCOUNT",

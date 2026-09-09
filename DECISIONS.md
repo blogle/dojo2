@@ -28,6 +28,20 @@ Use OpenEBS ZFS CSI snapshots for no-downtime local recovery. Restore each sched
 
 Operators must retain the restic password outside the cluster, restrict and rotate the Google service-account credential, bind the deployment to immutable image digests, and regularly rehearse restoration. A failed pre-migration off-site backup blocks migration by design.
 
+## 2026-09-04 — Keep Google Drive outside migration and require backup onboarding
+
+### Context
+
+The first backup deployment made every pod restart depend on Google Drive availability and credentials. That could wedge migration and application startup after a revoked permission or cloud outage.
+
+### Decision
+
+Migrations never depend on Google Drive. New users must complete a one-time backup onboarding step by sharing a private Drive folder with the deployment-specific service account. Scheduled Jobs report success and failure through a bearer-authenticated internal API. Later failures leave dojo available and produce a persistent warning.
+
+### Consequence
+
+This supersedes the earlier requirement that off-site backup failure block migration. Deployment configuration contains an application service-account identity but no human Google identity. The API may verify folder access, while restic passwords remain available only to backup workers.
+
 ## 2026-06-13 — Make DuckDB provisioning explicit and route domain time through an injected clock
 
 ### Context

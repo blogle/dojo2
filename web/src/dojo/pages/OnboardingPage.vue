@@ -8,10 +8,11 @@ import {
   PhTable,
   PhWarningCircle,
 } from "@phosphor-icons/vue";
-import { computed, ref } from "vue";
-import { useRouter } from "vue-router";
+import { computed, ref, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 
 import { useAppState } from "../state/app";
+import { configureBackupFolder, fetchBackupSettings } from "../api/client";
 
 import Button from "../components/actions/Button.vue";
 import SelectField from "../components/forms/SelectField.vue";
@@ -31,12 +32,14 @@ import type {
 } from "../types";
 
 const router = useRouter();
+const route = useRoute();
 const {
   state,
   analyzeSheet,
   commitSheetImport,
   beginGoogleOnboarding,
   initialize,
+  beginEmptyOnboarding,
 } = useAppState();
 
 type Step =
@@ -46,12 +49,17 @@ type Step =
   | "net-worth-review"
   | "confirm-low-confidence"
   | "committing"
-  | "complete";
+  | "complete"
+  | "backup-setup";
 
 const step = ref<Step>("choose");
 const sheetId = ref("");
 const errorMessage = ref("");
 const formError = ref("");
+const backupFolderId = ref("");
+const backupServiceAccountEmail = ref("");
+const backupError = ref("");
+const backupSaving = ref(false);
 
 const importResult = computed(() => state.importResult);
 const importPreview = computed(() => state.importPreview);
@@ -106,8 +114,8 @@ function getLowConfidenceCount(): number {
 }
 
 async function handleStartEmpty() {
-  await initialize();
-  router.push("/budgets");
+  await beginEmptyOnboarding();
+  await showBackupSetup();
 }
 
 async function handleSubmitSheet() {
@@ -187,8 +195,54 @@ function handleBackToReview() {
 }
 
 function handleContinue() {
-  router.push("/budgets");
+  void showBackupSetup();
 }
+
+async function showBackupSetup() {
+  step.value = "backup-setup";
+  backupError.value = "";
+  try {
+    const settings = await fetchBackupSettings();
+    backupServiceAccountEmail.value = settings.service_account_email;
+    backupFolderId.value = settings.configuration?.folder_id ?? "";
+    if (!settings.verification_available) {
+      backupError.value =
+        "Backup verification is not configured on this dojo server.";
+    }
+  } catch (error) {
+    backupError.value =
+      error instanceof Error ? error.message : "Backup setup could not load.";
+  }
+}
+
+async function saveBackupFolder() {
+  const folderId = backupFolderId.value.trim();
+  if (!folderId) return;
+  backupSaving.value = true;
+  backupError.value = "";
+  try {
+    await configureBackupFolder(folderId);
+    await initialize();
+    router.push("/budgets");
+  } catch (error) {
+    backupError.value =
+      error instanceof Error
+        ? error.message
+        : "Google Drive folder verification failed.";
+  } finally {
+    backupSaving.value = false;
+  }
+}
+
+watch(
+  () => state.appStatus?.mode,
+  (mode) => {
+    if (mode === "backup_setup" || route.query.backup === "repair") {
+      void showBackupSetup();
+    }
+  },
+  { immediate: true },
+);
 
 const showDetails = ref(false);
 
@@ -674,6 +728,43 @@ const showInvalidSheetId = computed(
           </Button>
         </Inline>
       </template>
+
+      <template v-if="step === 'backup-setup'">
+        <p class="onboarding__eyebrow">PROTECT YOUR DATA</p>
+        <h1 class="onboarding__headline">Set up Google Drive backups</h1>
+        <p class="onboarding__copy">
+          Create a private folder in Google Drive and share it with this dojo
+          backup account as an editor.
+        </p>
+
+        <Surface variant="muted" padding="md" :border="true">
+          <p class="onboarding__field-label">Backup account</p>
+          <p class="onboarding__credential">
+            {{ backupServiceAccountEmail || "Unavailable" }}
+          </p>
+        </Surface>
+
+        <TextField
+          v-model="backupFolderId"
+          label="Google Drive folder ID"
+          placeholder="Paste the value after /folders/ in the Drive URL"
+          :error="backupError"
+        />
+
+        <p class="onboarding__copy">
+          dojo verifies that it can create and remove a probe folder before
+          saving this configuration. Financial data is encrypted by restic
+          before upload.
+        </p>
+
+        <Button
+          variant="primary"
+          :disabled="backupSaving || !backupFolderId.trim()"
+          @click="saveBackupFolder"
+        >
+          {{ backupSaving ? "Verifying…" : "Verify and enable backups" }}
+        </Button>
+      </template>
     </div>
 
     <ImportDetailsModal
@@ -713,6 +804,17 @@ const showInvalidSheetId = computed(
   border: 1px solid var(--color-outline);
   border-radius: var(--radius-md);
   background: var(--color-surface-raised);
+}
+
+.onboarding__field-label {
+  margin: 0 0 var(--space-xs);
+  color: var(--color-on-surface-muted);
+}
+
+.onboarding__credential {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--color-on-surface);
 }
 
 .onboarding__eyebrow {

@@ -16,3 +16,10 @@ docs/book/
 web/cypress/downloads/
 web/cypress/screenshots/
 web/cypress/videos/
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+!*.tfvars.example
+crash.log

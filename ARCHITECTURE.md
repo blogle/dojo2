@@ -45,7 +45,9 @@ The backend intentionally does not run migrations as a side effect of Python imp
 
 `api/src/dojo/backup.py` prepares a recoverable copy rather than copying over a live database. It copies the database and any WAL into staging, opens the staged copy with DuckDB to perform recovery and checkpointing, and writes a hash- and runtime-bearing manifest. Restore verifies that manifest and refuses to overwrite an existing target.
 
-Production uses two layers. OpenEBS ZFS CSI `VolumeSnapshot` resources provide fast, no-downtime local recovery points. A temporary PVC restored from each snapshot is opened and verified before restic encrypts and uploads it through rclone to a service-account-owned Google Drive folder. Local snapshots are not considered off-site backups. Restore always targets a new PVC, which is migrated and verified before the Deployment is switched to it.
+Production uses two independent layers. OpenEBS ZFS CSI `VolumeSnapshot` resources provide fast, no-downtime local recovery points. A temporary PVC restored from each scheduled snapshot is opened and verified before restic encrypts and uploads it through rclone to a human-owned Google Drive folder shared with the deployment-specific service account. Local snapshots are not considered off-site backups. Restore always targets a new PVC, which is migrated and verified before the Deployment is switched to it.
+
+Google Drive is never on the migration or API-startup path. `dojo-migrate` runs without Drive credentials or network access. Backup configuration is required during first-run onboarding, while later backup failures are recorded through a bearer-authenticated internal endpoint and surfaced as a non-blocking persistent UI warning.
 
 ## SCD2 Model
 

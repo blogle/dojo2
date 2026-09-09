@@ -18,3 +18,17 @@ spec:
           - name: orchestrator
             image: ghcr.io/blogle/dojo2
             command: [/bin/dojo-snapshot-backup]
+            env:
+            - name: DOJO_BACKUP_STATUS_URL
+              value: http://dojo/api/internal/backup-runs
+            - name: DOJO_BACKUP_STATUS_TOKEN_FILE
+              value: /backup-status/token
+            volumeMounts:
+            - name: backup-status
+              mountPath: /backup-status
+              readOnly: true
+          volumes:
+          - name: backup-status
+            secret:
+              secretName: dojo-backup-status
+              optional: true

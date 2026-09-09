@@ -46,6 +46,9 @@ Use the root `justfile` as the only routine command interface.
 | `just backup-restore ...` | Restore a verified database without overwriting an existing target |
 | `just k8s-render` | Render the Kubernetes base manifests |
 | `just k8s-snapshot-backup` | Run one OpenEBS snapshot-to-Google-Drive backup |
+| `just drive-infra-validate` | Validate the OpenTofu Google backup identity root |
+| `just drive-infra-plan` | Plan Google backup identity changes |
+| `just drive-rehearsal` | Run the opt-in credentialed Drive round-trip rehearsal |
 
 ## Narrow Versus Complete Checks
 
@@ -76,7 +79,7 @@ Before finishing a change, run `just check`. For CI-equivalent verification, run
 
 The repository uses explicit provisioning.
 
-Production migration must follow the backup gate described in `docs/src/backup-and-restore.md`. Do not copy `/data/dojo.duckdb` while the API owns it, and never test restoration over the production PVC.
+Production migration is independent of Google Drive availability. Do not copy `/data/dojo.duckdb` while the API owns it, and never test restoration over the production PVC.
 
 - Schema creation lives in `api/src/dojo/sql/schema/current.sql`.
 - The provisioning entrypoint is `api/src/dojo/migrations.py`.

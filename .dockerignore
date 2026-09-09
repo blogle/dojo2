@@ -5,3 +5,12 @@ api/dist
 web/node_modules
 web/dist
 tmp
+.env
+**/.env
+**/.terraform
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+**/*service-account*.json
+**/*credentials*.json

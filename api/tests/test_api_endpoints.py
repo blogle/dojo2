@@ -664,7 +664,8 @@ def test_commit_import_draft_imports_data(monkeypatch, tmp_path) -> None:
 
         status = client.get("/api/app/status")
         assert status.status_code == 200
-        assert status.json()["ready"] is True
+        assert status.json()["ready"] is False
+        assert status.json()["mode"] == "backup_setup"
 
 
 def test_transaction_update_rejects_stale_version(monkeypatch, tmp_path) -> None:
@@ -734,3 +735,53 @@ def test_reviewed_import_requires_complete_decisions(monkeypatch, tmp_path) -> N
         )
         assert response.status_code == 400
         assert "missing" in response.json()["detail"]
+
+
+def test_start_empty_requires_verified_backup_folder(monkeypatch, tmp_path) -> None:
+    token_file = tmp_path / "backup-token"
+    token_file.write_text("test-token", encoding="utf-8")
+    monkeypatch.setenv("SESSION_SECRET", "test-secret")
+    monkeypatch.setenv("BACKUP_SERVICE_ACCOUNT_EMAIL", "dojo@example.iam.gserviceaccount.com")
+    monkeypatch.setenv("BACKUP_SERVICE_ACCOUNT_FILE", "/tmp/test-service-account.json")
+    monkeypatch.setenv("BACKUP_STATUS_TOKEN_FILE", str(token_file))
+    provisioned_main_module(monkeypatch, tmp_path, "api-test.duckdb")
+    monkeypatch.setattr(routes_module, "verify_drive_folder", lambda _folder, _credentials: None)
+
+    with TestClient(main_module.app) as client:
+        started = client.post("/api/onboarding/start-empty")
+        assert started.status_code == 200
+        assert started.json()["mode"] == "backup_setup"
+        assert started.json()["ready"] is False
+
+        settings = client.get("/api/settings/backup")
+        assert settings.json()["service_account_email"] == "dojo@example.iam.gserviceaccount.com"
+        configured = client.put("/api/settings/backup", json={"folder_id": "drive-folder-123"})
+        assert configured.status_code == 200
+        assert configured.json()["configuration"]["status"] == "CONFIGURED"
+        assert client.get("/api/app/status").json()["ready"] is True
+
+
+def test_backup_status_endpoint_is_authenticated_and_non_blocking(monkeypatch, tmp_path) -> None:
+    token_file = tmp_path / "backup-status-token"
+    token_file.write_text("test-backup-token", encoding="utf-8")
+    monkeypatch.setenv("SESSION_SECRET", "test-secret")
+    monkeypatch.setenv("BACKUP_STATUS_TOKEN_FILE", str(token_file))
+    provisioned_main_module(monkeypatch, tmp_path, "api-test.duckdb")
+    run_id = "00000000-0000-4000-8000-000000000001"
+    payload = {
+        "trigger_kind": "SCHEDULED",
+        "status": "FAILED",
+        "phase": "UPLOADING",
+        "error_message": "Drive access was revoked",
+    }
+
+    with TestClient(main_module.app) as client:
+        assert client.post(f"/api/internal/backup-runs/{run_id}", json=payload).status_code == 401
+        response = client.post(
+            f"/api/internal/backup-runs/{run_id}",
+            json=payload,
+            headers={"Authorization": "Bearer test-backup-token"},
+        )
+        assert response.status_code == 200
+        assert response.json()["status"] == "FAILED"
+        assert client.get("/health").status_code == 200

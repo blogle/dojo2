@@ -11,7 +11,21 @@ Discover the installed storage classes before deployment:
 
 The snapshot driver must be `zfs.csi.openebs.io`. The scheduled script automatically accepts exactly one matching snapshot class; set `DOJO_VOLUME_SNAPSHOT_CLASS` when the cluster has more than one. Make the production PVC's StorageClass explicit after discovery.
 
-Create a Google service account, create a private Drive folder, and share only that folder with the service-account address. Copy `deploy/k8s/backup-secret.example.yaml` outside the repository, replace its placeholders, and apply it. Store the restic password in a separate recovery system; losing it makes every encrypted backup unusable. Initialize the repository once from a controlled workstation or Job using the same rclone configuration:
+Use `infra/opentofu/google-backup` to enable the Drive API and create the deployment-specific service account in an existing Google Cloud project:
+
+    just drive-infra-plan
+    just drive-infra-apply
+
+Copy the `backup_service_account_email` output. The user then creates a private Drive folder and shares only that folder with that email. The verified folder ID is stored as deployment data during dojo onboarding; no human Google identity is stored in the repository or application database.
+
+Apply separate Secrets and ConfigMap using the checked-in examples:
+
+    deploy/k8s/backup-config.example.yaml
+    deploy/k8s/backup-secret.example.yaml   # Google service-account JSON
+    deploy/k8s/restic-secret.example.yaml    # restic password
+    deploy/k8s/backup-status-secret.example.yaml
+
+Store the restic password in a separate recovery system; losing it makes every encrypted backup unusable. Initialize the repository once from a controlled workstation or Job using the same rclone configuration:
 
     RESTIC_REPOSITORY=rclone:gdrive:dojo/restic restic init
 
@@ -27,9 +41,9 @@ Run an immediate backup with:
 
 Inspect the CronJob and child Job status and alert on any failure. The workflow keeps the newest seven local snapshots and removes temporary Jobs and PVCs.
 
-## Migration gate
+## Migration independence
 
-The Deployment's first init container runs after the old singleton pod has stopped. If a database exists, it prepares and uploads a verified `pre-migration` restic snapshot before `dojo-migrate` can run. If Google Drive, credentials, restic verification, or database recovery fails, migration is blocked. Do not bypass this gate merely to complete a rollout; repair backup access or explicitly execute and verify an equivalent recovery copy first.
+`dojo-migrate` does not access Google Drive and does not mount backup credentials. A Drive outage, missing Secret, or revoked folder permission cannot block migration or API startup. Scheduled backup failures are reported to the internal status endpoint and shown as a persistent warning. OpenEBS snapshots remain the local recovery layer.
 
 ## Restore rehearsal
 
@@ -38,3 +52,14 @@ List snapshots with restic and choose an explicit ID rather than `latest`. Copy 
 Start an isolated dojo Deployment against the restored PVC. Compare `/api/app/status`, `/api/bootstrap`, representative account balances, Budget totals, Transactions, net worth, reconciliation state, and SCD2 history with recorded source values. Only after those checks pass may the production Deployment be patched to the restored claim. Keep the old PVC untouched through the rollback window.
 
 Run this rehearsal monthly and after changing DuckDB or migration behavior. Record the restic snapshot ID, source and target image digests, verification output, elapsed restore time, and result. Never record credentials or the restic password.
+
+## Local Drive rehearsal
+
+Set environment variables for the backup service-account JSON, Drive folder ID, and restic password file, then run the opt-in rehearsal:
+
+    export DOJO_GDRIVE_SERVICE_ACCOUNT_FILE=/path/to/service-account.json
+    export DOJO_GDRIVE_FOLDER_ID=your-folder-id
+    export DOJO_RESTIC_PASSWORD_FILE=/path/to/restic-password
+    just drive-rehearsal
+
+The script creates a unique temporary restic repository beneath `dojo-rehearsals`, uploads a generated DuckDB backup, verifies and restores the exact snapshot, reruns migrations, and removes only that rehearsal repository. This command is intentionally excluded from CI because it requires live Google credentials and network access.
