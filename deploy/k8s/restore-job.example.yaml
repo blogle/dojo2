@@ -21,7 +21,7 @@ spec:
         - name: RESTIC_REPOSITORY
           value: rclone:gdrive:dojo/restic
         - name: RESTIC_PASSWORD_FILE
-          value: /backup-secrets/restic-password
+          value: /restic-secrets/restic-password
         - name: RCLONE_CONFIG
           value: /backup-secrets/rclone.conf
         volumeMounts:
@@ -31,6 +31,9 @@ spec:
           mountPath: /materialized
         - name: backup-secrets
           mountPath: /backup-secrets
+          readOnly: true
+        - name: restic-secrets
+          mountPath: /restic-secrets
           readOnly: true
       - name: migrate
         image: REPLACE_IMAGE_DIGEST
@@ -58,4 +61,12 @@ spec:
         emptyDir: {}
       - name: backup-secrets
         secret:
-          secretName: dojo-backup-credentials
+          secretName: dojo-backup-google
+          items:
+          - key: service-account.json
+            path: service-account.json
+          - key: rclone.conf
+            path: rclone.conf
+      - name: restic-secrets
+        secret:
+          secretName: dojo-backup-restic

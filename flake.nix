@@ -66,6 +66,7 @@
             rclone
             kubectl
             opentofu
+            google-cloud-sdk
             git
             pkg-config
             openssl
