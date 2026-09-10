@@ -17,6 +17,7 @@ from dojo.constants import (
 )
 from dojo.importer import ParsedImportBundle
 from dojo.sql import load_sql
+from dojo.transfer_boundary import TransferBoundaryFact, compute_transfer_boundary_adjustment
 
 ACCOUNT_RANGE_REFS = [
     "trx_Dates",
@@ -63,7 +64,7 @@ def build_validation_report(service: Any, bundle: ParsedImportBundle) -> dict[st
 
     expected_accounts = _expected_account_balances(bundle)
     expected_categories = _expected_category_snapshots(bundle, months)
-    expected_atb = _expected_available_to_budget(bundle)
+    expected_atb = _expected_available_to_budget(bundle, as_of=service.clock.today())
     expected_group_totals = _expected_group_totals(bundle, expected_categories, months)
     expected_budget_summaries = _expected_budget_summaries(
         bundle, expected_categories, expected_atb, months, show_hidden=False
@@ -704,8 +705,10 @@ def _expected_account_balances(bundle: ParsedImportBundle) -> dict[str, dict[str
     return balances
 
 
-def _expected_available_to_budget(bundle: ParsedImportBundle) -> int:
+def _expected_available_to_budget(bundle: ParsedImportBundle, *, as_of: date) -> int:
     total = 0
+    account_classes = {account.name: account.account_class for account in bundle.accounts}
+    transfer_facts: list[TransferBoundaryFact] = []
     for transaction in bundle.transactions:
         if transaction.system_category == SYSTEM_CATEGORY_STARTING_BALANCE:
             if transaction.amount_minor > 0:
@@ -713,12 +716,24 @@ def _expected_available_to_budget(bundle: ParsedImportBundle) -> int:
             continue
         if transaction.system_category in {SYSTEM_CATEGORY_ATB, SYSTEM_CATEGORY_BALANCE_ADJUSTMENT}:
             total += transaction.amount_minor
+        if transaction.system_category == SYSTEM_CATEGORY_TRANSFER:
+            account_class = account_classes[transaction.account_name]
+            transfer_facts.append(
+                TransferBoundaryFact(
+                    transaction_id=transaction.transaction_id,
+                    account_class=account_class,
+                    system_category=transaction.system_category,
+                    amount_minor=transaction.amount_minor,
+                    effective_date=transaction.date,
+                    status=transaction.status,
+                )
+            )
     for allocation in bundle.allocations:
         if allocation.to_name == "Available to budget":
             total += allocation.amount_minor
         if allocation.from_name == "Available to budget":
             total -= allocation.amount_minor
-    return total
+    return total + compute_transfer_boundary_adjustment(transfer_facts, as_of=as_of)
 
 
 def _expected_category_snapshots(
