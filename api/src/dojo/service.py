@@ -1174,8 +1174,9 @@ class DojoService:
         )
         try:
             with self.db.transaction() as connection:
+                connection.execute(load_sql("queries/claim_import_draft"), (draft_id,))
                 claimed = connection.execute(
-                    load_sql("queries/claim_import_draft"), (draft_id,)
+                    load_sql("queries/claimed_import_draft"), (draft_id,)
                 ).fetchone()
                 if claimed is None:
                     raise ValueError("Draft not found or already used")
