@@ -38,6 +38,16 @@ Save the output:
 
 This email is the identity that will receive Drive folder access. Record it alongside the project ID.
 
+### Existing Google Sheets OAuth client
+
+The login/import OAuth client is separate from the backup service account. It is the standard Google OAuth **Web application** client used by the Aspire Sheets import flow, with the production callback:
+
+    https://dojo.thejeffer.net/api/onboarding/google/callback
+
+The Google provider resource `google_iam_oauth_client` must not be used for this: it manages Workforce Identity OAuth clients, not consumer Google Sheets OAuth clients. Google does not expose the standard Credentials-console client through the Google Terraform provider. Preserve the existing client ID and secret during this migration; do not create a replacement client unless a deliberate OAuth cutover is planned.
+
+The existing `dojo-google-oauth` Kubernetes Secret is now represented by the encrypted `SealedSecret` in `deploy/k8s/overlays/production/dojo-google-oauth-sealed.yaml`. The encrypted values are cluster-specific and cannot be decrypted outside the cluster. If the OAuth client or redirect URI changes, regenerate that SealedSecret with `kubectl get secret dojo-google-oauth -n dojo-prod -o yaml | kubeseal --format yaml` and review the diff before committing it.
+
 ## 2. Create the Drive backup folder
 
 Create a private Google Drive folder for dojo backups. This step is performed by a human Google account owner, not Terraform.
@@ -145,14 +155,13 @@ Before applying the production overlay, identify the cluster's OpenEBS configura
 
 Record the StorageClass name and exactly one `volumesnapshotclass` name whose driver is `zfs.csi.openebs.io`. If the cluster has more than one ZFS snapshot class, set `DOJO_VOLUME_SNAPSHOT_CLASS` on the CronJob environment.
 
-## 5. Build and apply
+## 5. Publish and apply
 
-Build the release image and record its digest:
+Images are built and published by GitHub Actions. Do not build or tag a local image for production. Publish a version tag through the normal repository workflow, then obtain the immutable digest from GHCR:
 
-    just container
-    docker inspect --format='{{index .RepoDigests 0}}' dojo:latest
+    docker buildx imagetools inspect ghcr.io/blogle/dojo2:<VERSION>
 
-Set the digest on every image reference. The production overlay at `deploy/k8s/overlays/production/kustomization.yaml` pins the digest for all workload containers:
+Set the digest from the published image on every image reference. The production overlay at `deploy/k8s/overlays/production/kustomization.yaml` pins the digest for all workload containers:
 
     images:
     - name: ghcr.io/blogle/dojo2
