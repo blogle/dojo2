@@ -90,6 +90,7 @@
           contents = [
             pkgs.bash
             pkgs.coreutils
+            pkgs.cacert
             apiPython
             apiSource
             apiLauncher
