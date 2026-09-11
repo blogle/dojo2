@@ -105,19 +105,20 @@ kind: Job
 metadata:
   name: $job
 spec:
-  backoffLimit: 1
+  backoffLimit: 0
   template:
     spec:
       restartPolicy: Never
       containers:
       - name: backup
         image: $image
-        command: [/bin/bash, -cu]
+        command: [/bin/bash, -ceu]
         args:
         - |
           export RCLONE_CONFIG_GDRIVE_ROOT_FOLDER_ID="$(python -c 'import httpx; payload=httpx.get("http://dojo/api/settings/backup", timeout=10).json(); print(payload["configuration"]["folder_id"])')"
           /bin/dojo-backup-status --url '${DOJO_BACKUP_STATUS_URL}' --token-file /backup-status/token --run-id '$run_id' --trigger-kind SCHEDULED --status RUNNING --phase PREPARING --source-snapshot '$snapshot' --image-digest '$image' || true
           /bin/dojo-backup prepare /data/dojo.duckdb /stage/dojo.duckdb --image-digest '$image' --source-snapshot '$snapshot'
+          restic snapshots >/dev/null 2>&1 || restic init
           restic backup /stage --tag dojo --tag scheduled --tag '$snapshot' --json > /stage/restic-result.json
           restic check
           restic forget --keep-daily 14 --keep-weekly 8 --keep-monthly 12 --prune
