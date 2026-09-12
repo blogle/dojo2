@@ -112,7 +112,7 @@ spec:
       containers:
       - name: backup
         image: $image
-        command: [/bin/bash, -ceu]
+        command: [/bin/bash, -euc]
         args:
         - |
           export RCLONE_CONFIG_GDRIVE_ROOT_FOLDER_ID="$(python -c 'import httpx; payload=httpx.get("http://dojo/api/settings/backup", timeout=10).json(); print(payload["configuration"]["folder_id"])')"
