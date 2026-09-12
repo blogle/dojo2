@@ -38,6 +38,11 @@ export RCLONE_CONFIG="$work/rclone.conf"
 export RESTIC_PASSWORD_FILE="$DOJO_RESTIC_PASSWORD_FILE"
 export RESTIC_REPOSITORY="rclone:gdrive:$remote_path/restic"
 
+probe_name=".dojo-storage-probe-$run_id"
+probe_remote="gdrive:$remote_path/$probe_name"
+printf 'ok' | rclone rcat "$probe_remote"
+rclone delete "$probe_remote"
+
 (cd api && uv run python -m dojo.migrations "$work/source.duckdb")
 (cd api && uv run python -m dojo.backup prepare "$work/source.duckdb" "$work/stage/dojo.duckdb" --image-digest local-rehearsal --source-snapshot "$run_id")
 restic init

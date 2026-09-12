@@ -50,13 +50,13 @@ The existing `dojo-google-oauth` Kubernetes Secret is now represented by the enc
 
 ## 2. Create the Drive backup folder
 
-Create a private Google Drive folder for dojo backups. This step is performed by a human Google account owner, not Terraform.
+Create a folder on a Google Shared Drive for dojo backups. Service accounts have no storage quota on personal Drive; the backup writes will fail with a 403 `storageQuotaExceeded` error if the folder is on My Drive. This step is performed by a human Google account owner, not Terraform.
 
-Share the folder with the service account email from step 1 as an Editor. The folder URL contains the folder ID:
+Share the Shared Drive with the service account email from step 1 as a Contributor (or Editor). The folder URL contains the folder ID:
 
     https://drive.google.com/drive/folders/FOLDER_ID
 
-Never use a Shared Drive folder that the service account does not have explicit access to. The folder must exist before onboarding completes.
+The folder must exist before onboarding completes. The onboarding verification will probe a file write to catch Shared Drive misconfigurations early.
 
 ## 3. Generate secrets
 

@@ -19,7 +19,7 @@ def test_verify_drive_folder_probes_write_access(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(subprocess, "run", run)
     verify_drive_folder("folder-id", str(credentials))
 
-    assert [command[1] for command in calls] == ["lsf", "mkdir", "rmdir"]
+    assert [command[1] for command in calls] == ["lsf", "mkdir", "rcat", "delete", "rmdir"]
 
 
 def test_verify_drive_folder_rejects_failed_probe(monkeypatch, tmp_path) -> None:

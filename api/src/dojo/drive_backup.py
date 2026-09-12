@@ -34,6 +34,23 @@ def verify_drive_folder(folder_id: str, service_account_file: str) -> None:
             env=environment,
         )
         subprocess.run(
+            ["rclone", "rcat", f"{remote}{probe}/storage-check"],
+            input=b"ok",
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=environment,
+        )
+        subprocess.run(
+            ["rclone", "delete", f"{remote}{probe}"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=environment,
+        )
+        subprocess.run(
             ["rclone", "rmdir", f"{remote}{probe}"],
             check=True,
             capture_output=True,
@@ -43,5 +60,8 @@ def verify_drive_folder(folder_id: str, service_account_file: str) -> None:
         )
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
         raise ValueError(
-            "dojo could not write to that Google Drive folder. Confirm the folder ID and sharing permissions."
+            "dojo could not write to that Google Drive folder. "
+            "Confirm the folder ID and sharing permissions. "
+            "If using a Google service account, the folder must be on a Shared Drive; "
+            "personal Drive folders do not grant storage quota to service accounts."
         ) from exc
