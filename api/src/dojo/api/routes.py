@@ -121,13 +121,16 @@ def start_empty_onboarding(request: Request) -> dict[str, Any]:
 @router.get("/settings/backup")
 def backup_settings(request: Request) -> dict[str, Any]:
     settings = get_settings(request)
+    session_id = get_or_create_oauth_session_id(request)
+    token = get_oauth_token_store(request).get(session_id)
+    has_refresh_token = bool(token and token.get("refresh_token"))
     verification_available = bool(
-        settings.backup_service_account_email
-        and Path(settings.backup_service_account_file).is_file()
+        settings.oauth_configured
+        and has_refresh_token
         and Path(settings.backup_status_token_file).is_file()
     )
     return get_service(request).get_backup_settings() | {
-        "service_account_email": settings.backup_service_account_email,
+        "service_account_email": None,
         "verification_available": verification_available,
     }
 
@@ -137,13 +140,26 @@ def configure_backup(request: Request, payload: BackupFolderPayload) -> dict[str
     settings = get_settings(request)
     if not Path(settings.backup_status_token_file).is_file():
         raise HTTPException(status_code=503, detail="Backup status reporting is not configured")
+    session_id = get_or_create_oauth_session_id(request)
+    token = get_oauth_token_store(request).get(session_id)
+    if not token or not token.get("refresh_token"):
+        raise HTTPException(
+            status_code=400,
+            detail="Google Drive access not granted. Sign in with Google first.",
+        )
+    refresh_token = str(token["refresh_token"])
     try:
-        verify_drive_folder(payload.folder_id, settings.backup_service_account_file)
+        verify_drive_folder(
+            payload.folder_id,
+            client_id=settings.google_oauth_client_id,
+            client_secret=settings.google_oauth_client_secret,
+            refresh_token=refresh_token,
+        )
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return get_service(request).configure_backup_folder(payload.folder_id)
+    return get_service(request).configure_backup_folder(payload.folder_id, refresh_token)
 
 
 @router.post("/onboarding/google/start")

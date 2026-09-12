@@ -18,11 +18,9 @@ class Settings(BaseSettings):
     google_oauth_client_secret: str = Field(default="", alias="GOOGLE_OAUTH_CLIENT_SECRET")
     google_oauth_redirect_uri: str = Field(default="", alias="GOOGLE_OAUTH_REDIRECT_URI")
     google_oauth_scopes: str = Field(
-        default="https://www.googleapis.com/auth/spreadsheets.readonly",
+        default="https://www.googleapis.com/auth/spreadsheets.readonly https://www.googleapis.com/auth/drive.file",
         alias="GOOGLE_OAUTH_SCOPES",
     )
-    backup_service_account_email: str = Field(default="", alias="BACKUP_SERVICE_ACCOUNT_EMAIL")
-    backup_service_account_file: str = Field(default="", alias="BACKUP_SERVICE_ACCOUNT_FILE")
     backup_status_token_file: str = Field(default="", alias="BACKUP_STATUS_TOKEN_FILE")
     session_secret: str = Field(default="dev-only-change-me", alias="SESSION_SECRET")
     log_level: str = Field(default="debug", alias="LOG_LEVEL")

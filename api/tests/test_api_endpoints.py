@@ -741,20 +741,35 @@ def test_start_empty_requires_verified_backup_folder(monkeypatch, tmp_path) -> N
     token_file = tmp_path / "backup-token"
     token_file.write_text("test-token", encoding="utf-8")
     monkeypatch.setenv("SESSION_SECRET", "test-secret")
-    monkeypatch.setenv("BACKUP_SERVICE_ACCOUNT_EMAIL", "dojo@example.iam.gserviceaccount.com")
-    monkeypatch.setenv("BACKUP_SERVICE_ACCOUNT_FILE", "/tmp/test-service-account.json")
+    monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_ID", "test-client-id")
+    monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_SECRET", "test-client-secret")
     monkeypatch.setenv("BACKUP_STATUS_TOKEN_FILE", str(token_file))
     provisioned_main_module(monkeypatch, tmp_path, "api-test.duckdb")
-    monkeypatch.setattr(routes_module, "verify_drive_folder", lambda _folder, _credentials: None)
+    monkeypatch.setattr(routes_module, "verify_drive_folder", lambda *args, **kwargs: None)
 
     with TestClient(main_module.app) as client:
+        # Simulate having completed OAuth with a refresh token
+        # by making the token store return a token for any session
+        from dojo.google import OAuthTokenStore
+        store: OAuthTokenStore = main_module.app.state.oauth_token_store
+        original_get = store.get
+
+        def patched_get(sid: str):
+            result = original_get(sid)
+            if result is not None:
+                return result
+            return {"refresh_token": "test-refresh-token", "access_token": "test"}
+
+        store.get = patched_get  # type: ignore[assignment]
+
         started = client.post("/api/onboarding/start-empty")
         assert started.status_code == 200
         assert started.json()["mode"] == "backup_setup"
         assert started.json()["ready"] is False
 
         settings = client.get("/api/settings/backup")
-        assert settings.json()["service_account_email"] == "dojo@example.iam.gserviceaccount.com"
+        assert settings.json()["service_account_email"] is None
+        assert settings.json()["verification_available"] is True
         configured = client.put("/api/settings/backup", json={"folder_id": "drive-folder-123"})
         assert configured.status_code == 200
         assert configured.json()["configuration"]["status"] == "CONFIGURED"

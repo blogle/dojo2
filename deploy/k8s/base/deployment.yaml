@@ -44,14 +44,6 @@ spec:
           value: /data/dojo.duckdb
         - name: FRONTEND_BASE_URL
           value: http://localhost:8000
-        - name: BACKUP_SERVICE_ACCOUNT_EMAIL
-          valueFrom:
-            configMapKeyRef:
-              name: dojo-backup-config
-              key: service-account-email
-              optional: true
-        - name: BACKUP_SERVICE_ACCOUNT_FILE
-          value: /google-backup/service-account.json
         - name: BACKUP_STATUS_TOKEN_FILE
           value: /backup-status/token
         volumeMounts:

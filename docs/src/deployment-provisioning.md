@@ -50,13 +50,13 @@ The existing `dojo-google-oauth` Kubernetes Secret is now represented by the enc
 
 ## 2. Create the Drive backup folder
 
-Create a folder on a Google Shared Drive for dojo backups. Service accounts have no storage quota on personal Drive; the backup writes will fail with a 403 `storageQuotaExceeded` error if the folder is on My Drive. This step is performed by a human Google account owner, not Terraform.
+Create a private Google Drive folder for dojo backups. This step is performed by a human Google account owner, not Terraform. Personal Drive folders work because dojo uses the user's own OAuth token for uploads, not a service account.
 
-Share the Shared Drive with the service account email from step 1 as a Contributor (or Editor). The folder URL contains the folder ID:
+The folder URL contains the folder ID:
 
     https://drive.google.com/drive/folders/FOLDER_ID
 
-The folder must exist before onboarding completes. The onboarding verification will probe a file write to catch Shared Drive misconfigurations early.
+The folder must exist before onboarding completes. The onboarding verification will probe a file write to confirm access.
 
 ## 3. Generate secrets
 
@@ -69,15 +69,6 @@ All credential material must live outside the repository and outside Terraform s
 ### Backup status token
 
     backup_status_token=$(head -c 64 /dev/urandom | base64 | head -c 64)
-
-### Service account key
-
-    gcloud iam service-accounts keys create /tmp/dojo-backup-sa.json \
-      --iam-account=$(tofu -chdir=infra/opentofu/google-backup output -raw backup_service_account_email)
-
-After applying the Secret, delete the local key file immediately:
-
-    rm /tmp/dojo-backup-sa.json
 
 ### Apply secrets to the cluster
 
@@ -95,14 +86,6 @@ The examples live in `deploy/k8s/`. Apply from a temporary copy, never from the 
       restic-password: "$restic_password"
     EOF
 
-**Service account JSON:**
-
-    kubectl create secret generic dojo-backup-google \
-      --from-file=service-account.json=/tmp/dojo-backup-sa.json \
-      -n $NAMESPACE \
-      --dry-run=client -o yaml | kubectl apply -f -
-    rm /tmp/dojo-backup-sa.json
-
 **Backup status token:**
 
     cat <<EOF | kubectl apply -n $NAMESPACE -f -
@@ -115,16 +98,23 @@ The examples live in `deploy/k8s/`. Apply from a temporary copy, never from the 
       token: "$backup_status_token"
     EOF
 
-**Backup configuration (ConfigMap):**
+**Backup Google OAuth credentials (placeholder):**
+
+The `dojo-backup-google` secret is populated automatically during onboarding when the user grants Google Drive access. Create an empty placeholder so the volume mount exists before onboarding:
 
     cat <<EOF | kubectl apply -n $NAMESPACE -f -
     apiVersion: v1
-    kind: ConfigMap
+    kind: Secret
     metadata:
-      name: dojo-backup-config
-    data:
-      service-account-email: "$(tofu -chdir=infra/opentofu/google-backup output -raw backup_service_account_email)"
+      name: dojo-backup-google
+    type: Opaque
+    stringData:
+      client-id: "placeholder"
+      client-secret: "placeholder"
+      refresh-token: "placeholder"
     EOF
+
+During onboarding, the user completes Google OAuth with `drive.file` scope. The app stores the refresh token and writes it to this secret. No manual credential rotation is needed — the refresh token persists until the user revokes access in their Google Account settings.
 
 ### Sealed Secrets alternative
 

@@ -116,7 +116,22 @@ spec:
         args:
         - |
           set -euo pipefail
-          export RCLONE_CONFIG_GDRIVE_ROOT_FOLDER_ID="$(python -c 'import httpx; payload=httpx.get("http://dojo/api/settings/backup", timeout=10).json(); print(payload["configuration"]["folder_id"])')"
+          client_id="$(cat /google-backup/client-id)"
+          client_secret="$(cat /google-backup/client-secret)"
+          refresh_token="$(cat /google-backup/refresh-token)"
+          folder_id="$(python -c 'import httpx; payload=httpx.get("http://dojo/api/settings/backup", timeout=10).json(); print(payload["configuration"]["folder_id"])')"
+          access_token="$(curl -sS -X POST https://oauth2.googleapis.com/token -d "client_id=$client_id" -d "client_secret=$client_secret" -d "refresh_token=$refresh_token" -d "grant_type=refresh_token" | python -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')"
+          cat > /tmp/rclone.conf <<RCLONE
+          [gdrive]
+          type = drive
+          scope = drive
+          client_id = $client_id
+          client_secret = $client_secret
+          token = {"access_token":"$access_token","token_type":"Bearer","refresh_token":"$refresh_token","expiry":"2000-01-01T00:00:00Z"}
+          root_folder_id = $folder_id
+          RCLONE
+          sed -i 's/^          //' /tmp/rclone.conf
+          export RCLONE_CONFIG=/tmp/rclone.conf
           /bin/dojo-backup-status --url '${DOJO_BACKUP_STATUS_URL}' --token-file /backup-status/token --run-id '$run_id' --trigger-kind SCHEDULED --status RUNNING --phase PREPARING --source-snapshot '$snapshot' --image-digest '$image' || true
           /bin/dojo-backup prepare /data/dojo.duckdb /stage/dojo.duckdb --image-digest '$image' --source-snapshot '$snapshot'
           restic snapshots >/dev/null 2>&1 || restic init
@@ -132,8 +147,6 @@ spec:
           value: rclone:gdrive:dojo/restic
         - name: RESTIC_PASSWORD_FILE
           value: /restic/restic-password
-        - name: RCLONE_CONFIG
-          value: /google-backup/rclone.conf
         volumeMounts:
         - name: data
           mountPath: /data

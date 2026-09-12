@@ -1,6 +1,0 @@
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: dojo-backup-config
-data:
-  service-account-email: dojo-backup@example-project.iam.gserviceaccount.com
