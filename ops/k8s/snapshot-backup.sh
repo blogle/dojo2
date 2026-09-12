@@ -115,6 +115,7 @@ spec:
         command: [/bin/bash, -euc]
         args:
         - |
+          set -euo pipefail
           export RCLONE_CONFIG_GDRIVE_ROOT_FOLDER_ID="$(python -c 'import httpx; payload=httpx.get("http://dojo/api/settings/backup", timeout=10).json(); print(payload["configuration"]["folder_id"])')"
           /bin/dojo-backup-status --url '${DOJO_BACKUP_STATUS_URL}' --token-file /backup-status/token --run-id '$run_id' --trigger-kind SCHEDULED --status RUNNING --phase PREPARING --source-snapshot '$snapshot' --image-digest '$image' || true
           /bin/dojo-backup prepare /data/dojo.duckdb /stage/dojo.duckdb --image-digest '$image' --source-snapshot '$snapshot'
