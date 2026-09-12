@@ -3,7 +3,6 @@
 api/.venv
 api/dist
 web/node_modules
-web/dist
 tmp
 .env
 **/.env
