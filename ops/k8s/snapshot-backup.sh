@@ -115,31 +115,11 @@ spec:
         command: [/bin/bash, -euc]
         args:
         - |
-          set -euo pipefail
-          client_id="$(cat /google-backup/client-id)"
-          client_secret="$(cat /google-backup/client-secret)"
-          refresh_token="$(cat /google-backup/refresh-token)"
-          folder_id="$(python -c 'import httpx; payload=httpx.get("http://dojo/api/settings/backup", timeout=10).json(); print(payload["configuration"]["folder_id"])')"
-          access_token="$(curl -sS -X POST https://oauth2.googleapis.com/token -d "client_id=$client_id" -d "client_secret=$client_secret" -d "refresh_token=$refresh_token" -d "grant_type=refresh_token" | python -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')"
-          cat > /tmp/rclone.conf <<RCLONE
-          [gdrive]
-          type = drive
-          scope = drive
-          client_id = $client_id
-          client_secret = $client_secret
-          token = {"access_token":"$access_token","token_type":"Bearer","refresh_token":"$refresh_token","expiry":"2000-01-01T00:00:00Z"}
-          root_folder_id = $folder_id
-          RCLONE
-          sed -i 's/^          //' /tmp/rclone.conf
-          export RCLONE_CONFIG=/tmp/rclone.conf
-          /bin/dojo-backup-status --url '${DOJO_BACKUP_STATUS_URL}' --token-file /backup-status/token --run-id '$run_id' --trigger-kind SCHEDULED --status RUNNING --phase PREPARING --source-snapshot '$snapshot' --image-digest '$image' || true
-          /bin/dojo-backup prepare /data/dojo.duckdb /stage/dojo.duckdb --image-digest '$image' --source-snapshot '$snapshot'
-          restic snapshots >/dev/null 2>&1 || restic init
-          restic backup /stage --tag dojo --tag scheduled --tag '$snapshot' --json > /stage/restic-result.json
-          restic check
-          restic forget --keep-daily 14 --keep-weekly 8 --keep-monthly 12 --prune
-          snapshot_id="$(python -c 'import json; from pathlib import Path; rows=[json.loads(line) for line in Path("/stage/restic-result.json").read_text().splitlines()]; print(next(row["snapshot_id"] for row in reversed(rows) if row.get("message_type") == "summary"))')"
-          database_sha256="$(python -c 'import json; print(json.load(open("/stage/dojo.duckdb.manifest.json"))["database_sha256"])')"
+           set -euo pipefail
+           /bin/dojo-backup-status --url '${DOJO_BACKUP_STATUS_URL}' --token-file /backup-status/token --run-id '$run_id' --trigger-kind SCHEDULED --status RUNNING --phase PREPARING --source-snapshot '$snapshot' --image-digest '$image' || true
+           /bin/dojo-backup prepare /data/dojo.duckdb /stage/dojo.duckdb --image-digest '$image' --source-snapshot '$snapshot'
+           snapshot_id="$(/bin/dojo-backup-upload --staging-directory /stage --internal-api-url http://dojo --internal-token-file /backup-status/token --restic-password-file /restic/restic-password --repository-path dojo/restic --tag dojo --tag scheduled --tag '$snapshot' --retain)"
+           database_sha256="$(python -c 'import json; print(json.load(open("/stage/dojo.duckdb.manifest.json"))["database_sha256"])')"
           database_size="$(python -c 'import json; print(json.load(open("/stage/dojo.duckdb.manifest.json"))["database_size"])')"
           /bin/dojo-backup-status --url '${DOJO_BACKUP_STATUS_URL}' --token-file /backup-status/token --run-id '$run_id' --trigger-kind SCHEDULED --status SUCCEEDED --phase COMPLETE --source-snapshot '$snapshot' --image-digest '$image' --restic-snapshot-id "$snapshot_id" --database-sha256 "$database_sha256" --database-size-bytes "$database_size" || true
         env:
@@ -152,10 +132,7 @@ spec:
           mountPath: /data
         - name: stage
           mountPath: /stage
-        - name: google-backup
-          mountPath: /google-backup
-          readOnly: true
-        - name: restic
+         - name: restic
           mountPath: /restic
           readOnly: true
         - name: backup-status
@@ -167,10 +144,7 @@ spec:
           claimName: $clone
       - name: stage
         emptyDir: {}
-      - name: google-backup
-        secret:
-          secretName: dojo-backup-google
-      - name: restic
+       - name: restic
         secret:
           secretName: dojo-backup-restic
       - name: backup-status

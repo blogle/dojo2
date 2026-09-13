@@ -23,7 +23,7 @@ The complete local proof consists of deterministic tests, fresh and upgraded Duc
 - [x] (2026-09-12) Implemented encrypted credential persistence and the plaintext-column compatibility repair; `just migration-check`, `just test-unit`, `just test-integration`, `just architecture-check`, `just typecheck`, and `just lint` pass.
 - [x] (2026-09-12) Split OAuth by explicit purpose and persist refresh credentials immediately; 97 unit tests, 81 integration tests, migration-check, architecture-check, typecheck, and lint pass.
 - [x] (2026-09-12) Implemented direct Drive verification, Picker session configuration, browser Picker adapter, and backup setup UI; 98 unit tests, 81 integration tests, web tests, typecheck, lint, and web build pass.
-- [ ] Implement the internal short-lived credential broker and one platform-neutral uploader; remove worker credential-file access; run milestone gates and commit.
+- [x] (2026-09-12) Implemented the internal short-lived credential broker and one platform-neutral uploader; removed worker credential-file access; 105 unit tests, 85 integration tests, architecture-check, typecheck, lint, and k8s-render pass.
 - [ ] Rewrite the local rehearsal to use the shared uploader; run deterministic rehearsal tests and commit.
 - [ ] Complete legacy readiness and repair behavior with integration and web tests; commit.
 - [ ] Replace OpenTofu service-account resources with project services and a restricted Picker API key; remove active Kubernetes service-account backup dependencies; validate and commit.
@@ -59,6 +59,10 @@ The complete local proof consists of deterministic tests, fresh and upgraded Duc
   Evidence: The Phase 2 command now includes it, producing 97 passing unit tests and making scope/pending-state regressions part of the canonical unit gate.
 - Observation: Direct Drive probe cleanup needs to retain the created file ID before any later response parsing or error handling.
   Evidence: `verify_drive_folder()` keeps the probe ID and performs deletion in `finally`, so a failed delete is surfaced while every created probe receives a cleanup attempt.
+- Observation: The repository architecture policy also forbids direct wall-clock calls in the shared uploader.
+  Evidence: The initial uploader used a token expiry timestamp and failed `architecture-check`; omitting expiry from the access-token-only rclone config keeps the worker from refreshing and satisfies the short-lived-token boundary.
+- Observation: The existing `just test-unit` and `just test-integration` lists require explicit updates for new broker/uploader tests.
+  Evidence: The Phase 4 recipes now include `test_backup_access.py` and `test_drive_uploader.py`; the gates report 105 and 85 passing tests respectively.
 
 ## Decision Log
 
@@ -86,6 +90,9 @@ The complete local proof consists of deterministic tests, fresh and upgraded Duc
 - Decision: Extract one platform-neutral upload implementation and call it from both Kubernetes orchestration and local rehearsal.
   Rationale: The storage snapshot/PVC lifecycle is Kubernetes-specific, but staging, restic, token brokering, cleanup, and restore verification must not diverge between production-shaped and local tests.
   Date/Author: 2026-09-12 / implementation agent
+- Decision: Keep the worker's rclone token envelope access-token-only and do not supply an expiry timestamp that could trigger a refresh attempt.
+  Rationale: The worker has no refresh token or OAuth client secret by design; a token-expiry failure is allowed to fail the run and be retried later.
+  Date/Author: 2026-09-12 / implementation agent
 - Decision: Run headless browser checks under a temporary `Xvfb` display when the shell has no display.
   Rationale: This supplies only the missing test runtime service and leaves canonical `just` recipes unchanged.
   Date/Author: 2026-09-12 / implementation agent
@@ -100,6 +107,8 @@ Phase 0 and Phase 1 outcome (2026-09-12): The baseline is reproducible under the
 Phase 2 outcome (2026-09-12): OAuth start requests now require an explicit `aspire_migration` or `backup` purpose, with exact purpose-specific scopes and the existing offline/consent parameters. Pending state records that purpose. Callback access tokens remain available in the browser-session store, while returned refresh credentials are encrypted and persisted immediately; missing refresh tokens preserve an existing credential or surface backup reauthorization. The web client submits the purpose explicitly. The Phase 2 gates passed with 97 unit tests, 81 integration tests, migration-check, architecture-check, typecheck, and lint.
 
 Phase 3 outcome (2026-09-12): The API now refreshes durable credentials server-side for Picker sessions and folder configuration, verifies selected folders through direct Drive metadata and zero-byte create/delete probes, and stores canonical folder name plus credential identity. The frontend now uses the isolated Google Picker adapter and minimal backup setup states, including cancel-safe selection and reauthorization fallback. Phase 3 passed with 98 unit tests, 81 integration tests, 275 Cypress component tests plus web unit tests, typecheck, lint, and production web build.
+
+Phase 4 outcome (2026-09-12): The existing internal bearer-authenticated router now brokers only short-lived access tokens and the configured folder ID after validating the encrypted API-owned credential. One platform-neutral uploader requests that broker token, creates an ephemeral access-token-only rclone config, initializes/backups/checks/restic, applies retention when requested, returns the snapshot ID, and removes the config. Kubernetes keeps snapshot/clone/Job orchestration and no longer reads or mounts Google credential files. Phase 4 passed with 105 unit tests, 85 integration tests, architecture-check, typecheck, lint, k8s-render, and a clean deployment refresh-token search.
 
 At each later major milestone, record what behavior became demonstrable, which gates passed, and any remaining gap. At completion, compare the result against the purpose above and explicitly list anything that could not be validated without staging or production. Production deployment must remain unperformed.
 
@@ -474,3 +483,5 @@ The OAuth start request is `POST /api/onboarding/google/start` with exactly one 
 2026-09-12: Marked Phase 2 verified. Recorded exact purpose-specific scope selection, pending purpose state, immediate encrypted callback persistence, missing-refresh-token behavior, the canonical unit-suite inclusion of `test_google.py`, and the 97-unit/81-integration gate results. The next revision must document Phase 2's commit and begin direct Drive verification and Picker.
 
 2026-09-12: Marked Phase 3 verified. Recorded direct Drive metadata/probe verification with cleanup, the browser-safe Picker session contract, canonical folder persistence, isolated Picker adapter, minimal backup setup UI, and backend/frontend gate results. The next revision must document Phase 3's commit and begin the internal broker and shared uploader.
+
+2026-09-12: Marked Phase 4 verified. Recorded the internal bearer-protected token broker, access-token-only ephemeral uploader config, shared restic execution, Kubernetes worker boundary, deleted obsolete backup Secret example, and 105-unit/85-integration gate results. The next revision must document Phase 4's commit and begin the local Drive rehearsal.
