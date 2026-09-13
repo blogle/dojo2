@@ -159,7 +159,7 @@ def configure_backup(request: Request, payload: BackupFolderPayload) -> dict[str
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return get_service(request).configure_backup_folder(payload.folder_id, refresh_token)
+    return get_service(request).configure_backup_folder(payload.folder_id)
 
 
 @router.post("/onboarding/google/start")

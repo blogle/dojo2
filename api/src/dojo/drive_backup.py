@@ -5,6 +5,7 @@ import os
 import subprocess
 import tempfile
 from pathlib import Path
+from typing import cast
 from uuid import uuid4
 
 import httpx
@@ -26,7 +27,7 @@ def _refresh_access_token(
         timeout=30.0,
     )
     response.raise_for_status()
-    return response.json()["access_token"]
+    return cast(str, response.json()["access_token"])
 
 
 def build_rclone_config(
@@ -37,12 +38,14 @@ def build_rclone_config(
     refresh_token: str,
 ) -> str:
     access_token = _refresh_access_token(client_id, client_secret, refresh_token)
-    token_payload = json.dumps({
-        "access_token": access_token,
-        "token_type": "Bearer",
-        "refresh_token": refresh_token,
-        "expiry": "2000-01-01T00:00:00Z",
-    })
+    token_payload = json.dumps(
+        {
+            "access_token": access_token,
+            "token_type": "Bearer",
+            "refresh_token": refresh_token,
+            "expiry": "2000-01-01T00:00:00Z",
+        }
+    )
     return (
         f"[gdrive]\n"
         f"type = drive\n"

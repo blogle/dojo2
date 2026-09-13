@@ -45,7 +45,7 @@ test-web:
 
 test-unit:
 	@printf '==> running backend unit tests\n'
-	cd api && uv run python -m pytest tests/test_money.py tests/test_settings.py tests/test_importer.py tests/test_loan_projection.py tests/test_operations.py tests/test_backup.py tests/test_drive_backup.py
+	cd api && uv run python -m pytest tests/test_money.py tests/test_settings.py tests/test_importer.py tests/test_loan_projection.py tests/test_operations.py tests/test_backup.py tests/test_backup_credentials.py tests/test_drive_backup.py
 
 test-property:
 	@printf '==> running backend property tests\n'

@@ -246,7 +246,9 @@ class DojoService:
                 self._insert_pending_backup_configuration(connection, now)
         return self.get_app_status()
 
-    def configure_backup_folder(self, folder_id: str, refresh_token: str) -> dict[str, Any]:
+    def configure_backup_folder(
+        self, folder_id: str, credential_id: str | None = None
+    ) -> dict[str, Any]:
         current = self.get_backup_configuration()
         now = self.clock.now()
         with self.db.transaction() as connection:
@@ -268,7 +270,8 @@ class DojoService:
                     "configuration_id": str(SYSTEM_BACKUP_CONFIGURATION_ID),
                     "status": "CONFIGURED",
                     "drive_folder_id": folder_id,
-                    "google_drive_refresh_token": refresh_token,
+                    "drive_folder_name": None,
+                    "credential_id": credential_id,
                     "verified_at": now,
                     "last_error": None,
                     "valid_from": now,
@@ -294,6 +297,8 @@ class DojoService:
                 "configuration_id": str(SYSTEM_BACKUP_CONFIGURATION_ID),
                 "status": "PENDING",
                 "drive_folder_id": None,
+                "drive_folder_name": None,
+                "credential_id": None,
                 "verified_at": None,
                 "last_error": None,
                 "valid_from": now,

@@ -19,8 +19,8 @@ The complete local proof consists of deterministic tests, fresh and upgraded Duc
 - [x] (2026-09-12) Applied the user-authorized formatting-only baseline repair to `api/src/dojo/drive_backup.py` and `api/tests/test_api_endpoints.py`.
 - [x] (2026-09-12) Applied the smallest baseline type correction in `api/src/dojo/drive_backup.py` so the current `mypy` version accepts the existing JSON return.
 - [x] (2026-09-12) Confirmed the full `just check` passes under a temporary `Xvfb` display. The ordinary headless invocation cannot start Cypress because no `DISPLAY` exists.
-- [ ] Create and commit only this ExecPlan with `docs: plan user OAuth Google Drive backups`.
-- [ ] Implement encrypted credential persistence and the plaintext-column compatibility repair; run its milestone gates and commit.
+- [x] (2026-09-12) Created and committed only this ExecPlan as `6fc8248` with `docs: plan user OAuth Google Drive backups`.
+- [x] (2026-09-12) Implemented encrypted credential persistence and the plaintext-column compatibility repair; `just migration-check`, `just test-unit`, `just test-integration`, `just architecture-check`, `just typecheck`, and `just lint` pass.
 - [ ] Split OAuth by explicit purpose and persist refresh credentials immediately; run its milestone gates and commit.
 - [ ] Implement direct Drive verification, Picker session configuration, browser Picker adapter, and backup setup UI; run backend/frontend milestone gates and commit.
 - [ ] Implement the internal short-lived credential broker and one platform-neutral uploader; remove worker credential-file access; run milestone gates and commit.
@@ -53,6 +53,8 @@ The complete local proof consists of deterministic tests, fresh and upgraded Duc
   Evidence: `api/src/dojo/sql/schema/migrations/add_backup_oauth_token.sql` adds the nullable column after `current.sql` runs. The replacement must define the new credential table in the fresh schema and make the old repair remove the column.
 - Observation: The OpenTofu root has no consumer OAuth client resource and must not gain one.
   Evidence: The requested standard consumer Web OAuth client is not represented by `google_iam_oauth_client`; only project services, a restricted API key, and the project-number output belong in this root.
+- Observation: Running `uv add` outside the repository's pinned Nix environment rewrote unrelated lockfile metadata, while the existing lock already contained cryptography transitively through Authlib.
+  Evidence: The newer inherited `uv` added upload-time metadata across 703 lines. Restoring the generated lock content and adding only dojo-api's direct dependency entries left the intended package change without unrelated resolver churn.
 
 ## Decision Log
 
@@ -86,7 +88,9 @@ The complete local proof consists of deterministic tests, fresh and upgraded Duc
 
 ## Outcomes & Retrospective
 
-This section is intentionally incomplete until implementation and local human validation finish. At each major milestone, record what behavior became demonstrable, which gates passed, and any remaining gap. At completion, compare the result against the purpose above and explicitly list anything that could not be validated without staging or production. Production deployment must remain unperformed.
+Phase 0 and Phase 1 outcome (2026-09-12): The baseline is reproducible under the repository Nix environment with a temporary Xvfb display. The API now has a focused AES-256-GCM credential envelope implementation, a fixed system credential table, new backup configuration identity fields, and a repeatable legacy repair that removes the plaintext token column while preserving configuration values. The service no longer writes the plaintext token. `just migration-check`, `just test-unit` (73 tests), `just test-integration` (80 tests), `just architecture-check`, `just typecheck`, and `just lint` passed. Real OAuth, Drive, Picker, worker, infrastructure, and human gates remain outstanding.
+
+At each later major milestone, record what behavior became demonstrable, which gates passed, and any remaining gap. At completion, compare the result against the purpose above and explicitly list anything that could not be validated without staging or production. Production deployment must remain unperformed.
 
 ## Context and Orientation
 
@@ -108,7 +112,7 @@ The root `justfile` is the command interface. Use `just setup`, `just check`, `j
 
 ### Phase 0: baseline and plan
 
-The baseline is now known: the original worktree was clean on `master`, the required documents were read, setup succeeded, and the full `just check` passed under a temporary display after the authorized formatting and minimal type-only repairs. The only remaining Phase 0 artifact is this plan. Stage only this file and create the required plan commit; leave the two formatting and type repairs unstaged until they can be included in an appropriate corrective or feature commit without hiding them.
+The baseline is now known: the original worktree was clean on `master`, the required documents were read, setup succeeded, and the full `just check` passed under a temporary display after the authorized formatting and minimal type-only repairs. The plan-only commit is complete. The authorized formatting/type repairs remain visible in the Phase 1 working diff and are included with the first independently verified implementation milestone rather than hidden in the plan commit.
 
 Run from `/workspace/dojo2`:
 
@@ -430,7 +434,7 @@ If a milestone gate fails, leave the failed tests/log symptom documented in `Sur
 The expected local history is approximately:
 
     docs: plan user OAuth Google Drive backups
-    feat: encrypt persisted Google Backup credentials
+    feat: encrypt persisted Google backup credentials
     feat: split Google OAuth by authorization purpose
     feat: select Google Drive backup folder with Picker
     feat: broker short-lived credentials to Drive backup workers
@@ -453,3 +457,5 @@ The OAuth start request is `POST /api/onboarding/google/start` with exactly one 
 ## Revision Note
 
 2026-09-12: Created this living plan after baseline setup and research. Recorded the clean initial worktree, local feature branch, temporary Xvfb requirement, authorized baseline repairs, current architecture mismatch, exact phase sequence, human gates, security boundaries, and recovery rules. Future revisions must update all living sections and append a new revision note explaining what changed and why.
+
+2026-09-12: Marked Phase 0 complete and Phase 1 verified. Recorded the pinned-`uv` lockfile correction, encrypted credential module, fresh schema, plaintext-column repair, service persistence removal, and Phase 1 gate results. The next revision must document Phase 1's commit and begin purpose-specific OAuth.

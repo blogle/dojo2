@@ -751,6 +751,7 @@ def test_start_empty_requires_verified_backup_folder(monkeypatch, tmp_path) -> N
         # Simulate having completed OAuth with a refresh token
         # by making the token store return a token for any session
         from dojo.google import OAuthTokenStore
+
         store: OAuthTokenStore = main_module.app.state.oauth_token_store
         original_get = store.get
 

@@ -21,6 +21,9 @@ class Settings(BaseSettings):
         default="https://www.googleapis.com/auth/spreadsheets.readonly https://www.googleapis.com/auth/drive.file",
         alias="GOOGLE_OAUTH_SCOPES",
     )
+    credential_encryption_key_file: str = Field(
+        default="", alias="DOJO_CREDENTIAL_ENCRYPTION_KEY_FILE"
+    )
     backup_status_token_file: str = Field(default="", alias="BACKUP_STATUS_TOKEN_FILE")
     session_secret: str = Field(default="dev-only-change-me", alias="SESSION_SECRET")
     log_level: str = Field(default="debug", alias="LOG_LEVEL")
