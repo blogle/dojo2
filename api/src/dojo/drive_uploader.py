@@ -67,6 +67,58 @@ def upload_backup(
         config_path.unlink(missing_ok=True)
 
 
+def restore_backup_snapshot(
+    snapshot_id: str,
+    target_directory: Path,
+    *,
+    internal_api_url: str,
+    internal_token: str,
+    restic_password_file: Path,
+    repository_path: str,
+) -> None:
+    access = request_backup_access(internal_api_url, internal_token)
+    config_path = _write_rclone_config(access["access_token"], access["folder_id"])
+    try:
+        environment = os.environ | {
+            "RCLONE_CONFIG": str(config_path),
+            "RESTIC_REPOSITORY": f"rclone:gdrive:{repository_path}",
+            "RESTIC_PASSWORD_FILE": str(restic_password_file),
+        }
+        target_directory.mkdir(parents=True, exist_ok=False)
+        _run_restic(
+            ["restic", "restore", snapshot_id, "--target", str(target_directory)],
+            environment,
+        )
+    finally:
+        config_path.unlink(missing_ok=True)
+
+
+def purge_repository(
+    repository_path: str,
+    *,
+    internal_api_url: str,
+    internal_token: str,
+) -> None:
+    if repository_path == "dojo/restic" or not repository_path.startswith("dojo-rehearsals/"):
+        raise DriveUploadError("Only a rehearsal repository may be removed.")
+    access = request_backup_access(internal_api_url, internal_token)
+    config_path = _write_rclone_config(access["access_token"], access["folder_id"])
+    try:
+        environment = os.environ | {"RCLONE_CONFIG": str(config_path)}
+        try:
+            subprocess.run(
+                ["rclone", "purge", f"gdrive:{repository_path}"],
+                env=environment,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except (OSError, subprocess.CalledProcessError) as exc:
+            raise DriveUploadError("Rehearsal repository cleanup failed.") from exc
+    finally:
+        config_path.unlink(missing_ok=True)
+
+
 def request_backup_access(internal_api_url: str, internal_token: str) -> dict[str, Any]:
     response = httpx.post(
         f"{internal_api_url.rstrip('/')}/api/internal/backup-access",
@@ -146,25 +198,55 @@ def _snapshot_id(output: str) -> str:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Upload a prepared dojo backup to Google Drive")
-    parser.add_argument("--staging-directory", required=True, type=Path)
-    parser.add_argument("--internal-api-url", required=True)
-    parser.add_argument("--internal-token-file", required=True, type=Path)
-    parser.add_argument("--restic-password-file", required=True, type=Path)
-    parser.add_argument("--repository-path", required=True)
-    parser.add_argument("--tag", action="append", default=[])
-    parser.add_argument("--retain", action="store_true")
+    parser = argparse.ArgumentParser(description="Upload prepared dojo backup data to Google Drive")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    upload = subparsers.add_parser("upload")
+    upload.add_argument("--staging-directory", required=True, type=Path)
+    upload.add_argument("--internal-api-url", required=True)
+    upload.add_argument("--internal-token-file", required=True, type=Path)
+    upload.add_argument("--restic-password-file", required=True, type=Path)
+    upload.add_argument("--repository-path", required=True)
+    upload.add_argument("--tag", action="append", default=[])
+    upload.add_argument("--retain", action="store_true")
+    restore = subparsers.add_parser("restore")
+    restore.add_argument("--snapshot-id", required=True)
+    restore.add_argument("--target-directory", required=True, type=Path)
+    restore.add_argument("--internal-api-url", required=True)
+    restore.add_argument("--internal-token-file", required=True, type=Path)
+    restore.add_argument("--restic-password-file", required=True, type=Path)
+    restore.add_argument("--repository-path", required=True)
+    purge = subparsers.add_parser("purge")
+    purge.add_argument("--internal-api-url", required=True)
+    purge.add_argument("--internal-token-file", required=True, type=Path)
+    purge.add_argument("--repository-path", required=True)
     args = parser.parse_args()
-    snapshot_id = upload_backup(
-        args.staging_directory,
-        internal_api_url=args.internal_api_url,
-        internal_token=args.internal_token_file.read_text(encoding="utf-8").strip(),
-        restic_password_file=args.restic_password_file,
-        repository_path=args.repository_path,
-        tags=tuple(args.tag),
-        retain=args.retain,
-    )
-    print(snapshot_id)
+    internal_token = args.internal_token_file.read_text(encoding="utf-8").strip()
+    if args.command == "upload":
+        snapshot_id = upload_backup(
+            args.staging_directory,
+            internal_api_url=args.internal_api_url,
+            internal_token=internal_token,
+            restic_password_file=args.restic_password_file,
+            repository_path=args.repository_path,
+            tags=tuple(args.tag),
+            retain=args.retain,
+        )
+        print(snapshot_id)
+    elif args.command == "restore":
+        restore_backup_snapshot(
+            args.snapshot_id,
+            args.target_directory,
+            internal_api_url=args.internal_api_url,
+            internal_token=internal_token,
+            restic_password_file=args.restic_password_file,
+            repository_path=args.repository_path,
+        )
+    else:
+        purge_repository(
+            args.repository_path,
+            internal_api_url=args.internal_api_url,
+            internal_token=internal_token,
+        )
     return 0
 
 

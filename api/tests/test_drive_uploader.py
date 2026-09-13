@@ -7,7 +7,13 @@ from pathlib import Path
 import httpx
 import pytest
 
-from dojo.drive_uploader import DriveUploadError, request_backup_access, upload_backup
+from dojo.drive_uploader import (
+    DriveUploadError,
+    purge_repository,
+    request_backup_access,
+    restore_backup_snapshot,
+    upload_backup,
+)
 
 
 def broker_response() -> httpx.Response:
@@ -124,6 +130,64 @@ def test_upload_cleans_config_after_restic_failure(monkeypatch, tmp_path: Path) 
             restic_password_file=password,
             repository_path="dojo-rehearsals/test/restic",
         )
+
+    assert config_paths
+    assert not config_paths[0].exists()
+
+
+def test_restore_uses_a_different_local_target(monkeypatch, tmp_path: Path) -> None:
+    target = tmp_path / "materialized"
+    password = tmp_path / "password"
+    password.write_text("restic-password", encoding="utf-8")
+    commands: list[list[str]] = []
+    monkeypatch.setattr(
+        "dojo.drive_uploader.httpx.post", lambda *_args, **_kwargs: broker_response()
+    )
+
+    def run(command: list[str], **_kwargs) -> subprocess.CompletedProcess[str]:
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("dojo.drive_uploader.subprocess.run", run)
+
+    restore_backup_snapshot(
+        "snapshot-id",
+        target,
+        internal_api_url="http://dojo",
+        internal_token="internal-token",
+        restic_password_file=password,
+        repository_path="dojo-rehearsals/test/restic",
+    )
+
+    assert target.is_dir()
+    assert commands == [["restic", "restore", "snapshot-id", "--target", str(target)]]
+
+
+def test_purge_repository_rejects_production_repository(monkeypatch) -> None:
+    with pytest.raises(DriveUploadError, match="Only a rehearsal repository"):
+        purge_repository(
+            "dojo/restic",
+            internal_api_url="http://dojo",
+            internal_token="internal-token",
+        )
+
+
+def test_purge_repository_cleans_ephemeral_config(monkeypatch) -> None:
+    passwordless = broker_response()
+    config_paths: list[Path] = []
+    monkeypatch.setattr("dojo.drive_uploader.httpx.post", lambda *_args, **_kwargs: passwordless)
+
+    def run(command: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
+        config_paths.append(Path(kwargs["env"]["RCLONE_CONFIG"]))
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("dojo.drive_uploader.subprocess.run", run)
+
+    purge_repository(
+        "dojo-rehearsals/test/restic",
+        internal_api_url="http://dojo",
+        internal_token="internal-token",
+    )
 
     assert config_paths
     assert not config_paths[0].exists()

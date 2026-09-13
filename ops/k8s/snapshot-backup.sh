@@ -118,7 +118,7 @@ spec:
            set -euo pipefail
            /bin/dojo-backup-status --url '${DOJO_BACKUP_STATUS_URL}' --token-file /backup-status/token --run-id '$run_id' --trigger-kind SCHEDULED --status RUNNING --phase PREPARING --source-snapshot '$snapshot' --image-digest '$image' || true
            /bin/dojo-backup prepare /data/dojo.duckdb /stage/dojo.duckdb --image-digest '$image' --source-snapshot '$snapshot'
-           snapshot_id="$(/bin/dojo-backup-upload --staging-directory /stage --internal-api-url http://dojo --internal-token-file /backup-status/token --restic-password-file /restic/restic-password --repository-path dojo/restic --tag dojo --tag scheduled --tag '$snapshot' --retain)"
+           snapshot_id="$(/bin/dojo-backup-upload upload --staging-directory /stage --internal-api-url http://dojo --internal-token-file /backup-status/token --restic-password-file /restic/restic-password --repository-path dojo/restic --tag dojo --tag scheduled --tag '$snapshot' --retain)"
            database_sha256="$(python -c 'import json; print(json.load(open("/stage/dojo.duckdb.manifest.json"))["database_sha256"])')"
           database_size="$(python -c 'import json; print(json.load(open("/stage/dojo.duckdb.manifest.json"))["database_size"])')"
           /bin/dojo-backup-status --url '${DOJO_BACKUP_STATUS_URL}' --token-file /backup-status/token --run-id '$run_id' --trigger-kind SCHEDULED --status SUCCEEDED --phase COMPLETE --source-snapshot '$snapshot' --image-digest '$image' --restic-snapshot-id "$snapshot_id" --database-sha256 "$database_sha256" --database-size-bytes "$database_size" || true

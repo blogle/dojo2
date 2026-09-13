@@ -1,56 +1,99 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-: "${DOJO_GDRIVE_SERVICE_ACCOUNT_FILE:?Set DOJO_GDRIVE_SERVICE_ACCOUNT_FILE}"
-: "${DOJO_GDRIVE_FOLDER_ID:?Set DOJO_GDRIVE_FOLDER_ID}"
+repo_root="$(git rev-parse --show-toplevel)"
+api_url="${DOJO_API_URL:-http://localhost:8000}"
+: "${BACKUP_STATUS_TOKEN_FILE:?Set BACKUP_STATUS_TOKEN_FILE}"
 : "${DOJO_RESTIC_PASSWORD_FILE:?Set DOJO_RESTIC_PASSWORD_FILE}"
 
-for path in "$DOJO_GDRIVE_SERVICE_ACCOUNT_FILE" "$DOJO_RESTIC_PASSWORD_FILE"; do
-  [[ -f "$path" ]] || { printf 'Required file does not exist: %s\n' "$path" >&2; exit 1; }
-done
+[[ -f "$BACKUP_STATUS_TOKEN_FILE" ]] || {
+  printf 'Required file does not exist: %s\n' "$BACKUP_STATUS_TOKEN_FILE" >&2
+  exit 1
+}
+[[ -f "$DOJO_RESTIC_PASSWORD_FILE" ]] || {
+  printf 'Required file does not exist: %s\n' "$DOJO_RESTIC_PASSWORD_FILE" >&2
+  exit 1
+}
 
-run_id="$(date -u +%Y%m%d%H%M%S)-$(python -c 'from uuid import uuid4; print(str(uuid4())[:8])')"
-remote_path="dojo-rehearsals/$run_id"
+python -c '
+import httpx
+import sys
+
+url = sys.argv[1].rstrip("/") + "/health"
+try:
+    response = httpx.get(url, timeout=10)
+    response.raise_for_status()
+except Exception as exc:
+    raise SystemExit(f"A running dojo API is required at {url}: {exc}") from exc
+' "$api_url"
+
+run_id="$(python -c 'from uuid import uuid4; print(uuid4().hex)')"
+remote_path="dojo-rehearsals/$run_id/restic"
+[[ "$remote_path" != "dojo/restic" ]] || {
+  printf 'Refusing to use the production repository.\n' >&2
+  exit 1
+}
+
 work="$(mktemp -d -t dojo-drive-rehearsal.XXXXXX)"
 chmod 700 "$work"
+remote_created=0
 
 cleanup() {
   result=$?
   set +e
-  if [[ "$remote_path" == dojo-rehearsals/* ]]; then
-    RCLONE_CONFIG="$work/rclone.conf" rclone purge "gdrive:$remote_path"
+  if [[ "$remote_created" -eq 1 ]]; then
+    (
+      cd "$repo_root/api"
+      uv run python -m dojo.drive_uploader purge \
+        --internal-api-url "$api_url" \
+        --internal-token-file "$BACKUP_STATUS_TOKEN_FILE" \
+        --repository-path "$remote_path"
+    ) >/dev/null 2>&1 || true
   fi
   rm -rf "$work"
   exit "$result"
 }
 trap cleanup EXIT
 
-cat > "$work/rclone.conf" <<EOF
-[gdrive]
-type = drive
-scope = drive
-service_account_file = $DOJO_GDRIVE_SERVICE_ACCOUNT_FILE
-root_folder_id = $DOJO_GDRIVE_FOLDER_ID
-EOF
-chmod 600 "$work/rclone.conf"
+(
+  cd "$repo_root/api"
+  uv run python -m dojo.migrations "$work/source.duckdb"
+  uv run python -m dojo.backup prepare \
+    "$work/source.duckdb" \
+    "$work/stage/dojo.duckdb" \
+    --image-digest local-rehearsal \
+    --source-snapshot "$run_id"
+)
 
-export RCLONE_CONFIG="$work/rclone.conf"
-export RESTIC_PASSWORD_FILE="$DOJO_RESTIC_PASSWORD_FILE"
-export RESTIC_REPOSITORY="rclone:gdrive:$remote_path/restic"
+remote_created=1
+snapshot_id="$(
+  cd "$repo_root/api"
+  uv run python -m dojo.drive_uploader upload \
+    --staging-directory "$work/stage" \
+    --internal-api-url "$api_url" \
+    --internal-token-file "$BACKUP_STATUS_TOKEN_FILE" \
+    --restic-password-file "$DOJO_RESTIC_PASSWORD_FILE" \
+    --repository-path "$remote_path" \
+    --tag dojo-drive-rehearsal
+)"
 
-probe_name=".dojo-storage-probe-$run_id"
-probe_remote="gdrive:$remote_path/$probe_name"
-printf 'ok' | rclone rcat "$probe_remote"
-rclone delete "$probe_remote"
+(
+  cd "$repo_root/api"
+  uv run python -m dojo.drive_uploader restore \
+    --snapshot-id "$snapshot_id" \
+    --target-directory "$work/materialized" \
+    --internal-api-url "$api_url" \
+    --internal-token-file "$BACKUP_STATUS_TOKEN_FILE" \
+    --restic-password-file "$DOJO_RESTIC_PASSWORD_FILE" \
+    --repository-path "$remote_path"
+  uv run python -m dojo.backup verify \
+    "$work/materialized/stage/dojo.duckdb" \
+    "$work/materialized/stage/dojo.duckdb.manifest.json"
+  uv run python -m dojo.backup restore \
+    "$work/materialized/stage/dojo.duckdb" \
+    "$work/materialized/stage/dojo.duckdb.manifest.json" \
+    "$work/restored.duckdb"
+  uv run python -m dojo.migrations "$work/restored.duckdb"
+)
 
-(cd api && uv run python -m dojo.migrations "$work/source.duckdb")
-(cd api && uv run python -m dojo.backup prepare "$work/source.duckdb" "$work/stage/dojo.duckdb" --image-digest local-rehearsal --source-snapshot "$run_id")
-restic init
-restic backup "$work/stage" --tag dojo-drive-rehearsal --json > "$work/restic-result.json"
-restic check
-snapshot_id="$(python -c 'import json,sys; rows=[json.loads(line) for line in open(sys.argv[1])]; print(next(row["snapshot_id"] for row in reversed(rows) if row.get("message_type") == "summary"))' "$work/restic-result.json")"
-restic restore "$snapshot_id" --target "$work/materialized"
-(cd api && uv run python -m dojo.backup verify "$work/materialized$work/stage/dojo.duckdb" "$work/materialized$work/stage/dojo.duckdb.manifest.json")
-(cd api && uv run python -m dojo.backup restore "$work/materialized$work/stage/dojo.duckdb" "$work/materialized$work/stage/dojo.duckdb.manifest.json" "$work/restored.duckdb")
-(cd api && uv run python -m dojo.migrations "$work/restored.duckdb")
 printf 'Google Drive backup rehearsal passed: %s\n' "$snapshot_id"
