@@ -27,8 +27,8 @@ The complete local proof consists of deterministic tests, fresh and upgraded Duc
 - [x] (2026-09-12) Rewrote the local rehearsal to use the shared uploader; 108 unit tests, 85 integration tests, lint, and typecheck pass.
 - [x] (2026-09-12) Completed legacy readiness and repair behavior with integration and web tests; 111 unit tests, 88 integration tests, 45 web unit tests, 275 Cypress component tests, migration-check, typecheck, and lint pass.
 - [x] (2026-09-12) Replaced OpenTofu service-account resources with project services and a restricted Picker API key; removed active Kubernetes service-account backup dependencies; infrastructure formatting/validation and k8s-render pass.
-- [ ] (blocked 2026-09-12) Human Gate A plan was attempted but OpenTofu could not load Google Application Default Credentials; authenticate locally and remove the obsolete `service_account_id` entry from ignored `terraform.tfvars`, then rerun `just drive-infra-plan`.
-- [ ] Stop at Human Gate B and wait for confirmation that the standard Web OAuth client has the local origin and redirect without removing existing production entries.
+- [x] (2026-09-12) Human Gate A plan was explicitly approved and applied. The four APIs and restricted Picker key are provisioned, obsolete service-account/IAM resources are removed, and no key value was recorded.
+- [ ] (awaiting confirmation 2026-09-12) Human Gate B: the standard Web OAuth client must be manually checked for the local origin/redirect, retained production entries, and non-Testing-mode unattended-backup suitability.
 - [ ] Prepare local environment documentation and safe ignored-file placeholders without creating or displaying credentials.
 - [ ] Stop at Human Gates C, D, E, and F for real local Start-empty, Aspire, repair, and Drive rehearsal validation; record each result here.
 - [ ] Align current documentation and commit it.
@@ -75,6 +75,12 @@ The complete local proof consists of deterministic tests, fresh and upgraded Duc
   Evidence: The rendered base manifest references `dojo-google-oauth`, `dojo-google-picker`, and `dojo-backup-credentials` by secret key, leaving their values to the deployment environment without inventing an origin or credential.
 - Observation: Human Gate A cannot produce an actionable infrastructure diff until local OpenTofu authentication is available.
   Evidence: `just drive-infra-plan` failed with the Google provider error that no Application Default Credentials were found. It also warned that ignored `terraform.tfvars` still contains the removed `service_account_id` variable.
+- Observation: The authenticated Human Gate A plan proposes the expected replacement resources without revealing the Picker API-key value.
+  Evidence: OpenTofu reports 5 to add and 3 to destroy: four required project services plus one Picker key are created; the old service account, IAM service enablement, and old Drive service resource address are removed. Outputs include the project-number Picker App ID and a sensitive Picker key output.
+- Observation: The reviewed Picker key now includes both supplied deployed dojo origins.
+  Evidence: The replanned allowed referrers are `http://localhost:5173/*`, `https://docs.google.com/*`, `https://dojo-staging.thejeffer.net/*`, and `https://dojo.thejeffer.net/*`; the API-key value remains withheld.
+- Observation: The first approved apply was partially interrupted by an ADC quota-project error, then reconciled successfully after setting `GOOGLE_CLOUD_QUOTA_PROJECT=dojo-508219` for the apply command.
+  Evidence: The first run removed obsolete resources and enabled four APIs but failed Picker key creation; the final one-resource apply created `dojo-picker` successfully. Outputs remained sensitive/withheld except the numeric App ID.
 
 ## Decision Log
 
@@ -114,6 +120,9 @@ The complete local proof consists of deterministic tests, fresh and upgraded Duc
 - Decision: Keep `infra/opentofu/google-backup/` as the API-key/project-services root and leave standard consumer Web OAuth client creation manual.
   Rationale: The requested provider resource manages API keys, not the consumer Workspace OAuth client; `google_iam_oauth_client` is not a valid substitute.
   Date/Author: 2026-09-12 / implementation agent
+- Decision: Treat the successful one-resource reconciliation as completion of the already-approved infrastructure plan after the initial partial apply.
+  Rationale: OpenTofu state showed the four APIs and obsolete-resource removals complete; retrying only the failed Picker key avoided repeating destructive actions.
+  Date/Author: 2026-09-12 / implementation agent
 - Decision: Run headless browser checks under a temporary `Xvfb` display when the shell has no display.
   Rationale: This supplies only the missing test runtime service and leaves canonical `just` recipes unchanged.
   Date/Author: 2026-09-12 / implementation agent
@@ -136,6 +145,8 @@ Phase 5 outcome (2026-09-12): `ops/drive/rehearse.sh` now requires a healthy loc
 Phase 6 outcome (2026-09-12): Ready workspaces remain usable with degraded backup status when credentials are absent or the latest scheduled run failed, while new PENDING onboarding remains in `backup_setup` and not ready. The existing single App warning remains the repair entry point and its navigation regression is covered. Upgrade/compatibility fixtures and API state tests pass alongside the web suites: 111 unit tests, 88 integration tests, 45 web unit tests, 275 Cypress component tests, migration-check, typecheck, and lint.
 
 Phase 7 outcome (2026-09-12): OpenTofu now enables exactly Drive, Sheets, Picker, and API Keys services, creates a restricted Picker browser key with configurable deployed referrers, and exposes the project number as Picker App ID plus key output. The API deployment receives references to Web OAuth, Picker, status, and encryption-key secrets; the backup worker receives only data, restic, and internal status/broker access. The obsolete Google backup Secret example and restore-file dependency are gone. `just drive-infra-fmt-check`, `just drive-infra-validate`, and `just k8s-render` pass. Current docs still need alignment before the documentation phase.
+
+Human Gate A outcome (2026-09-12): The reviewed OpenTofu plan was approved and applied. Four project APIs are enabled, the obsolete backup service account and IAM service enablement were removed, and the restricted Picker key was created with localhost, Google Docs, staging, and production dojo referrers. The initial apply required a quota-project remediation and a one-resource retry; no key value or credential was recorded.
 
 At each later major milestone, record what behavior became demonstrable, which gates passed, and any remaining gap. At completion, compare the result against the purpose above and explicitly list anything that could not be validated without staging or production. Production deployment must remain unperformed.
 
@@ -520,3 +531,9 @@ The OAuth start request is `POST /api/onboarding/google/start` with exactly one 
 2026-09-12: Marked Phase 7 verified. Recorded the retained OpenTofu root, exact API services, restricted Picker key, project-number output, API-only long-lived secret boundary, broker-based restore/backup manifests, and infrastructure gate results. The next stopping point is Human Gate A: run and report `just drive-infra-plan`, then wait for explicit apply approval.
 
 2026-09-12: Attempted Human Gate A. The canonical plan command was blocked before resource planning by missing local Google Application Default Credentials and an obsolete ignored `service_account_id` tfvars entry. No infrastructure was applied. Resume by fixing only the local ignored OpenTofu authentication/input state, rerunning the plan, and presenting the required non-secret summary for explicit apply approval.
+
+2026-09-12: Reran Human Gate A successfully after local ADC authentication and ignored tfvars cleanup. The plan reports 5 additions and 3 destructions, includes the four requested APIs and restricted Picker key, and exposes no key value in the recorded evidence. No infrastructure was applied; explicit user approval remains required.
+
+2026-09-12: Updated ignored tfvars with the supplied staging and production dojo origins and reran Human Gate A. The plan still reports 5 additions and 3 destructions, now with both deployed referrers included. No infrastructure was applied; explicit user approval remains required.
+
+2026-09-12: Human Gate A approved and applied. The initial apply partially completed because ADC lacked a usable quota project for API-key creation; after local quota-project remediation, a one-resource retry created the restricted Picker key. The four APIs and service-account removal are complete. The next stopping point is Human Gate B for manual standard Web OAuth client verification.
