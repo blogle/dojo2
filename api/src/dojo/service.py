@@ -177,6 +177,7 @@ class DojoService:
         latest_run = self.get_import_status()
         backup_configuration = self.get_backup_configuration()
         latest_backup_run = self.get_latest_backup_run()
+        has_backup_credential = self.has_backup_credential()
         if backup_configuration and backup_configuration["status"] == "PENDING":
             ready = False
             mode = "backup_setup"
@@ -186,7 +187,9 @@ class DojoService:
             mode = "ready"
             backup_state = (
                 "configured"
-                if latest_backup_run and latest_backup_run["status"] == "SUCCEEDED"
+                if latest_backup_run
+                and latest_backup_run["status"] == "SUCCEEDED"
+                and has_backup_credential
                 else "degraded"
             )
         elif latest_batch is not None:

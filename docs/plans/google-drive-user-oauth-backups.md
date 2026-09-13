@@ -25,7 +25,7 @@ The complete local proof consists of deterministic tests, fresh and upgraded Duc
 - [x] (2026-09-12) Implemented direct Drive verification, Picker session configuration, browser Picker adapter, and backup setup UI; 98 unit tests, 81 integration tests, web tests, typecheck, lint, and web build pass.
 - [x] (2026-09-12) Implemented the internal short-lived credential broker and one platform-neutral uploader; removed worker credential-file access; 105 unit tests, 85 integration tests, architecture-check, typecheck, lint, and k8s-render pass.
 - [x] (2026-09-12) Rewrote the local rehearsal to use the shared uploader; 108 unit tests, 85 integration tests, lint, and typecheck pass.
-- [ ] Complete legacy readiness and repair behavior with integration and web tests; commit.
+- [x] (2026-09-12) Completed legacy readiness and repair behavior with integration and web tests; 111 unit tests, 88 integration tests, 45 web unit tests, 275 Cypress component tests, migration-check, typecheck, and lint pass.
 - [ ] Replace OpenTofu service-account resources with project services and a restricted Picker API key; remove active Kubernetes service-account backup dependencies; validate and commit.
 - [ ] Stop at Human Gate A, run `just drive-infra-plan`, and wait for explicit approval before applying infrastructure.
 - [ ] Stop at Human Gate B and wait for confirmation that the standard Web OAuth client has the local origin and redirect without removing existing production entries.
@@ -65,6 +65,10 @@ The complete local proof consists of deterministic tests, fresh and upgraded Duc
   Evidence: The Phase 4 recipes now include `test_backup_access.py` and `test_drive_uploader.py`; the gates report 105 and 85 passing tests respectively.
 - Observation: Rehearsal cleanup needs the same broker-backed ephemeral configuration as upload and restore because the uploader removes its config after each operation.
   Evidence: `purge_repository()` obtains a fresh short-lived token, purges only a `dojo-rehearsals/` path, and deletes its temporary config; the shell trap invokes it on both success and failure.
+- Observation: A successful latest backup must not make a ready workspace appear healthy when the durable credential has been removed by the compatibility repair.
+  Evidence: `get_app_status()` now requires both a successful latest run and an existing encrypted credential for `backup.state = configured`; otherwise a ready workspace remains degraded.
+- Observation: Vue Router navigation from the existing warning is asynchronous in the Vitest environment.
+  Evidence: The repair-warning regression test requires `flushPromises()` after clicking Repair backups before asserting `/onboarding?backup=repair`.
 
 ## Decision Log
 
@@ -98,6 +102,9 @@ The complete local proof consists of deterministic tests, fresh and upgraded Duc
 - Decision: Keep rehearsal remote cleanup in the shared uploader, with a path guard that rejects `dojo/restic` and all non-rehearsal paths.
   Rationale: The local command must be unable to prune or delete the production repository while still reusing API broker credentials and rclone setup.
   Date/Author: 2026-09-12 / implementation agent
+- Decision: Determine application backup health locally from durable-credential presence plus latest run status, without making Google network calls during app status/readiness.
+  Rationale: API startup and readiness must remain available during Drive outages; the broker and explicit backup setup flow handle authorization failures without blocking application use.
+  Date/Author: 2026-09-12 / implementation agent
 - Decision: Run headless browser checks under a temporary `Xvfb` display when the shell has no display.
   Rationale: This supplies only the missing test runtime service and leaves canonical `just` recipes unchanged.
   Date/Author: 2026-09-12 / implementation agent
@@ -116,6 +123,8 @@ Phase 3 outcome (2026-09-12): The API now refreshes durable credentials server-s
 Phase 4 outcome (2026-09-12): The existing internal bearer-authenticated router now brokers only short-lived access tokens and the configured folder ID after validating the encrypted API-owned credential. One platform-neutral uploader requests that broker token, creates an ephemeral access-token-only rclone config, initializes/backups/checks/restic, applies retention when requested, returns the snapshot ID, and removes the config. Kubernetes keeps snapshot/clone/Job orchestration and no longer reads or mounts Google credential files. Phase 4 passed with 105 unit tests, 85 integration tests, architecture-check, typecheck, lint, k8s-render, and a clean deployment refresh-token search.
 
 Phase 5 outcome (2026-09-12): `ops/drive/rehearse.sh` now requires a healthy local API and local restic password/status-token files, creates and prepares a temporary DuckDB, uploads through the shared broker/uploader, restores through the same module to a different target, verifies the material with dojo backup verification, and purges only its unique rehearsal repository in an exit trap. Deterministic tests cover upload failure cleanup, restore target separation, production-path refusal, and purge config cleanup. Phase 5 passed with 108 unit tests, 85 integration tests, lint, and typecheck; the live rehearsal remains deliberately manual.
+
+Phase 6 outcome (2026-09-12): Ready workspaces remain usable with degraded backup status when credentials are absent or the latest scheduled run failed, while new PENDING onboarding remains in `backup_setup` and not ready. The existing single App warning remains the repair entry point and its navigation regression is covered. Upgrade/compatibility fixtures and API state tests pass alongside the web suites: 111 unit tests, 88 integration tests, 45 web unit tests, 275 Cypress component tests, migration-check, typecheck, and lint.
 
 At each later major milestone, record what behavior became demonstrable, which gates passed, and any remaining gap. At completion, compare the result against the purpose above and explicitly list anything that could not be validated without staging or production. Production deployment must remain unperformed.
 
@@ -494,3 +503,5 @@ The OAuth start request is `POST /api/onboarding/google/start` with exactly one 
 2026-09-12: Marked Phase 4 verified. Recorded the internal bearer-protected token broker, access-token-only ephemeral uploader config, shared restic execution, Kubernetes worker boundary, deleted obsolete backup Secret example, and 105-unit/85-integration gate results. The next revision must document Phase 4's commit and begin the local Drive rehearsal.
 
 2026-09-12: Marked Phase 5 verified. Recorded the local API health prerequisite, unique rehearsal path, shared upload/restore/purge implementation, production repository guard, temporary local data cleanup, and 108-unit/85-integration gate results. The next revision must document Phase 5's commit and begin legacy readiness and repair behavior.
+
+2026-09-12: Marked Phase 6 verified. Recorded degraded readiness semantics, latest-run/credential health gating, existing warning repair routing, upgrade fixture coverage, and 111-unit/88-integration/web gate results. The next revision must document Phase 6's commit and begin OpenTofu and active service-account removal.

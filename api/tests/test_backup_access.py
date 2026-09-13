@@ -108,3 +108,39 @@ def test_backup_access_hides_invalid_credential_failures(monkeypatch, tmp_path) 
     assert response.status_code == 503
     assert response.json()["detail"]["code"] == "backup_access_unavailable"
     assert "v1:invalid" not in response.text
+
+
+def test_new_onboarding_with_pending_backup_is_not_ready(service) -> None:
+    status = service.start_empty_onboarding()
+
+    assert status["ready"] is False
+    assert status["mode"] == "backup_setup"
+    assert status["backup"]["state"] == "required"
+
+
+def test_existing_import_without_credential_remains_ready_and_degraded(imported_service) -> None:
+    status = imported_service.get_app_status()
+
+    assert status["ready"] is True
+    assert status["mode"] == "ready"
+    assert status["backup"]["state"] == "degraded"
+
+
+def test_configured_backup_with_failed_run_remains_ready_and_degraded(service) -> None:
+    service.start_empty_onboarding()
+    service.configure_backup_folder("folder-id", "Backup folder", str(SYSTEM_BACKUP_CREDENTIAL_ID))
+    service.report_backup_run(
+        "00000000-0000-4000-8000-000000000001",
+        {
+            "trigger_kind": "SCHEDULED",
+            "status": "FAILED",
+            "phase": "UPLOADING",
+            "error_message": "Google Drive authorization must be renewed.",
+        },
+    )
+
+    status = service.get_app_status()
+
+    assert status["ready"] is True
+    assert status["mode"] == "ready"
+    assert status["backup"]["state"] == "degraded"
