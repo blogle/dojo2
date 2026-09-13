@@ -256,6 +256,7 @@ class DojoService:
                 {
                     "status": configuration["status"],
                     "folder_id": configuration["drive_folder_id"],
+                    "folder_name": configuration["drive_folder_name"],
                     "verified_at": configuration["verified_at"],
                 }
                 if configuration
@@ -272,7 +273,7 @@ class DojoService:
         return self.get_app_status()
 
     def configure_backup_folder(
-        self, folder_id: str, credential_id: str | None = None
+        self, folder_id: str, folder_name: str, credential_id: str
     ) -> dict[str, Any]:
         current = self.get_backup_configuration()
         now = self.clock.now()
@@ -295,7 +296,7 @@ class DojoService:
                     "configuration_id": str(SYSTEM_BACKUP_CONFIGURATION_ID),
                     "status": "CONFIGURED",
                     "drive_folder_id": folder_id,
-                    "drive_folder_name": None,
+                    "drive_folder_name": folder_name,
                     "credential_id": credential_id,
                     "verified_at": now,
                     "last_error": None,

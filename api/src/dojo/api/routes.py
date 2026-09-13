@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import secrets
-from pathlib import Path
 from typing import Annotated, Any, cast
 from urllib.parse import urlsplit
 from uuid import UUID
@@ -51,11 +50,14 @@ from dojo.backup_credentials import (
     load_encryption_key,
 )
 from dojo.commands import CommandConflictError
-from dojo.constants import (
-    GOOGLE_SHEETS_READONLY_SCOPE,
-    SYSTEM_BACKUP_CREDENTIAL_ID,
+from dojo.constants import GOOGLE_SHEETS_READONLY_SCOPE, SYSTEM_BACKUP_CREDENTIAL_ID
+from dojo.drive_backup import (
+    GoogleAccessToken,
+    GoogleDriveAuthorizationError,
+    GoogleDriveError,
+    access_token_from_credential,
+    verify_drive_folder,
 )
-from dojo.drive_backup import verify_drive_folder
 from dojo.google import (
     GOOGLE_DRIVE_FILE_SCOPE,
     OAuthTokenStore,
@@ -135,45 +137,79 @@ def start_empty_onboarding(request: Request) -> dict[str, Any]:
 @router.get("/settings/backup")
 def backup_settings(request: Request) -> dict[str, Any]:
     settings = get_settings(request)
-    session_id = get_or_create_oauth_session_id(request)
-    token = get_oauth_token_store(request).get(session_id)
-    has_refresh_token = bool(token and token.get("refresh_token"))
-    verification_available = bool(
-        settings.oauth_configured
-        and has_refresh_token
-        and Path(settings.backup_status_token_file).is_file()
-    )
-    return get_service(request).get_backup_settings() | {
-        "service_account_email": None,
-        "verification_available": verification_available,
+    service = get_service(request)
+    configuration = service.get_backup_configuration()
+    return service.get_backup_settings() | {
+        "google_drive_authorized": service.has_backup_credential(),
+        "picker_available": bool(settings.google_picker_api_key and settings.google_picker_app_id),
+        "folder_configured": bool(
+            configuration
+            and configuration["status"] == "CONFIGURED"
+            and configuration["drive_folder_id"]
+        ),
+        "reauthorization_required": not service.has_backup_credential(),
     }
 
 
 @router.put("/settings/backup")
 def configure_backup(request: Request, payload: BackupFolderPayload) -> dict[str, Any]:
-    settings = get_settings(request)
-    if not Path(settings.backup_status_token_file).is_file():
-        raise HTTPException(status_code=503, detail="Backup status reporting is not configured")
-    session_id = get_or_create_oauth_session_id(request)
-    token = get_oauth_token_store(request).get(session_id)
-    if not token or not token.get("refresh_token"):
-        raise HTTPException(
-            status_code=400,
-            detail="Google Drive access not granted. Sign in with Google first.",
-        )
-    refresh_token = str(token["refresh_token"])
     try:
-        verify_drive_folder(
-            payload.folder_id,
+        access_token = _get_backup_access_token(request)
+        folder = verify_drive_folder(payload.folder_id, access_token=access_token.access_token)
+    except HTTPException:
+        raise
+    except GoogleDriveAuthorizationError as exc:
+        raise _reauthorization_required() from exc
+    except (GoogleDriveError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return get_service(request).configure_backup_folder(
+        folder.folder_id,
+        folder.folder_name,
+        str(SYSTEM_BACKUP_CREDENTIAL_ID),
+    )
+
+
+def _reauthorization_required() -> HTTPException:
+    return HTTPException(
+        status_code=401,
+        detail={
+            "code": "google_drive_reauthorization_required",
+            "message": "Connect Google Drive again.",
+        },
+    )
+
+
+def _get_backup_access_token(request: Request) -> GoogleAccessToken:
+    settings = get_settings(request)
+    credential = get_service(request).get_backup_credential()
+    if credential is None:
+        raise _reauthorization_required()
+    try:
+        return access_token_from_credential(
+            encrypted_refresh_token=str(credential["encrypted_refresh_token"]),
+            credential_id=str(credential["credential_id"]),
+            encryption_key_file=settings.credential_encryption_key_file,
             client_id=settings.google_oauth_client_id,
             client_secret=settings.google_oauth_client_secret,
-            refresh_token=refresh_token,
         )
-    except RuntimeError as exc:
+    except (ValueError, GoogleDriveAuthorizationError) as exc:
+        raise _reauthorization_required() from exc
+    except GoogleDriveError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return get_service(request).configure_backup_folder(payload.folder_id)
+
+
+@router.get("/google/drive/picker-session")
+def google_drive_picker_session(request: Request) -> dict[str, Any]:
+    settings = get_settings(request)
+    if not settings.google_picker_api_key or not settings.google_picker_app_id:
+        raise HTTPException(status_code=503, detail="Google Picker is not configured.")
+    access_token = _get_backup_access_token(request)
+    return {
+        "access_token": access_token.access_token,
+        "expires_in": access_token.expires_in,
+        "picker_api_key": settings.google_picker_api_key,
+        "picker_app_id": settings.google_picker_app_id,
+    }
 
 
 @router.post("/onboarding/google/start")

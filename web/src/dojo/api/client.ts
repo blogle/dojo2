@@ -10,6 +10,7 @@ import type {
   Category,
   CategoryGroup,
   GoogleOnboardingStatus,
+  GoogleDrivePickerSession,
   ImportPreview,
   ImportResult,
   NetWorthResponse,
@@ -94,6 +95,10 @@ export async function configureBackupFolder(
     method: "PUT",
     body: JSON.stringify({ folder_id: folderId }),
   });
+}
+
+export async function fetchGoogleDrivePickerSession(): Promise<GoogleDrivePickerSession> {
+  return request<GoogleDrivePickerSession>("/api/google/drive/picker-session");
 }
 
 export async function fetchBootstrap(): Promise<BootstrapResponse> {

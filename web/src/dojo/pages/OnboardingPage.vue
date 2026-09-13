@@ -12,7 +12,13 @@ import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { useAppState } from "../state/app";
-import { configureBackupFolder, fetchBackupSettings } from "../api/client";
+import {
+  ApiError,
+  configureBackupFolder,
+  fetchBackupSettings,
+  fetchGoogleDrivePickerSession,
+} from "../api/client";
+import { openGoogleDriveFolderPicker } from "../googlePicker";
 
 import Button from "../components/actions/Button.vue";
 import SelectField from "../components/forms/SelectField.vue";
@@ -56,8 +62,11 @@ const step = ref<Step>("choose");
 const sheetId = ref("");
 const errorMessage = ref("");
 const formError = ref("");
-const backupFolderId = ref("");
-const backupServiceAccountEmail = ref("");
+const backupFolderName = ref("");
+const backupAuthorized = ref(false);
+const backupPickerAvailable = ref(false);
+const backupFolderConfigured = ref(false);
+const backupReauthorizationRequired = ref(false);
 const backupError = ref("");
 const backupSaving = ref(false);
 
@@ -203,32 +212,83 @@ async function showBackupSetup() {
   backupError.value = "";
   try {
     const settings = await fetchBackupSettings();
-    backupServiceAccountEmail.value = settings.service_account_email;
-    backupFolderId.value = settings.configuration?.folder_id ?? "";
-    if (!settings.verification_available) {
-      backupError.value =
-        "Backup verification is not configured on this dojo server.";
-    }
+    backupAuthorized.value = settings.google_drive_authorized;
+    backupPickerAvailable.value = settings.picker_available;
+    backupFolderConfigured.value = settings.folder_configured;
+    backupReauthorizationRequired.value = settings.reauthorization_required;
+    backupFolderName.value = settings.configuration?.folder_name ?? "";
   } catch (error) {
     backupError.value =
       error instanceof Error ? error.message : "Backup setup could not load.";
   }
 }
 
-async function saveBackupFolder() {
-  const folderId = backupFolderId.value.trim();
-  if (!folderId) return;
+async function connectGoogleDrive() {
   backupSaving.value = true;
   backupError.value = "";
   try {
-    await configureBackupFolder(folderId);
-    await initialize();
-    router.push("/budgets");
+    await beginGoogleOnboarding("backup");
+    await showBackupSetup();
   } catch (error) {
     backupError.value =
       error instanceof Error
         ? error.message
+        : "Google Drive authorization failed.";
+  } finally {
+    backupSaving.value = false;
+  }
+}
+
+async function chooseBackupFolder() {
+  if (!backupPickerAvailable.value) {
+    backupError.value = "Google Picker is not configured on this dojo server.";
+    return;
+  }
+  backupSaving.value = true;
+  backupError.value = "";
+  try {
+    const session = await fetchGoogleDrivePickerSession();
+    const selected = await openGoogleDriveFolderPicker(
+      session.access_token,
+      session.picker_api_key,
+      session.picker_app_id,
+    );
+    if (!selected) return;
+    const settings = await configureBackupFolder(selected.id);
+    backupFolderName.value =
+      settings.configuration?.folder_name ?? selected.name;
+    backupFolderConfigured.value = true;
+    backupAuthorized.value = true;
+  } catch (error) {
+    if (
+      error instanceof ApiError &&
+      error.code === "google_drive_reauthorization_required"
+    ) {
+      backupAuthorized.value = false;
+      backupReauthorizationRequired.value = true;
+      backupFolderConfigured.value = false;
+    }
+    backupError.value =
+      error instanceof Error
+        ? error.message
         : "Google Drive folder verification failed.";
+  } finally {
+    backupSaving.value = false;
+  }
+}
+
+async function continueToApp() {
+  if (!backupFolderConfigured.value) return;
+  backupSaving.value = true;
+  backupError.value = "";
+  try {
+    await initialize();
+    await router.push("/budgets");
+  } catch (error) {
+    backupError.value =
+      error instanceof Error
+        ? error.message
+        : "The application could not be loaded.";
   } finally {
     backupSaving.value = false;
   }
@@ -730,40 +790,57 @@ const showInvalidSheetId = computed(
       </template>
 
       <template v-if="step === 'backup-setup'">
-        <p class="onboarding__eyebrow">PROTECT YOUR DATA</p>
-        <h1 class="onboarding__headline">Set up Google Drive backups</h1>
+        <p class="onboarding__eyebrow">BACKUPS</p>
+        <h1 class="onboarding__headline">Back up dojo to Google Drive</h1>
         <p class="onboarding__copy">
-          Create a private folder in Google Drive and share it with this dojo
-          backup account as an editor.
+          dojo will keep encrypted recovery backups in a Google Drive folder you
+          choose.
         </p>
 
-        <Surface variant="muted" padding="md" :border="true">
-          <p class="onboarding__field-label">Backup account</p>
-          <p class="onboarding__credential">
-            {{ backupServiceAccountEmail || "Unavailable" }}
-          </p>
+        <Surface
+          v-if="backupError"
+          variant="muted"
+          padding="var(--space-lg)"
+          :border="true"
+          class="onboarding__error-banner"
+        >
+          <p class="onboarding__error-desc">{{ backupError }}</p>
         </Surface>
 
-        <TextField
-          v-model="backupFolderId"
-          label="Google Drive folder ID"
-          placeholder="Paste the value after /folders/ in the Drive URL"
-          :error="backupError"
-        />
-
-        <p class="onboarding__copy">
-          dojo verifies that it can create and remove a probe folder before
-          saving this configuration. Financial data is encrypted by restic
-          before upload.
-        </p>
-
-        <Button
-          variant="primary"
-          :disabled="backupSaving || !backupFolderId.trim()"
-          @click="saveBackupFolder"
-        >
-          {{ backupSaving ? "Verifying…" : "Verify and enable backups" }}
-        </Button>
+        <template v-if="!backupAuthorized || backupReauthorizationRequired">
+          <Button
+            variant="primary"
+            :disabled="backupSaving"
+            :loading="backupSaving"
+            @click="connectGoogleDrive"
+          >
+            Connect Google Drive
+          </Button>
+        </template>
+        <template v-else-if="!backupFolderConfigured">
+          <Button
+            variant="primary"
+            :disabled="backupSaving || !backupPickerAvailable"
+            :loading="backupSaving"
+            @click="chooseBackupFolder"
+          >
+            Choose folder
+          </Button>
+        </template>
+        <template v-else>
+          <Surface variant="muted" padding="md" :border="true">
+            <p class="onboarding__field-label">Backup folder</p>
+            <p class="onboarding__credential">{{ backupFolderName }}</p>
+          </Surface>
+          <Button
+            variant="primary"
+            :disabled="backupSaving"
+            :loading="backupSaving"
+            @click="continueToApp"
+          >
+            Continue to app
+          </Button>
+        </template>
       </template>
     </div>
 

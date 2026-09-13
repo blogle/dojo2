@@ -22,7 +22,7 @@ The complete local proof consists of deterministic tests, fresh and upgraded Duc
 - [x] (2026-09-12) Created and committed only this ExecPlan as `6fc8248` with `docs: plan user OAuth Google Drive backups`.
 - [x] (2026-09-12) Implemented encrypted credential persistence and the plaintext-column compatibility repair; `just migration-check`, `just test-unit`, `just test-integration`, `just architecture-check`, `just typecheck`, and `just lint` pass.
 - [x] (2026-09-12) Split OAuth by explicit purpose and persist refresh credentials immediately; 97 unit tests, 81 integration tests, migration-check, architecture-check, typecheck, and lint pass.
-- [ ] Implement direct Drive verification, Picker session configuration, browser Picker adapter, and backup setup UI; run backend/frontend milestone gates and commit.
+- [x] (2026-09-12) Implemented direct Drive verification, Picker session configuration, browser Picker adapter, and backup setup UI; 98 unit tests, 81 integration tests, web tests, typecheck, lint, and web build pass.
 - [ ] Implement the internal short-lived credential broker and one platform-neutral uploader; remove worker credential-file access; run milestone gates and commit.
 - [ ] Rewrite the local rehearsal to use the shared uploader; run deterministic rehearsal tests and commit.
 - [ ] Complete legacy readiness and repair behavior with integration and web tests; commit.
@@ -57,6 +57,8 @@ The complete local proof consists of deterministic tests, fresh and upgraded Duc
   Evidence: The newer inherited `uv` added upload-time metadata across 703 lines. Restoring the generated lock content and adding only dojo-api's direct dependency entries left the intended package change without unrelated resolver churn.
 - Observation: The existing `just test-unit` did not include `tests/test_google.py`, even though that module owns the OAuth unit coverage.
   Evidence: The Phase 2 command now includes it, producing 97 passing unit tests and making scope/pending-state regressions part of the canonical unit gate.
+- Observation: Direct Drive probe cleanup needs to retain the created file ID before any later response parsing or error handling.
+  Evidence: `verify_drive_folder()` keeps the probe ID and performs deletion in `finally`, so a failed delete is surfaced while every created probe receives a cleanup attempt.
 
 ## Decision Log
 
@@ -96,6 +98,8 @@ The complete local proof consists of deterministic tests, fresh and upgraded Duc
 Phase 0 and Phase 1 outcome (2026-09-12): The baseline is reproducible under the repository Nix environment with a temporary Xvfb display. The API now has a focused AES-256-GCM credential envelope implementation, a fixed system credential table, new backup configuration identity fields, and a repeatable legacy repair that removes the plaintext token column while preserving configuration values. The service no longer writes the plaintext token. `just migration-check`, `just test-unit` (73 tests), `just test-integration` (80 tests), `just architecture-check`, `just typecheck`, and `just lint` passed. Real OAuth, Drive, Picker, worker, infrastructure, and human gates remain outstanding.
 
 Phase 2 outcome (2026-09-12): OAuth start requests now require an explicit `aspire_migration` or `backup` purpose, with exact purpose-specific scopes and the existing offline/consent parameters. Pending state records that purpose. Callback access tokens remain available in the browser-session store, while returned refresh credentials are encrypted and persisted immediately; missing refresh tokens preserve an existing credential or surface backup reauthorization. The web client submits the purpose explicitly. The Phase 2 gates passed with 97 unit tests, 81 integration tests, migration-check, architecture-check, typecheck, and lint.
+
+Phase 3 outcome (2026-09-12): The API now refreshes durable credentials server-side for Picker sessions and folder configuration, verifies selected folders through direct Drive metadata and zero-byte create/delete probes, and stores canonical folder name plus credential identity. The frontend now uses the isolated Google Picker adapter and minimal backup setup states, including cancel-safe selection and reauthorization fallback. Phase 3 passed with 98 unit tests, 81 integration tests, 275 Cypress component tests plus web unit tests, typecheck, lint, and production web build.
 
 At each later major milestone, record what behavior became demonstrable, which gates passed, and any remaining gap. At completion, compare the result against the purpose above and explicitly list anything that could not be validated without staging or production. Production deployment must remain unperformed.
 
@@ -468,3 +472,5 @@ The OAuth start request is `POST /api/onboarding/google/start` with exactly one 
 2026-09-12: Marked Phase 0 complete and Phase 1 verified. Recorded the pinned-`uv` lockfile correction, encrypted credential module, fresh schema, plaintext-column repair, service persistence removal, and Phase 1 gate results. The next revision must document Phase 1's commit and begin purpose-specific OAuth.
 
 2026-09-12: Marked Phase 2 verified. Recorded exact purpose-specific scope selection, pending purpose state, immediate encrypted callback persistence, missing-refresh-token behavior, the canonical unit-suite inclusion of `test_google.py`, and the 97-unit/81-integration gate results. The next revision must document Phase 2's commit and begin direct Drive verification and Picker.
+
+2026-09-12: Marked Phase 3 verified. Recorded direct Drive metadata/probe verification with cleanup, the browser-safe Picker session contract, canonical folder persistence, isolated Picker adapter, minimal backup setup UI, and backend/frontend gate results. The next revision must document Phase 3's commit and begin the internal broker and shared uploader.

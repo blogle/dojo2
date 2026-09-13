@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 import dojo.api.main as main_module
 import dojo.api.routes as routes_module
 from dojo.api.settings import get_settings
+from dojo.drive_backup import GoogleAccessToken, VerifiedDriveFolder
 from dojo.migrations import provision_database
 
 
@@ -784,42 +785,34 @@ def test_reviewed_import_requires_complete_decisions(monkeypatch, tmp_path) -> N
 
 
 def test_start_empty_requires_verified_backup_folder(monkeypatch, tmp_path) -> None:
-    token_file = tmp_path / "backup-token"
-    token_file.write_text("test-token", encoding="utf-8")
     monkeypatch.setenv("SESSION_SECRET", "test-secret")
     monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_ID", "test-client-id")
     monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_SECRET", "test-client-secret")
-    monkeypatch.setenv("BACKUP_STATUS_TOKEN_FILE", str(token_file))
     provisioned_main_module(monkeypatch, tmp_path, "api-test.duckdb")
-    monkeypatch.setattr(routes_module, "verify_drive_folder", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        routes_module,
+        "_get_backup_access_token",
+        lambda _request: GoogleAccessToken("access-token", 3600),
+    )
+    monkeypatch.setattr(
+        routes_module,
+        "verify_drive_folder",
+        lambda *_args, **_kwargs: VerifiedDriveFolder("canonical-folder", "Backup folder"),
+    )
 
     with TestClient(main_module.app) as client:
-        # Simulate having completed OAuth with a refresh token
-        # by making the token store return a token for any session
-        from dojo.google import OAuthTokenStore
-
-        store: OAuthTokenStore = main_module.app.state.oauth_token_store
-        original_get = store.get
-
-        def patched_get(sid: str):
-            result = original_get(sid)
-            if result is not None:
-                return result
-            return {"refresh_token": "test-refresh-token", "access_token": "test"}
-
-        store.get = patched_get  # type: ignore[assignment]
-
         started = client.post("/api/onboarding/start-empty")
         assert started.status_code == 200
         assert started.json()["mode"] == "backup_setup"
         assert started.json()["ready"] is False
 
         settings = client.get("/api/settings/backup")
-        assert settings.json()["service_account_email"] is None
-        assert settings.json()["verification_available"] is True
+        assert settings.json()["google_drive_authorized"] is False
+        assert settings.json()["reauthorization_required"] is True
         configured = client.put("/api/settings/backup", json={"folder_id": "drive-folder-123"})
         assert configured.status_code == 200
         assert configured.json()["configuration"]["status"] == "CONFIGURED"
+        assert configured.json()["configuration"]["folder_name"] == "Backup folder"
         assert client.get("/api/app/status").json()["ready"] is True
 
 

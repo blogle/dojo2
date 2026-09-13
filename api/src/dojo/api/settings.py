@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     credential_encryption_key_file: str = Field(
         default="", alias="DOJO_CREDENTIAL_ENCRYPTION_KEY_FILE"
     )
+    google_picker_api_key: str = Field(default="", alias="GOOGLE_PICKER_API_KEY")
+    google_picker_app_id: int = Field(default=0, alias="GOOGLE_PICKER_APP_ID")
     backup_status_token_file: str = Field(default="", alias="BACKUP_STATUS_TOKEN_FILE")
     session_secret: str = Field(default="dev-only-change-me", alias="SESSION_SECRET")
     log_level: str = Field(default="debug", alias="LOG_LEVEL")
