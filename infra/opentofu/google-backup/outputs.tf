@@ -1,8 +1,10 @@
-output "backup_service_account_email" {
-  description = "Share the user-created Google Drive folder with this address."
-  value       = google_service_account.backup.email
+output "picker_api_key" {
+  description = "Restricted browser API key used by Google Picker."
+  value       = google_apikeys_key.picker.key_string
+  sensitive   = true
 }
 
-output "backup_service_account_name" {
-  value = google_service_account.backup.name
+output "picker_app_id" {
+  description = "Google Cloud project number used as the Google Picker App ID."
+  value       = data.google_project.current.number
 }

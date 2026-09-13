@@ -26,7 +26,7 @@ The complete local proof consists of deterministic tests, fresh and upgraded Duc
 - [x] (2026-09-12) Implemented the internal short-lived credential broker and one platform-neutral uploader; removed worker credential-file access; 105 unit tests, 85 integration tests, architecture-check, typecheck, lint, and k8s-render pass.
 - [x] (2026-09-12) Rewrote the local rehearsal to use the shared uploader; 108 unit tests, 85 integration tests, lint, and typecheck pass.
 - [x] (2026-09-12) Completed legacy readiness and repair behavior with integration and web tests; 111 unit tests, 88 integration tests, 45 web unit tests, 275 Cypress component tests, migration-check, typecheck, and lint pass.
-- [ ] Replace OpenTofu service-account resources with project services and a restricted Picker API key; remove active Kubernetes service-account backup dependencies; validate and commit.
+- [x] (2026-09-12) Replaced OpenTofu service-account resources with project services and a restricted Picker API key; removed active Kubernetes service-account backup dependencies; infrastructure formatting/validation and k8s-render pass.
 - [ ] Stop at Human Gate A, run `just drive-infra-plan`, and wait for explicit approval before applying infrastructure.
 - [ ] Stop at Human Gate B and wait for confirmation that the standard Web OAuth client has the local origin and redirect without removing existing production entries.
 - [ ] Prepare local environment documentation and safe ignored-file placeholders without creating or displaying credentials.
@@ -69,6 +69,10 @@ The complete local proof consists of deterministic tests, fresh and upgraded Duc
   Evidence: `get_app_status()` now requires both a successful latest run and an existing encrypted credential for `backup.state = configured`; otherwise a ready workspace remains degraded.
 - Observation: Vue Router navigation from the existing warning is asynchronous in the Vitest environment.
   Evidence: The repair-warning regression test requires `flushPromises()` after clicking Repair backups before asserting `/onboarding?backup=repair`.
+- Observation: The Google provider exposes a `google_apikeys_key` value as `key_string`, not `key`.
+  Evidence: The first `drive-infra-validate` failed on `google_apikeys_key.picker.key`; changing the output to `key_string` made validation pass.
+- Observation: The base Kubernetes deployment has no checked-in overlay for deployment-specific Web OAuth, Picker, and encryption secrets.
+  Evidence: The rendered base manifest references `dojo-google-oauth`, `dojo-google-picker`, and `dojo-backup-credentials` by secret key, leaving their values to the deployment environment without inventing an origin or credential.
 
 ## Decision Log
 
@@ -105,6 +109,9 @@ The complete local proof consists of deterministic tests, fresh and upgraded Duc
 - Decision: Determine application backup health locally from durable-credential presence plus latest run status, without making Google network calls during app status/readiness.
   Rationale: API startup and readiness must remain available during Drive outages; the broker and explicit backup setup flow handle authorization failures without blocking application use.
   Date/Author: 2026-09-12 / implementation agent
+- Decision: Keep `infra/opentofu/google-backup/` as the API-key/project-services root and leave standard consumer Web OAuth client creation manual.
+  Rationale: The requested provider resource manages API keys, not the consumer Workspace OAuth client; `google_iam_oauth_client` is not a valid substitute.
+  Date/Author: 2026-09-12 / implementation agent
 - Decision: Run headless browser checks under a temporary `Xvfb` display when the shell has no display.
   Rationale: This supplies only the missing test runtime service and leaves canonical `just` recipes unchanged.
   Date/Author: 2026-09-12 / implementation agent
@@ -125,6 +132,8 @@ Phase 4 outcome (2026-09-12): The existing internal bearer-authenticated router 
 Phase 5 outcome (2026-09-12): `ops/drive/rehearse.sh` now requires a healthy local API and local restic password/status-token files, creates and prepares a temporary DuckDB, uploads through the shared broker/uploader, restores through the same module to a different target, verifies the material with dojo backup verification, and purges only its unique rehearsal repository in an exit trap. Deterministic tests cover upload failure cleanup, restore target separation, production-path refusal, and purge config cleanup. Phase 5 passed with 108 unit tests, 85 integration tests, lint, and typecheck; the live rehearsal remains deliberately manual.
 
 Phase 6 outcome (2026-09-12): Ready workspaces remain usable with degraded backup status when credentials are absent or the latest scheduled run failed, while new PENDING onboarding remains in `backup_setup` and not ready. The existing single App warning remains the repair entry point and its navigation regression is covered. Upgrade/compatibility fixtures and API state tests pass alongside the web suites: 111 unit tests, 88 integration tests, 45 web unit tests, 275 Cypress component tests, migration-check, typecheck, and lint.
+
+Phase 7 outcome (2026-09-12): OpenTofu now enables exactly Drive, Sheets, Picker, and API Keys services, creates a restricted Picker browser key with configurable deployed referrers, and exposes the project number as Picker App ID plus key output. The API deployment receives references to Web OAuth, Picker, status, and encryption-key secrets; the backup worker receives only data, restic, and internal status/broker access. The obsolete Google backup Secret example and restore-file dependency are gone. `just drive-infra-fmt-check`, `just drive-infra-validate`, and `just k8s-render` pass. Current docs still need alignment before the documentation phase.
 
 At each later major milestone, record what behavior became demonstrable, which gates passed, and any remaining gap. At completion, compare the result against the purpose above and explicitly list anything that could not be validated without staging or production. Production deployment must remain unperformed.
 
@@ -505,3 +514,5 @@ The OAuth start request is `POST /api/onboarding/google/start` with exactly one 
 2026-09-12: Marked Phase 5 verified. Recorded the local API health prerequisite, unique rehearsal path, shared upload/restore/purge implementation, production repository guard, temporary local data cleanup, and 108-unit/85-integration gate results. The next revision must document Phase 5's commit and begin legacy readiness and repair behavior.
 
 2026-09-12: Marked Phase 6 verified. Recorded degraded readiness semantics, latest-run/credential health gating, existing warning repair routing, upgrade fixture coverage, and 111-unit/88-integration/web gate results. The next revision must document Phase 6's commit and begin OpenTofu and active service-account removal.
+
+2026-09-12: Marked Phase 7 verified. Recorded the retained OpenTofu root, exact API services, restricted Picker key, project-number output, API-only long-lived secret boundary, broker-based restore/backup manifests, and infrastructure gate results. The next stopping point is Human Gate A: run and report `just drive-infra-plan`, then wait for explicit apply approval.

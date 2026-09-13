@@ -44,13 +44,40 @@ spec:
           value: /data/dojo.duckdb
         - name: FRONTEND_BASE_URL
           value: http://localhost:8000
+        - name: GOOGLE_OAUTH_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              name: dojo-google-oauth
+              key: client-id
+        - name: GOOGLE_OAUTH_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: dojo-google-oauth
+              key: client-secret
+        - name: GOOGLE_OAUTH_REDIRECT_URI
+          valueFrom:
+            secretKeyRef:
+              name: dojo-google-oauth
+              key: redirect-uri
+        - name: GOOGLE_PICKER_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: dojo-google-picker
+              key: api-key
+        - name: GOOGLE_PICKER_APP_ID
+          valueFrom:
+            secretKeyRef:
+              name: dojo-google-picker
+              key: app-id
+        - name: DOJO_CREDENTIAL_ENCRYPTION_KEY_FILE
+          value: /credentials/encryption-key
         - name: BACKUP_STATUS_TOKEN_FILE
           value: /backup-status/token
         volumeMounts:
         - name: data
           mountPath: /data
-        - name: google-backup
-          mountPath: /google-backup
+        - name: credentials
+          mountPath: /credentials
           readOnly: true
         - name: backup-status
           mountPath: /backup-status
@@ -83,10 +110,12 @@ spec:
       - name: data
         persistentVolumeClaim:
           claimName: dojo-data
-      - name: google-backup
+      - name: credentials
         secret:
-          secretName: dojo-backup-google
-          optional: true
+          secretName: dojo-backup-credentials
+          items:
+          - key: encryption-key
+            path: encryption-key
       - name: backup-status
         secret:
           secretName: dojo-backup-status

@@ -1,7 +1,12 @@
-# Google backup identity
+# Google Drive backup configuration
 
-This OpenTofu root enables the Google Drive and IAM APIs in an existing Google Cloud project and creates dojo's deployment-specific backup service account. It deliberately does not create a private key or a human-owned Drive folder: private keys would be retained in Terraform state, while personal Drive content is outside the Google Cloud provider's ownership boundary.
+This OpenTofu root enables the Google Drive, Sheets, Picker, and API Keys APIs in an existing Google Cloud project and creates the restricted browser API key used by dojo's Google Picker. It does not create a Google service account, OAuth client, private key, human-owned Drive folder, or OAuth secret.
 
-Authenticate with Application Default Credentials, copy `terraform.tfvars.example` to an ignored `terraform.tfvars`, then use the root `just drive-infra-*` commands. After apply, use the `backup_service_account_email` output in dojo's required backup onboarding step.
+Authenticate with Application Default Credentials, copy `terraform.tfvars.example` to an ignored `terraform.tfvars`, set deployment-specific additional browser referrers without guessing an origin, and use the root `just drive-infra-*` commands. After apply, pass the `picker_api_key` and `picker_app_id` outputs to the API deployment configuration. Do not paste the API-key value into source control or chat.
 
-For local rehearsal, create a short-lived key with `gcloud iam service-accounts keys create` outside the repository, then revoke it after testing. Production should use workload identity where the Kubernetes platform supports it.
+The standard Google Auth Platform Web OAuth client remains a one-time manual bootstrap item because the normal consumer Workspace OAuth client is not represented by `google_iam_oauth_client`. Configure this client with the following local entries and keep any existing production entries:
+
+    Authorized JavaScript origin: http://localhost:5173
+    Authorized redirect URI: http://localhost:8000/api/onboarding/google/callback
+
+The local API receives the Web OAuth client values and the API-owned credential encryption key through the normal ignored deployment secret mechanism. Backup workers never receive those values; they call dojo's internal short-lived access-token broker.
