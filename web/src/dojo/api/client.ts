@@ -242,9 +242,12 @@ export async function fetchAssetsLiabilities(): Promise<AssetsLiabilitiesRespons
   return request<AssetsLiabilitiesResponse>("/api/assets-liabilities");
 }
 
-export async function startGoogleOnboarding(): Promise<GoogleOnboardingStatus> {
+export async function startGoogleOnboarding(
+  purpose: "aspire_migration" | "backup",
+): Promise<GoogleOnboardingStatus> {
   return request<GoogleOnboardingStatus>("/api/onboarding/google/start", {
     method: "POST",
+    body: JSON.stringify({ purpose }),
   });
 }
 

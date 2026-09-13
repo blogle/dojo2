@@ -2,11 +2,14 @@ from __future__ import annotations
 
 from typing import Any
 from unittest.mock import patch
+from urllib.parse import parse_qs, urlparse
 
 import httpx
 import pytest
 
 from dojo.google import (
+    GOOGLE_ASPIRE_MIGRATION_SCOPES,
+    GOOGLE_BACKUP_SCOPES,
     _is_transient_error,
     build_google_auth_url,
     exchange_google_code,
@@ -72,6 +75,24 @@ class TestBuildGoogleAuthUrl:
         assert "access_type=offline" in url
         assert "prompt=consent" in url
         assert "state=mystate" in url
+
+    @pytest.mark.parametrize(
+        "scopes",
+        [
+            GOOGLE_ASPIRE_MIGRATION_SCOPES,
+            GOOGLE_BACKUP_SCOPES,
+        ],
+    )
+    def test_scope_sets_are_purpose_specific(self, scopes: tuple[str, ...]) -> None:
+        url = build_google_auth_url(
+            client_id="test-id",
+            redirect_uri="http://localhost/callback",
+            scopes=" ".join(scopes),
+            state="mystate",
+        )
+        granted_scopes = set(parse_qs(urlparse(url).query)["scope"][0].split())
+
+        assert granted_scopes == set(scopes)
 
 
 class TestExchangeGoogleCode:
@@ -260,12 +281,14 @@ class TestOAuthTokenStore:
             state="state-1",
             session_id="session-1",
             frontend_origin="http://192.0.2.1:5173",
+            purpose="backup",
         )
 
         pending = store.consume_authorization("state-1")
         assert pending is not None
         assert pending.session_id == "session-1"
         assert pending.frontend_origin == "http://192.0.2.1:5173"
+        assert pending.purpose == "backup"
         assert store.consume_authorization("state-1") is None
 
     def test_set_and_get(self) -> None:

@@ -21,7 +21,7 @@ The complete local proof consists of deterministic tests, fresh and upgraded Duc
 - [x] (2026-09-12) Confirmed the full `just check` passes under a temporary `Xvfb` display. The ordinary headless invocation cannot start Cypress because no `DISPLAY` exists.
 - [x] (2026-09-12) Created and committed only this ExecPlan as `6fc8248` with `docs: plan user OAuth Google Drive backups`.
 - [x] (2026-09-12) Implemented encrypted credential persistence and the plaintext-column compatibility repair; `just migration-check`, `just test-unit`, `just test-integration`, `just architecture-check`, `just typecheck`, and `just lint` pass.
-- [ ] Split OAuth by explicit purpose and persist refresh credentials immediately; run its milestone gates and commit.
+- [x] (2026-09-12) Split OAuth by explicit purpose and persist refresh credentials immediately; 97 unit tests, 81 integration tests, migration-check, architecture-check, typecheck, and lint pass.
 - [ ] Implement direct Drive verification, Picker session configuration, browser Picker adapter, and backup setup UI; run backend/frontend milestone gates and commit.
 - [ ] Implement the internal short-lived credential broker and one platform-neutral uploader; remove worker credential-file access; run milestone gates and commit.
 - [ ] Rewrite the local rehearsal to use the shared uploader; run deterministic rehearsal tests and commit.
@@ -55,6 +55,8 @@ The complete local proof consists of deterministic tests, fresh and upgraded Duc
   Evidence: The requested standard consumer Web OAuth client is not represented by `google_iam_oauth_client`; only project services, a restricted API key, and the project-number output belong in this root.
 - Observation: Running `uv add` outside the repository's pinned Nix environment rewrote unrelated lockfile metadata, while the existing lock already contained cryptography transitively through Authlib.
   Evidence: The newer inherited `uv` added upload-time metadata across 703 lines. Restoring the generated lock content and adding only dojo-api's direct dependency entries left the intended package change without unrelated resolver churn.
+- Observation: The existing `just test-unit` did not include `tests/test_google.py`, even though that module owns the OAuth unit coverage.
+  Evidence: The Phase 2 command now includes it, producing 97 passing unit tests and making scope/pending-state regressions part of the canonical unit gate.
 
 ## Decision Log
 
@@ -85,10 +87,15 @@ The complete local proof consists of deterministic tests, fresh and upgraded Duc
 - Decision: Run headless browser checks under a temporary `Xvfb` display when the shell has no display.
   Rationale: This supplies only the missing test runtime service and leaves canonical `just` recipes unchanged.
   Date/Author: 2026-09-12 / implementation agent
+- Decision: Keep `build_google_auth_url()` generic but select its scope string only at the explicit OAuth-start route from the purpose-specific constants.
+  Rationale: The existing URL helper remains reusable and testable, while no environment-level catch-all scope can accidentally grant Sheets access to Drive-only authorization.
+  Date/Author: 2026-09-12 / implementation agent
 
 ## Outcomes & Retrospective
 
 Phase 0 and Phase 1 outcome (2026-09-12): The baseline is reproducible under the repository Nix environment with a temporary Xvfb display. The API now has a focused AES-256-GCM credential envelope implementation, a fixed system credential table, new backup configuration identity fields, and a repeatable legacy repair that removes the plaintext token column while preserving configuration values. The service no longer writes the plaintext token. `just migration-check`, `just test-unit` (73 tests), `just test-integration` (80 tests), `just architecture-check`, `just typecheck`, and `just lint` passed. Real OAuth, Drive, Picker, worker, infrastructure, and human gates remain outstanding.
+
+Phase 2 outcome (2026-09-12): OAuth start requests now require an explicit `aspire_migration` or `backup` purpose, with exact purpose-specific scopes and the existing offline/consent parameters. Pending state records that purpose. Callback access tokens remain available in the browser-session store, while returned refresh credentials are encrypted and persisted immediately; missing refresh tokens preserve an existing credential or surface backup reauthorization. The web client submits the purpose explicitly. The Phase 2 gates passed with 97 unit tests, 81 integration tests, migration-check, architecture-check, typecheck, and lint.
 
 At each later major milestone, record what behavior became demonstrable, which gates passed, and any remaining gap. At completion, compare the result against the purpose above and explicitly list anything that could not be validated without staging or production. Production deployment must remain unperformed.
 
@@ -459,3 +466,5 @@ The OAuth start request is `POST /api/onboarding/google/start` with exactly one 
 2026-09-12: Created this living plan after baseline setup and research. Recorded the clean initial worktree, local feature branch, temporary Xvfb requirement, authorized baseline repairs, current architecture mismatch, exact phase sequence, human gates, security boundaries, and recovery rules. Future revisions must update all living sections and append a new revision note explaining what changed and why.
 
 2026-09-12: Marked Phase 0 complete and Phase 1 verified. Recorded the pinned-`uv` lockfile correction, encrypted credential module, fresh schema, plaintext-column repair, service persistence removal, and Phase 1 gate results. The next revision must document Phase 1's commit and begin purpose-specific OAuth.
+
+2026-09-12: Marked Phase 2 verified. Recorded exact purpose-specific scope selection, pending purpose state, immediate encrypted callback persistence, missing-refresh-token behavior, the canonical unit-suite inclusion of `test_google.py`, and the 97-unit/81-integration gate results. The next revision must document Phase 2's commit and begin direct Drive verification and Picker.

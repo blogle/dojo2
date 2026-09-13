@@ -244,9 +244,11 @@ async function commitSheetImport(
   });
 }
 
-async function beginGoogleOnboarding(): Promise<void> {
+async function beginGoogleOnboarding(
+  purpose: "aspire_migration" | "backup" = "aspire_migration",
+): Promise<void> {
   await withSaving(async () => {
-    const onboarding = await startGoogleOnboarding();
+    const onboarding = await startGoogleOnboarding(purpose);
     state.onboardingInfo = onboarding;
     if (!onboarding.configured || !onboarding.auth_url) {
       return;

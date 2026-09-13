@@ -24,6 +24,7 @@ from dojo.api.models import (
     FundCategoryRequest,
     FundGroupRequest,
     GoalPayload,
+    GoogleOAuthStartRequest,
     ImportCommitRequest,
     ImportRequest,
     InvestmentCashSnapshotPayload,
@@ -44,9 +45,19 @@ from dojo.api.models import (
     TransferPayload,
 )
 from dojo.api.settings import Settings
+from dojo.backup_credentials import (
+    BackupCredentialError,
+    encrypt_refresh_token,
+    load_encryption_key,
+)
 from dojo.commands import CommandConflictError
+from dojo.constants import (
+    GOOGLE_SHEETS_READONLY_SCOPE,
+    SYSTEM_BACKUP_CREDENTIAL_ID,
+)
 from dojo.drive_backup import verify_drive_folder
 from dojo.google import (
+    GOOGLE_DRIVE_FILE_SCOPE,
     OAuthTokenStore,
     build_google_auth_url,
     exchange_google_code,
@@ -96,10 +107,13 @@ def oauth_status_payload(request: Request) -> dict[str, Any]:
     settings = get_settings(request)
     session_id = get_or_create_oauth_session_id(request)
     token_store = get_oauth_token_store(request)
+    has_backup_credential = get_service(request).has_backup_credential()
     return {
         "configured": settings.oauth_configured,
         "fixture_mode": settings.dev_fixture_mode,
         "authorized": token_store.has(session_id),
+        "backup_authorized": has_backup_credential,
+        "backup_reauthorization_required": not has_backup_credential,
         "message": (
             "Google OAuth is configured and ready."
             if settings.oauth_configured
@@ -163,7 +177,9 @@ def configure_backup(request: Request, payload: BackupFolderPayload) -> dict[str
 
 
 @router.post("/onboarding/google/start")
-def start_google_onboarding(request: Request) -> dict[str, Any]:
+def start_google_onboarding(
+    request: Request, request_payload: GoogleOAuthStartRequest
+) -> dict[str, Any]:
     settings = get_settings(request)
     payload = oauth_status_payload(request)
     if not settings.oauth_configured:
@@ -173,13 +189,20 @@ def start_google_onboarding(request: Request) -> dict[str, Any]:
         state=state,
         session_id=get_or_create_oauth_session_id(request),
         frontend_origin=get_frontend_origin(request),
+        purpose=request_payload.purpose,
     )
     callback = urlsplit(settings.google_oauth_redirect_uri)
     return payload | {
         "auth_url": build_google_auth_url(
             client_id=settings.google_oauth_client_id,
             redirect_uri=settings.google_oauth_redirect_uri,
-            scopes=settings.google_oauth_scopes,
+            scopes=" ".join(
+                (
+                    (GOOGLE_SHEETS_READONLY_SCOPE, GOOGLE_DRIVE_FILE_SCOPE)
+                    if request_payload.purpose == "aspire_migration"
+                    else (GOOGLE_DRIVE_FILE_SCOPE,)
+                )
+            ),
             state=state,
         ),
         "callback_origin": f"{callback.scheme}://{callback.netloc}",
@@ -205,6 +228,30 @@ def google_callback(request: Request, code: str, state: str) -> HTMLResponse:
         code=code,
     )
     token_store.set(pending.session_id, token)
+    refresh_token = token.get("refresh_token")
+    if isinstance(refresh_token, str) and refresh_token.strip():
+        try:
+            encryption_key = load_encryption_key(settings.credential_encryption_key_file)
+            granted_scopes = token.get("scope")
+            if not isinstance(granted_scopes, str) or not granted_scopes.strip():
+                granted_scopes = " ".join(
+                    (
+                        (GOOGLE_SHEETS_READONLY_SCOPE, GOOGLE_DRIVE_FILE_SCOPE)
+                        if pending.purpose == "aspire_migration"
+                        else (GOOGLE_DRIVE_FILE_SCOPE,)
+                    )
+                )
+            encrypted = encrypt_refresh_token(
+                refresh_token,
+                credential_id=SYSTEM_BACKUP_CREDENTIAL_ID,
+                key=encryption_key,
+            )
+            get_service(request).store_backup_credential(encrypted, granted_scopes)
+        except BackupCredentialError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="Google authorization succeeded, but backup credential storage is unavailable.",
+            ) from exc
     target_origin = json.dumps(pending.frontend_origin).replace("<", "\\u003c")
     return HTMLResponse(
         f"<html><body><script>window.opener?.postMessage({{type:'dojo-google-oauth',ok:true}}, {target_origin});window.close();</script>Google access granted.</body></html>"

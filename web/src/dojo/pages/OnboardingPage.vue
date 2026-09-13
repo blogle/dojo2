@@ -130,7 +130,7 @@ async function handleSubmitSheet() {
   step.value = "progress";
 
   try {
-    await beginGoogleOnboarding();
+    await beginGoogleOnboarding("aspire_migration");
     await analyzeSheet(submittedSheetId);
     if (state.importPreview) {
       step.value = "net-worth-review";

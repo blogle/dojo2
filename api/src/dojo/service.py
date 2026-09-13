@@ -40,6 +40,7 @@ from dojo.constants import (
     MAX_TS,
     SYSTEM_ATB_BUCKET_ID,
     SYSTEM_BACKUP_CONFIGURATION_ID,
+    SYSTEM_BACKUP_CREDENTIAL_ID,
     SYSTEM_CATEGORY_ATB,
     SYSTEM_CATEGORY_BALANCE_ADJUSTMENT,
     SYSTEM_CATEGORY_STARTING_BALANCE,
@@ -223,6 +224,30 @@ class DojoService:
 
     def get_latest_backup_run(self) -> dict[str, Any] | None:
         return self.db.fetch_one(load_sql("queries/latest_backup_run"))
+
+    def get_backup_credential(self) -> dict[str, Any] | None:
+        return self.db.fetch_one(
+            load_sql("queries/current_backup_credential"), (str(SYSTEM_BACKUP_CREDENTIAL_ID),)
+        )
+
+    def has_backup_credential(self) -> bool:
+        return self.get_backup_credential() is not None
+
+    def store_backup_credential(self, encrypted_refresh_token: str, granted_scopes: str) -> None:
+        now = self.clock.now()
+        current = self.get_backup_credential()
+        created_at = current["created_at"] if current else now
+        self.db.execute(
+            load_sql("queries/upsert_backup_credential"),
+            (
+                str(SYSTEM_BACKUP_CREDENTIAL_ID),
+                encrypted_refresh_token,
+                granted_scopes,
+                1,
+                created_at,
+                now,
+            ),
+        )
 
     def get_backup_settings(self) -> dict[str, Any]:
         configuration = self.get_backup_configuration()

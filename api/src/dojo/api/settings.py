@@ -17,10 +17,6 @@ class Settings(BaseSettings):
     google_oauth_client_id: str = Field(default="", alias="GOOGLE_OAUTH_CLIENT_ID")
     google_oauth_client_secret: str = Field(default="", alias="GOOGLE_OAUTH_CLIENT_SECRET")
     google_oauth_redirect_uri: str = Field(default="", alias="GOOGLE_OAUTH_REDIRECT_URI")
-    google_oauth_scopes: str = Field(
-        default="https://www.googleapis.com/auth/spreadsheets.readonly https://www.googleapis.com/auth/drive.file",
-        alias="GOOGLE_OAUTH_SCOPES",
-    )
     credential_encryption_key_file: str = Field(
         default="", alias="DOJO_CREDENTIAL_ENCRYPTION_KEY_FILE"
     )
