@@ -27,7 +27,7 @@ The complete local proof consists of deterministic tests, fresh and upgraded Duc
 - [x] (2026-09-12) Rewrote the local rehearsal to use the shared uploader; 108 unit tests, 85 integration tests, lint, and typecheck pass.
 - [x] (2026-09-12) Completed legacy readiness and repair behavior with integration and web tests; 111 unit tests, 88 integration tests, 45 web unit tests, 275 Cypress component tests, migration-check, typecheck, and lint pass.
 - [x] (2026-09-12) Replaced OpenTofu service-account resources with project services and a restricted Picker API key; removed active Kubernetes service-account backup dependencies; infrastructure formatting/validation and k8s-render pass.
-- [ ] Stop at Human Gate A, run `just drive-infra-plan`, and wait for explicit approval before applying infrastructure.
+- [ ] (blocked 2026-09-12) Human Gate A plan was attempted but OpenTofu could not load Google Application Default Credentials; authenticate locally and remove the obsolete `service_account_id` entry from ignored `terraform.tfvars`, then rerun `just drive-infra-plan`.
 - [ ] Stop at Human Gate B and wait for confirmation that the standard Web OAuth client has the local origin and redirect without removing existing production entries.
 - [ ] Prepare local environment documentation and safe ignored-file placeholders without creating or displaying credentials.
 - [ ] Stop at Human Gates C, D, E, and F for real local Start-empty, Aspire, repair, and Drive rehearsal validation; record each result here.
@@ -73,6 +73,8 @@ The complete local proof consists of deterministic tests, fresh and upgraded Duc
   Evidence: The first `drive-infra-validate` failed on `google_apikeys_key.picker.key`; changing the output to `key_string` made validation pass.
 - Observation: The base Kubernetes deployment has no checked-in overlay for deployment-specific Web OAuth, Picker, and encryption secrets.
   Evidence: The rendered base manifest references `dojo-google-oauth`, `dojo-google-picker`, and `dojo-backup-credentials` by secret key, leaving their values to the deployment environment without inventing an origin or credential.
+- Observation: Human Gate A cannot produce an actionable infrastructure diff until local OpenTofu authentication is available.
+  Evidence: `just drive-infra-plan` failed with the Google provider error that no Application Default Credentials were found. It also warned that ignored `terraform.tfvars` still contains the removed `service_account_id` variable.
 
 ## Decision Log
 
@@ -516,3 +518,5 @@ The OAuth start request is `POST /api/onboarding/google/start` with exactly one 
 2026-09-12: Marked Phase 6 verified. Recorded degraded readiness semantics, latest-run/credential health gating, existing warning repair routing, upgrade fixture coverage, and 111-unit/88-integration/web gate results. The next revision must document Phase 6's commit and begin OpenTofu and active service-account removal.
 
 2026-09-12: Marked Phase 7 verified. Recorded the retained OpenTofu root, exact API services, restricted Picker key, project-number output, API-only long-lived secret boundary, broker-based restore/backup manifests, and infrastructure gate results. The next stopping point is Human Gate A: run and report `just drive-infra-plan`, then wait for explicit apply approval.
+
+2026-09-12: Attempted Human Gate A. The canonical plan command was blocked before resource planning by missing local Google Application Default Credentials and an obsolete ignored `service_account_id` tfvars entry. No infrastructure was applied. Resume by fixing only the local ignored OpenTofu authentication/input state, rerunning the plan, and presenting the required non-secret summary for explicit apply approval.
