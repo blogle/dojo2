@@ -28,7 +28,7 @@ The complete local proof consists of deterministic tests, fresh and upgraded Duc
 - [x] (2026-09-12) Completed legacy readiness and repair behavior with integration and web tests; 111 unit tests, 88 integration tests, 45 web unit tests, 275 Cypress component tests, migration-check, typecheck, and lint pass.
 - [x] (2026-09-12) Replaced OpenTofu service-account resources with project services and a restricted Picker API key; removed active Kubernetes service-account backup dependencies; infrastructure formatting/validation and k8s-render pass.
 - [x] (2026-09-12) Human Gate A plan was explicitly approved and applied. The four APIs and restricted Picker key are provisioned, obsolete service-account/IAM resources are removed, and no key value was recorded.
-- [ ] (awaiting confirmation 2026-09-12) Human Gate B: the replacement standard Web OAuth client must be manually checked for local, staging, and production origin/redirect entries, and non-Testing-mode unattended-backup suitability. The previously used staging/production client was deleted outside this repository.
+- [ ] (blocked 2026-09-12) Human Gate B: the replacement standard Web OAuth client has local configuration, but Google verification is blocked because the configured home/privacy URLs are not publicly reachable and domain ownership is not verified. Resolve the external hosting/ownership prerequisite before continuing.
 - [ ] Prepare local environment documentation and safe ignored-file placeholders without creating or displaying credentials.
 - [ ] Stop at Human Gates C, D, E, and F for real local Start-empty, Aspire, repair, and Drive rehearsal validation; record each result here.
 - [ ] Align current documentation and commit it.
@@ -83,6 +83,8 @@ The complete local proof consists of deterministic tests, fresh and upgraded Duc
   Evidence: The first run removed obsolete resources and enabled four APIs but failed Picker key creation; the final one-resource apply created `dojo-picker` successfully. Outputs remained sensitive/withheld except the numeric App ID.
 - Observation: The user deleted the former staging/production OAuth client because it belonged to an unrelated Google project.
   Evidence: The replacement client is configured in local `api/.env`; staging and production deployment secrets will need the replacement client values during a later deployment workflow. No client values were read or recorded.
+- Observation: Google will not publish this external OAuth application while its home page and privacy policy are unreachable or their domain ownership is unverified.
+  Evidence: Google reports the supplied `dojo.thejeffer.net` home page and `/privacy` URL as unresponsive and not registered to the user. This cannot be fixed by OpenTofu or local application credentials alone.
 
 ## Decision Log
 
@@ -151,6 +153,8 @@ Phase 7 outcome (2026-09-12): OpenTofu now enables exactly Drive, Sheets, Picker
 Human Gate A outcome (2026-09-12): The reviewed OpenTofu plan was approved and applied. Four project APIs are enabled, the obsolete backup service account and IAM service enablement were removed, and the restricted Picker key was created with localhost, Google Docs, staging, and production dojo referrers. The initial apply required a quota-project remediation and a one-resource retry; no key value or credential was recorded.
 
 Human Gate B status (2026-09-12): A replacement Web OAuth client was created in the dojo project and its values were placed in ignored local `api/.env`. The former staging/production client was deleted externally because it belonged to an unrelated project. Gate B remains open until the replacement client is confirmed for local, staging, and production origins/redirects and is not dependent on Testing-mode refresh-token behavior.
+
+Human Gate B blocker (2026-09-12): Google verification rejected the configured home and privacy URLs because the dojo hosts are not publicly reachable and domain ownership is not verified. The user must provide public HTTPS home/privacy pages on a verified domain, update the consent-screen branding URLs, and complete verification before unattended-backup validation can proceed.
 
 At each later major milestone, record what behavior became demonstrable, which gates passed, and any remaining gap. At completion, compare the result against the purpose above and explicitly list anything that could not be validated without staging or production. Production deployment must remain unperformed.
 
