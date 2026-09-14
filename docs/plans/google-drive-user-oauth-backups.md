@@ -36,8 +36,8 @@ The complete local proof consists of deterministic tests, fresh and upgraded Duc
 - [x] (2026-09-14) Human Gate F: the approved live rehearsal completed upload, restic check, snapshot discovery, separate local restore, dojo verification, and cleanup of the temporary remote repository. No production repository was touched.
 - [x] (2026-09-13) Corrected configured-backup status so a valid credential and verified folder are not marked degraded solely because no backup run has occurred yet. Added backend and App warning regression coverage; focused automated gates pass.
 - [x] (2026-09-14) Aligned current product, architecture, contributor, decision, changelog, provisioning, and backup/restore documentation with user OAuth, Picker, encrypted credentials, brokered worker access, shared rehearsal, degraded repair behavior, and the corrected migration transition. `just docs` and obsolete-guidance search pass.
-- [ ] Run final `just check`, `just ci`, infrastructure checks, manifest rendering, searches, and diff review; update this plan and commit any final plan outcome.
-- [ ] Stop at Human Gate G and ask: `Local implementation and validation are complete. Do you want me to push the feature branch and open the PR?`
+- [x] (2026-09-14) Final `just check`, `just ci`, OpenTofu checks, Kubernetes rendering, obsolete-dependency searches, whitespace checks, and final diff review passed. Rehearsal temporary data was removed and local secret files remain ignored.
+- [ ] (waiting 2026-09-14) Human Gate G: local implementation and validation are complete. Awaiting explicit approval to push the feature branch and open the PR.
 - [ ] Only after approval, push the feature branch, open a PR against `master`, wait for green CI, and stop at Human Gate H before merge or staging promotion.
 - [ ] Only after promotion approval, use the existing merge and staging workflow. Production is out of scope.
 
@@ -105,6 +105,8 @@ The complete local proof consists of deterministic tests, fresh and upgraded Duc
   Evidence: The rehearsal now locates the restored manifest and derives its sibling database before normal verification and restore.
 - Observation: The current documentation still described the superseded service-account and mounted-refresh-token deployment model after implementation was complete.
   Evidence: The seven required documentation files were aligned; `git grep` found no current service-account email/JSON, `service_account_file`, `dojo-backup-google`, or `google_drive_refresh_token` guidance in those docs.
+- Observation: The final repository checks emit pre-existing Nix evaluation-cache and compiler-library warnings in this environment, but all canonical recipes exit successfully.
+  Evidence: `just check`, `just ci`, `just docs`, OpenTofu validation, and Kubernetes rendering completed successfully; no warning indicated a test or build failure.
 - Observation: Google displayed a verification warning during Aspire authorization because the combined migration flow requests the sensitive `spreadsheets.readonly` scope.
   Evidence: The user reports that migration otherwise completed successfully. The warning is supplied by Google for app/scope verification and is not an OAuth callback or Picker failure.
 - Observation: The user accepted both onboarding paths after the migration completion transition was clarified.
@@ -199,6 +201,8 @@ Human Gate E outcome (2026-09-14): The user confirmed the warning, repair naviga
 Human Gate F outcome (2026-09-14): The live rehearsal created and prepared temporary DuckDB data, obtained brokered short-lived Drive access, uploaded a unique rehearsal repository, ran restic integrity checking, restored to a distinct local target, passed dojo backup verification, and cleaned up the remote rehearsal repository and local temporary data. The final run passed with a snapshot ID; no credential values were recorded.
 
 Documentation outcome (2026-09-14): Current SPEC, ARCHITECTURE, DECISIONS, CHANGELOG, CONTRIBUTING, provisioning, and backup/restore guidance now matches the completed user-OAuth architecture. Superseded decision history is explicitly marked historical. `just docs`, diff checks, and obsolete-guidance audit pass.
+
+Final automated outcome (2026-09-14): `just check` and `just ci` passed with the full backend/frontend/build/documentation stack. `just drive-infra-fmt-check`, `just drive-infra-validate`, and `just k8s-render` passed. The final diff contains only intended feature, test, infrastructure, documentation, plan, and generic warning-spacing changes. Known limitation: Google may continue showing a sensitive-scope verification warning for `spreadsheets.readonly` until Google completes external app verification.
 
 Human Gate F preparation (2026-09-14): The user explicitly approved the live rehearsal. Preflight stopped safely because local-only status-token and restic-password file paths were not configured; no remote repository or local rehearsal data was created.
 
@@ -615,3 +619,5 @@ The OAuth start request is `POST /api/onboarding/google/start` with exactly one 
 2026-09-14: Human Gate F passed after correcting three live-script issues: API-environment health probing, relative secret-path normalization, and restic restore-path discovery. The shared uploader/unit suite passed with 112 tests. The next phase is current documentation alignment.
 
 2026-09-14: Completed current documentation alignment and corrected the SPEC migration transition/status wording. `just docs` passed and current-doc obsolete-guidance audit was clean. The next stopping point is the final automated gate and diff review.
+
+2026-09-14: Final automated gates and review passed. Local implementation, real onboarding flows, repair flow, and Drive upload/restore rehearsal are complete; no push or deployment was performed. Stopped at Human Gate G pending explicit approval to push and open the PR.
