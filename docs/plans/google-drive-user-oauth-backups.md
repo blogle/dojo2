@@ -30,7 +30,7 @@ The complete local proof consists of deterministic tests, fresh and upgraded Duc
 - [x] (2026-09-12) Human Gate A plan was explicitly approved and applied. The four APIs and restricted Picker key are provisioned, obsolete service-account/IAM resources are removed, and no key value was recorded.
 - [x] (2026-09-13) Human Gate B: the user confirmed Google OAuth consent-screen verification is complete. The replacement standard Web OAuth client remains the manual bootstrap, and staging/production Kubernetes secret updates are intentionally deferred to the later deployment workflow.
 - [x] (2026-09-13) Prepared local environment documentation with safe empty placeholders for all required OAuth, Picker, encryption-key, and backup-status-token settings. Confirmed `.env`, `api/.env`, `.local/`, and local secret paths are ignored without reading secret values.
-- [ ] Stop at Human Gates C, D, E, and F for real local Start-empty, Aspire, repair, and Drive rehearsal validation; record each result here.
+- [ ] (in progress 2026-09-13) Human Gate C: isolated API is running against `.local/drive-backup-start-empty.duckdb`; `GET /health` and `GET /api/health` both returned `{"status":"ok","app":"dojo"}`. Awaiting the user's real Start-empty OAuth and Picker click-through.
 - [ ] Align current documentation and commit it.
 - [ ] Run final `just check`, `just ci`, infrastructure checks, manifest rendering, searches, and diff review; update this plan and commit any final plan outcome.
 - [ ] Stop at Human Gate G and ask: `Local implementation and validation are complete. Do you want me to push the feature branch and open the PR?`
@@ -157,6 +157,8 @@ Human Gate A outcome (2026-09-12): The reviewed OpenTofu plan was approved and a
 Human Gate B outcome (2026-09-13): Google OAuth consent-screen verification is complete after the public `dojo` home/privacy/terms site and Cloudflare ownership verification became active. The app name remains `dojo`; staging and production Kubernetes secret replacement is a later deployment task and is not performed locally now.
 
 Phase 8 outcome (2026-09-13): The local `.env.example` now lists all required OAuth, Picker, encryption-key, and backup-status-token variables with safe empty placeholders. `.env`, `api/.env`, `.local/`, and local secret paths are ignored. No credential values were generated, displayed, or committed. The next stopping point is Human Gate C for the isolated local Start-empty flow.
+
+Human Gate C preparation (2026-09-13): The isolated API database was selected and provisioned through the canonical `DUCKDB_PATH=.local/drive-backup-start-empty.duckdb just api` command. Both required health endpoints returned status `ok`; browser validation is now waiting on the user.
 
 At each later major milestone, record what behavior became demonstrable, which gates passed, and any remaining gap. At completion, compare the result against the purpose above and explicitly list anything that could not be validated without staging or production. Production deployment must remain unperformed.
 
@@ -549,3 +551,5 @@ The OAuth start request is `POST /api/onboarding/google/start` with exactly one 
 2026-09-12: Human Gate A approved and applied. The initial apply partially completed because ADC lacked a usable quota project for API-key creation; after local quota-project remediation, a one-resource retry created the restricted Picker key. The four APIs and service-account removal are complete. The next stopping point is Human Gate B for manual standard Web OAuth client verification.
 
 2026-09-13: The user confirmed Google OAuth consent-screen verification is complete. Phase 8 local environment preparation is complete with safe `.env.example` placeholders and ignored-path verification. Staging and production Kubernetes secret updates remain deferred. The next stopping point is Human Gate C for the real isolated local Start-empty flow.
+
+2026-09-13: Started Human Gate C with the isolated Start-empty database. The API health and API-health endpoints passed; no browser, Google, or Picker result has been recorded yet.
