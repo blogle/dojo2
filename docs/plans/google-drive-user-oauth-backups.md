@@ -30,7 +30,8 @@ The complete local proof consists of deterministic tests, fresh and upgraded Duc
 - [x] (2026-09-12) Human Gate A plan was explicitly approved and applied. The four APIs and restricted Picker key are provisioned, obsolete service-account/IAM resources are removed, and no key value was recorded.
 - [x] (2026-09-13) Human Gate B: the user confirmed Google OAuth consent-screen verification is complete. The replacement standard Web OAuth client remains the manual bootstrap, and staging/production Kubernetes secret updates are intentionally deferred to the later deployment workflow.
 - [x] (2026-09-13) Prepared local environment documentation with safe empty placeholders for all required OAuth, Picker, encryption-key, and backup-status-token settings. Confirmed `.env`, `api/.env`, `.local/`, and local secret paths are ignored without reading secret values.
-- [ ] (in progress 2026-09-13) Human Gate C: the encryption key now resolves from the API working directory after configuring the API-relative `../.local/...` path. The isolated API was restarted against `.local/drive-backup-start-empty.duckdb`; both health endpoints passed. Retry the Start-empty browser flow from the beginning.
+- [x] (2026-09-13) Human Gate C: the user reported that the isolated Start-empty authorization, Picker folder selection, canonical folder display, and application entry completed successfully. The configured backup now reports healthy without a pre-first-run warning.
+- [ ] (in progress 2026-09-13) Human Gate D: the user reports that Aspire migration otherwise completed successfully, with the expected Google verification warning during Sheets authorization. Structural database inspection and explicit confirmation of the no-second-consent behavior remain to be recorded.
 - [x] (2026-09-13) Corrected configured-backup status so a valid credential and verified folder are not marked degraded solely because no backup run has occurred yet. Added backend and App warning regression coverage; focused automated gates pass.
 - [ ] Align current documentation and commit it.
 - [ ] Run final `just check`, `just ci`, infrastructure checks, manifest rendering, searches, and diff review; update this plan and commit any final plan outcome.
@@ -94,6 +95,8 @@ The complete local proof consists of deterministic tests, fresh and upgraded Duc
   Evidence: The key file is present; an API-relative parent path resolves, while the path as currently configured does not. Picker settings were appended to ignored `api/.env`; their values were not displayed.
 - Observation: A newly configured backup had been treated as degraded until its first scheduled run, even though the repair action could only repeat already-complete folder configuration.
   Evidence: `get_app_status()` now reports `configured` when a durable credential and configured folder exist with no latest run; failed latest runs and missing credentials remain degraded. The live isolated API returned `ready=true`, `backup.state=configured`, and `backup.message=null` after the fix.
+- Observation: Google displayed a verification warning during Aspire authorization because the combined migration flow requests the sensitive `spreadsheets.readonly` scope.
+  Evidence: The user reports that migration otherwise completed successfully. The warning is supplied by Google for app/scope verification and is not an OAuth callback or Picker failure.
 
 ## Decision Log
 
@@ -168,6 +171,8 @@ Phase 8 outcome (2026-09-13): The local `.env.example` now lists all required OA
 Human Gate C preparation (2026-09-13): The isolated API database was selected and provisioned through the canonical `DUCKDB_PATH=.local/drive-backup-start-empty.duckdb just api` command. The first browser OAuth callback failed safely because the configured encryption-key path could not be resolved from the API working directory. After the user changed it to the API-relative `../.local/...` path, the API restarted successfully and both required health endpoints returned status `ok`. Browser validation is ready to retry.
 
 Corrective backup-status outcome (2026-09-13): Configured backups without a recorded run no longer show the degraded warning or route the user back to folder setup. Missing credentials and failed latest runs retain the existing degraded warning and repair route. Backend unit/integration, migration, architecture, typecheck, lint, and complete web tests pass.
+
+Migration completion UX outcome (2026-09-13): The migration completion action now says `Continue to backup setup` and explains that encrypted Drive backup setup is required before entering the app. The backup setup screen retains `Continue to app` only after folder configuration.
 
 At each later major milestone, record what behavior became demonstrable, which gates passed, and any remaining gap. At completion, compare the result against the purpose above and explicitly list anything that could not be validated without staging or production. Production deployment must remain unperformed.
 
@@ -568,3 +573,5 @@ The OAuth start request is `POST /api/onboarding/google/start` with exactly one 
 2026-09-13: The user corrected the encryption-key path to an API-relative location. The isolated API restarted against the Start-empty database and passed both health endpoints. Resume Gate C by retrying the browser flow from the beginning.
 
 2026-09-13: Corrected the configured-but-never-run backup status dead end. The live isolated API now reports configured/healthy after folder setup; the user should refresh the browser and confirm the warning is absent.
+
+2026-09-13: The user reported a successful Aspire migration flow with a Google verification warning during Sheets authorization. The completion-to-backup transition was corrected so its action no longer claims to enter the app prematurely. Structural migration evidence and final Gate D confirmation remain pending.

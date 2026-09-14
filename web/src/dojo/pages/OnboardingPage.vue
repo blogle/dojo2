@@ -772,6 +772,9 @@ const showInvalidSheetId = computed(
         <p class="onboarding__copy">
           Your Aspire data was imported and validated successfully.
         </p>
+        <p class="onboarding__copy">
+          Next, set up encrypted Google Drive backups before entering the app.
+        </p>
 
         <Divider />
 
@@ -784,7 +787,7 @@ const showInvalidSheetId = computed(
             Details
           </Button>
           <Button variant="primary" @click="handleContinue">
-            Continue to app
+            Continue to backup setup
           </Button>
         </Inline>
       </template>
