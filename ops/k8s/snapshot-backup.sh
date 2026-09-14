@@ -4,7 +4,8 @@ set -euo pipefail
 namespace="${DOJO_NAMESPACE:-default}"
 source_claim="${DOJO_DATA_CLAIM:-dojo-data}"
 snapshot_class="${DOJO_VOLUME_SNAPSHOT_CLASS:-}"
-if [[ "${1:-}" == "--render-job" ]]; then
+
+render_job() {
   : "${DOJO_BACKUP_JOB_NAME:?Set DOJO_BACKUP_JOB_NAME}"
   : "${DOJO_BACKUP_RUN_ID:?Set DOJO_BACKUP_RUN_ID}"
   : "${DOJO_BACKUP_SNAPSHOT:?Set DOJO_BACKUP_SNAPSHOT}"
@@ -29,9 +30,9 @@ spec:
           set -euo pipefail
           /bin/dojo-backup-status --url '${DOJO_BACKUP_STATUS_URL:-http://dojo}' --token-file /backup-status/token --run-id '${DOJO_BACKUP_RUN_ID}' --trigger-kind SCHEDULED --status RUNNING --phase PREPARING --source-snapshot '${DOJO_BACKUP_SNAPSHOT}' --image-digest '${DOJO_BACKUP_IMAGE}' || true
           /bin/dojo-backup prepare /data/dojo.duckdb /stage/dojo.duckdb --image-digest '${DOJO_BACKUP_IMAGE}' --source-snapshot '${DOJO_BACKUP_SNAPSHOT}'
-           snapshot_id="\$(/bin/dojo-backup-upload upload --staging-directory /stage --internal-api-url http://dojo --internal-token-file /backup-status/token --restic-password-file /restic/restic-password --repository-path dojo/restic --tag dojo --tag scheduled --tag '${DOJO_BACKUP_SNAPSHOT}' --retain)"
-           database_sha256="\$(python -c 'import json; print(json.load(open("/stage/dojo.duckdb.manifest.json"))["database_sha256"])')"
-           database_size="\$(python -c 'import json; print(json.load(open("/stage/dojo.duckdb.manifest.json"))["database_size"])')"
+          snapshot_id="\$(/bin/dojo-backup-upload upload --staging-directory /stage --internal-api-url http://dojo --internal-token-file /backup-status/token --restic-password-file /restic/restic-password --repository-path dojo/restic --tag dojo --tag scheduled --tag '${DOJO_BACKUP_SNAPSHOT}' --retain)"
+          database_sha256="\$(python -c 'import json; print(json.load(open("/stage/dojo.duckdb.manifest.json"))["database_sha256"])')"
+          database_size="\$(python -c 'import json; print(json.load(open("/stage/dojo.duckdb.manifest.json"))["database_size"])')"
           /bin/dojo-backup-status --url '${DOJO_BACKUP_STATUS_URL:-http://dojo}' --token-file /backup-status/token --run-id '${DOJO_BACKUP_RUN_ID}' --trigger-kind SCHEDULED --status SUCCEEDED --phase COMPLETE --source-snapshot '${DOJO_BACKUP_SNAPSHOT}' --image-digest '${DOJO_BACKUP_IMAGE}' --restic-snapshot-id "\$snapshot_id" --database-sha256 "\$database_sha256" --database-size-bytes "\$database_size" || true
         env:
         - name: RESTIC_REPOSITORY
@@ -62,6 +63,10 @@ spec:
         secret:
           secretName: dojo-backup-status
 EOF
+}
+
+if [[ "${1:-}" == "--render-job" ]]; then
+  render_job
   exit 0
 fi
 run_id="$(python -c 'from uuid import uuid4; print(uuid4())')"
@@ -166,7 +171,7 @@ DOJO_BACKUP_SNAPSHOT="$snapshot" \
 DOJO_BACKUP_IMAGE="$image" \
 DOJO_BACKUP_CLONE="$clone" \
 DOJO_BACKUP_STATUS_URL="$DOJO_BACKUP_STATUS_URL" \
-  "$0" --render-job | kubectl -n "$namespace" apply -f -
+  render_job | kubectl -n "$namespace" apply -f -
 
 phase="VERIFYING"
 kubectl -n "$namespace" wait --for=condition=complete "job/$job" --timeout=20m
