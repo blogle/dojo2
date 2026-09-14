@@ -2,7 +2,8 @@
 set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"
-api_url="${DOJO_API_URL:-http://localhost:8000}"
+source_api_url="${DOJO_SOURCE_API_URL:-${DOJO_API_URL:-http://localhost:8000}}"
+recovery_api_url="${DOJO_RECOVERY_API_URL:-$source_api_url}"
 : "${BACKUP_STATUS_TOKEN_FILE:?Set BACKUP_STATUS_TOKEN_FILE}"
 : "${DOJO_RESTIC_PASSWORD_FILE:?Set DOJO_RESTIC_PASSWORD_FILE}"
 
@@ -29,8 +30,24 @@ try:
     response.raise_for_status()
 except Exception as exc:
     raise SystemExit(f"A running dojo API is required at {url}: {exc}") from exc
-' "$api_url"
+' "$source_api_url"
 )
+if [[ "$recovery_api_url" != "$source_api_url" ]]; then
+  (
+    cd "$repo_root/api"
+    uv run python -c '
+import httpx
+import sys
+
+url = sys.argv[1].rstrip("/") + "/health"
+try:
+    response = httpx.get(url, timeout=10)
+    response.raise_for_status()
+except Exception as exc:
+    raise SystemExit(f"A running dojo API is required at {url}: {exc}") from exc
+' "$recovery_api_url"
+  )
+fi
 
 run_id="$(python -c 'from uuid import uuid4; print(uuid4().hex)')"
 remote_path="dojo-rehearsals/$run_id/restic"
@@ -50,7 +67,7 @@ cleanup() {
     (
       cd "$repo_root/api"
       uv run python -m dojo.drive_uploader purge \
-        --internal-api-url "$api_url" \
+        --internal-api-url "$recovery_api_url" \
         --internal-token-file "$BACKUP_STATUS_TOKEN_FILE" \
         --repository-path "$remote_path"
     ) >/dev/null 2>&1 || true
@@ -75,7 +92,7 @@ snapshot_id="$(
   cd "$repo_root/api"
   uv run python -m dojo.drive_uploader upload \
     --staging-directory "$work/stage" \
-    --internal-api-url "$api_url" \
+    --internal-api-url "$source_api_url" \
     --internal-token-file "$BACKUP_STATUS_TOKEN_FILE" \
     --restic-password-file "$DOJO_RESTIC_PASSWORD_FILE" \
     --repository-path "$remote_path" \
@@ -87,7 +104,7 @@ snapshot_id="$(
   uv run python -m dojo.drive_uploader restore \
     --snapshot-id "$snapshot_id" \
     --target-directory "$work/materialized" \
-    --internal-api-url "$api_url" \
+    --internal-api-url "$recovery_api_url" \
     --internal-token-file "$BACKUP_STATUS_TOKEN_FILE" \
     --restic-password-file "$DOJO_RESTIC_PASSWORD_FILE" \
     --repository-path "$remote_path"

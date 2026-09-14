@@ -40,8 +40,9 @@ The complete local proof consists of deterministic tests, fresh and upgraded Duc
 - [x] (2026-09-14) User-directed Kubernetes OAuth secret rotation completed using `/workspace/kube_config/config`: both `dojo-staging` and `dojo-prod` `dojo-google-oauth` secrets now use the replacement client values with existing redirect URIs preserved, and both dojo deployments rolled out successfully. No secret values were recorded.
 
 - [x] (2026-09-14) Addressed PR review blockers: generated and restore Kubernetes Jobs now parse successfully, legacy configured folders require a fresh credential-linked Picker verification, backup authorization requires `drive.file`, Drive 401/403 handling is separated, and the independent break-glass restore rehearsal is documented and wired into the canonical commands. Full checks pass with Xvfb for Cypress.
-- [ ] (waiting 2026-09-14) Human Gate G: local implementation and validation are complete. Awaiting explicit approval to push the feature branch and open the PR.
-- [ ] Only after approval, push the feature branch, open a PR against `master`, wait for green CI, and stop at Human Gate H before merge or staging promotion.
+- [x] (2026-09-14) Corrected the break-glass rehearsal so the source API uploads the temporary repository, while a separately bootstrapped recovery API alone restores and cleans up that same snapshot. The source API is never used after upload.
+- [x] (2026-09-14) Pushed the review remediation to PR #1. Local checks pass; GitHub CI is pending. Merge remains blocked pending review approval.
+- [ ] Stop at Human Gate H before merge or staging promotion.
 - [ ] Only after promotion approval, use the existing merge and staging workflow. Production is out of scope.
 
 ## Surprises & Discoveries
@@ -229,7 +230,7 @@ Kubernetes snapshot orchestration is in `ops/k8s/snapshot-backup.sh` and checked
 
 The OpenTofu root is intentionally retained at `infra/opentofu/google-backup/`. It will manage only the specified Google project services, a restricted `google_apikeys_key`, and the numeric project-number output. The standard Google Auth Platform Web OAuth client remains a documented manual bootstrap item; do not add `google_iam_oauth_client` or deprecated IAP OAuth resources.
 
-The root `justfile` is the command interface. Use `just setup`, `just check`, `just test-unit`, `just test-integration`, `just test-web`, `just typecheck`, `just lint`, `just architecture-check`, `just migration-check`, `just k8s-render`, `just drive-infra-*`, `just drive-rehearsal`, and `just ci` as specified below. When Cypress is required in this headless environment, start a temporary `Xvfb` and run the unchanged recipe with `DISPLAY=:99`; do not replace repository recipes with ad hoc test commands.
+The root `justfile` is the command interface. Use `just setup`, `just check`, `just test-unit`, `just test-integration`, `just test-web`, `just typecheck`, `just lint`, `just architecture-check`, `just migration-check`, `just k8s-render`, `just drive-infra-*`, `just drive-rehearsal`, `just drive-break-glass-rehearsal`, and `just ci` as specified below. When Cypress is required in this headless environment, start a temporary `Xvfb` and run the unchanged recipe with `DISPLAY=:99`; do not replace repository recipes with ad hoc test commands.
 
 ## Plan of Work
 

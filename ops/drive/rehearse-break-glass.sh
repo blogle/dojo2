@@ -2,9 +2,11 @@
 set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"
-: "${DOJO_BREAK_GLASS_API_URL:?Set DOJO_BREAK_GLASS_API_URL to the freshly bootstrapped recovery API}"
+: "${DOJO_SOURCE_API_URL:?Set DOJO_SOURCE_API_URL to the source API}"
+: "${DOJO_RECOVERY_API_URL:?Set DOJO_RECOVERY_API_URL to the freshly bootstrapped recovery API}"
 
-# The ordinary rehearsal creates its source database locally, while this URL
-# points at the separately provisioned recovery API/database.
-DOJO_API_URL="$DOJO_BREAK_GLASS_API_URL" \
+# The source API creates the backup. The recovery API is used exclusively for
+# restoring and cleaning up that repository after source-state loss.
+DOJO_SOURCE_API_URL="$DOJO_SOURCE_API_URL" \
+DOJO_RECOVERY_API_URL="$DOJO_RECOVERY_API_URL" \
   "$repo_root/ops/drive/rehearse.sh"
