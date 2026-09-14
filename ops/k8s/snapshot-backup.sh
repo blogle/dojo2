@@ -50,6 +50,8 @@ spec:
         - name: backup-status
           mountPath: /backup-status
           readOnly: true
+        - name: tmp
+          mountPath: /tmp
       volumes:
       - name: data
         persistentVolumeClaim:
@@ -62,6 +64,8 @@ spec:
       - name: backup-status
         secret:
           secretName: dojo-backup-status
+      - name: tmp
+        emptyDir: {}
 EOF
 }
 
