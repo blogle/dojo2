@@ -21,6 +21,10 @@ class GoogleDriveError(RuntimeError):
     """Raised when a Drive operation cannot be completed safely."""
 
 
+class GoogleDrivePermissionError(GoogleDriveError):
+    """Raised when a valid credential cannot write to a Drive resource."""
+
+
 @dataclass(frozen=True)
 class GoogleAccessToken:
     access_token: str
@@ -135,8 +139,23 @@ def verify_drive_folder(folder_id: str, *, access_token: str) -> VerifiedDriveFo
 
 
 def _raise_drive_response(response: httpx.Response) -> None:
-    if response.status_code in {401, 403}:
+    if response.status_code == 401:
         raise GoogleDriveAuthorizationError("Google Drive authorization must be renewed.")
+    if response.status_code == 403:
+        try:
+            payload = cast(dict[str, Any], response.json())
+        except ValueError:
+            payload = {}
+        errors = payload.get("error", {}).get("errors", [])
+        reasons = {
+            str(error.get("reason"))
+            for error in errors
+            if isinstance(error, dict) and error.get("reason")
+        }
+        if reasons & {"insufficientFilePermissions", "forbidden"}:
+            raise GoogleDrivePermissionError(
+                "The selected Google Drive folder is not writable by dojo."
+            )
     try:
         response.raise_for_status()
     except httpx.HTTPStatusError as exc:

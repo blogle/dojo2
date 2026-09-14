@@ -64,6 +64,8 @@ It creates a unique temporary `dojo-rehearsals/` repository, verifies and restor
 
 Use `deploy/k8s/restore-job.example.yaml` with a new empty PVC and an explicit snapshot ID. The Job verifies the manifest, runs migrations, and opens a second verification copy. Never restore over the production PVC. Promote only after comparing application status, balances, budgets, transactions, net worth, reconciliation state, and SCD2 history.
 
+If the source database is lost, use the break-glass procedure in [Backup and restore](backup-and-restore.md): bootstrap a temporary API/database, authorize Google Drive again, select the existing folder with Picker, and point the restore Job at that temporary API. Do not attempt to recover access through the unavailable source database.
+
 ## Troubleshooting
 
 **Backup is degraded:** Check the API's backup status and use the Repair backups action. Do not inspect or copy refresh tokens; reauthorize through the standard Web OAuth flow.

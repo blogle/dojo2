@@ -48,6 +48,7 @@ from dojo.constants import (
     SYSTEM_CREDIT_CARD_GROUP_ID,
 )
 from dojo.database import Database, json_dumps
+from dojo.google import GOOGLE_DRIVE_FILE_SCOPE
 from dojo.importer import (
     ParsedImportBundle,
     extract_sheet_id,
@@ -177,7 +178,7 @@ class DojoService:
         latest_run = self.get_import_status()
         backup_configuration = self.get_backup_configuration()
         latest_backup_run = self.get_latest_backup_run()
-        has_backup_credential = self.has_backup_credential()
+        has_usable_backup_configuration = self.has_usable_backup_configuration()
         if backup_configuration and backup_configuration["status"] == "PENDING":
             ready = False
             mode = "backup_setup"
@@ -187,7 +188,7 @@ class DojoService:
             mode = "ready"
             backup_state = (
                 "configured"
-                if has_backup_credential
+                if has_usable_backup_configuration
                 and (latest_backup_run is None or latest_backup_run["status"] == "SUCCEEDED")
                 else "degraded"
             )
@@ -233,7 +234,25 @@ class DojoService:
         )
 
     def has_backup_credential(self) -> bool:
-        return self.get_backup_credential() is not None
+        credential = self.get_backup_credential()
+        return bool(
+            credential
+            and GOOGLE_DRIVE_FILE_SCOPE in str(credential.get("granted_scopes", "")).split()
+        )
+
+    def has_usable_backup_configuration(self) -> bool:
+        configuration = self.get_backup_configuration()
+        credential = self.get_backup_credential()
+        return bool(
+            configuration
+            and configuration["status"] == "CONFIGURED"
+            and configuration["drive_folder_id"]
+            and configuration["verified_at"]
+            and credential
+            and configuration["credential_id"] is not None
+            and str(configuration["credential_id"]) == str(credential["credential_id"])
+            and self.has_backup_credential()
+        )
 
     def store_backup_credential(self, encrypted_refresh_token: str, granted_scopes: str) -> None:
         now = self.clock.now()

@@ -131,8 +131,11 @@ backup-restore database manifest target:
 k8s-snapshot-backup:
 	ops/k8s/snapshot-backup.sh
 
-k8s-render:
+k8s-render: k8s-validate-backup-manifests
 	kubectl kustomize deploy/k8s/base
+
+k8s-validate-backup-manifests:
+	ops/k8s/validate-backup-manifests.sh
 
 drive-infra-fmt:
 	tofu -chdir=infra/opentofu/google-backup fmt
@@ -154,6 +157,9 @@ drive-infra-apply:
 
 drive-rehearsal:
 	ops/drive/rehearse.sh
+
+drive-break-glass-rehearsal:
+	ops/drive/rehearse-break-glass.sh
 
 # --- Benchmarks ---
 
@@ -177,7 +183,7 @@ bench-web:
 clean:
 	rm -rf api/dist api/build web/dist docs/book .pytest_cache .mypy_cache .ruff_cache
 
-check: format-check lint typecheck architecture-check migration-check test-unit test-property test-integration test-web build docs
+check: format-check lint typecheck architecture-check migration-check k8s-render test-unit test-property test-integration test-web build docs
 
 ci: check test-e2e container
 

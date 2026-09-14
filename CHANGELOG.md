@@ -6,6 +6,8 @@ The entries below describe the completed implementation. Earlier service-account
 
 - Replaced service-account Drive backups with purpose-specific user OAuth: Aspire uses one combined Sheets-and-Drive grant, Start empty uses Drive-only access, and Google Picker plus direct Drive probes configure the folder. Added API-owned AES-256-GCM credentials, short-lived broker tokens, a shared local/Kubernetes uploader, degraded readiness and repair behavior, and OpenTofu API-key/project-service provisioning.
 
+- Hardened the OAuth backup state machine so legacy folders remain degraded until reverified against the current credential with `drive.file`, distinguished writable-folder failures from reauthorization, validated generated and restore Kubernetes Jobs offline, and documented an independent break-glass restore rehearsal.
+
 - Rewired Budget move, group funding, category/group creation, reorder saving, and retired-category restoration to persistent API operations with failure-visible UI behavior.
 - Added aggregate validation and complete decision parsing to reviewed Aspire commits, including an executable reviewed-path fixture rehearsal.
 - Added transaction version tokens, stale-write conflicts, and success-only transaction form, undo, and removal feedback.

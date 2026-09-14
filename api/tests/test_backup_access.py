@@ -110,6 +110,58 @@ def test_backup_access_hides_invalid_credential_failures(monkeypatch, tmp_path) 
     assert "v1:invalid" not in response.text
 
 
+def test_backup_access_rejects_configuration_linked_to_another_credential(
+    monkeypatch, tmp_path
+) -> None:
+    with provisioned_client(monkeypatch, tmp_path) as client:
+        service = main_module.app.state.dojo_service
+        service.start_empty_onboarding()
+        service.configure_backup_folder(
+            "folder-id", "Backup folder", "00000000-0000-0000-0000-00000000ba03"
+        )
+        key = b"0123456789abcdef0123456789abcdef"
+        service.store_backup_credential(
+            encrypt_refresh_token(
+                "opaque-refresh-value",
+                credential_id=SYSTEM_BACKUP_CREDENTIAL_ID,
+                key=key,
+            ),
+            "https://www.googleapis.com/auth/drive.file",
+        )
+        response = client.post(
+            "/api/internal/backup-access",
+            headers={"Authorization": "Bearer internal-token"},
+        )
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "backup_access_unavailable"
+
+
+def test_backup_access_rejects_credential_without_drive_scope(monkeypatch, tmp_path) -> None:
+    with provisioned_client(monkeypatch, tmp_path) as client:
+        service = main_module.app.state.dojo_service
+        service.start_empty_onboarding()
+        service.configure_backup_folder(
+            "folder-id", "Backup folder", str(SYSTEM_BACKUP_CREDENTIAL_ID)
+        )
+        key = b"0123456789abcdef0123456789abcdef"
+        service.store_backup_credential(
+            encrypt_refresh_token(
+                "opaque-refresh-value",
+                credential_id=SYSTEM_BACKUP_CREDENTIAL_ID,
+                key=key,
+            ),
+            "https://www.googleapis.com/auth/spreadsheets.readonly",
+        )
+        response = client.post(
+            "/api/internal/backup-access",
+            headers={"Authorization": "Bearer internal-token"},
+        )
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "backup_access_unavailable"
+
+
 def test_new_onboarding_with_pending_backup_is_not_ready(service) -> None:
     status = service.start_empty_onboarding()
 
@@ -163,3 +215,41 @@ def test_configured_backup_with_failed_run_remains_ready_and_degraded(service) -
     assert status["ready"] is True
     assert status["mode"] == "ready"
     assert status["backup"]["state"] == "degraded"
+
+
+def test_legacy_configured_folder_is_not_usable_after_backup_credential_repair(service) -> None:
+    service.start_empty_onboarding()
+    service.configure_backup_folder(
+        "legacy-folder", "Legacy folder", str(SYSTEM_BACKUP_CREDENTIAL_ID)
+    )
+    service.db.execute(
+        "UPDATE backup_configurations SET credential_id = NULL "
+        "WHERE valid_to = TIMESTAMPTZ '9999-12-31 23:59:59+00'"
+    )
+    key = b"0123456789abcdef0123456789abcdef"
+    service.store_backup_credential(
+        encrypt_refresh_token(
+            "opaque-refresh-value",
+            credential_id=SYSTEM_BACKUP_CREDENTIAL_ID,
+            key=key,
+        ),
+        "https://www.googleapis.com/auth/drive.file",
+    )
+
+    assert service.has_backup_credential() is True
+    assert service.has_usable_backup_configuration() is False
+    assert service.get_app_status()["backup"]["state"] == "degraded"
+
+
+def test_backup_credential_without_drive_scope_is_not_authorized(service) -> None:
+    key = b"0123456789abcdef0123456789abcdef"
+    service.store_backup_credential(
+        encrypt_refresh_token(
+            "opaque-refresh-value",
+            credential_id=SYSTEM_BACKUP_CREDENTIAL_ID,
+            key=key,
+        ),
+        "https://www.googleapis.com/auth/spreadsheets.readonly",
+    )
+
+    assert service.has_backup_credential() is False

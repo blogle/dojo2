@@ -55,6 +55,7 @@ from dojo.drive_backup import (
     GoogleAccessToken,
     GoogleDriveAuthorizationError,
     GoogleDriveError,
+    GoogleDrivePermissionError,
     access_token_from_credential,
     verify_drive_folder,
 )
@@ -138,15 +139,10 @@ def start_empty_onboarding(request: Request) -> dict[str, Any]:
 def backup_settings(request: Request) -> dict[str, Any]:
     settings = get_settings(request)
     service = get_service(request)
-    configuration = service.get_backup_configuration()
     return service.get_backup_settings() | {
         "google_drive_authorized": service.has_backup_credential(),
         "picker_available": bool(settings.google_picker_api_key and settings.google_picker_app_id),
-        "folder_configured": bool(
-            configuration
-            and configuration["status"] == "CONFIGURED"
-            and configuration["drive_folder_id"]
-        ),
+        "folder_configured": service.has_usable_backup_configuration(),
         "reauthorization_required": not service.has_backup_credential(),
     }
 
@@ -160,6 +156,14 @@ def configure_backup(request: Request, payload: BackupFolderPayload) -> dict[str
         raise
     except GoogleDriveAuthorizationError as exc:
         raise _reauthorization_required() from exc
+    except GoogleDrivePermissionError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "google_drive_folder_not_writable",
+                "message": "dojo cannot write to that Google Drive folder. Choose another folder.",
+            },
+        ) from exc
     except (GoogleDriveError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return get_service(request).configure_backup_folder(
@@ -181,8 +185,9 @@ def _reauthorization_required() -> HTTPException:
 
 def _get_backup_access_token(request: Request) -> GoogleAccessToken:
     settings = get_settings(request)
-    credential = get_service(request).get_backup_credential()
-    if credential is None:
+    service = get_service(request)
+    credential = service.get_backup_credential()
+    if credential is None or not service.has_backup_credential():
         raise _reauthorization_required()
     try:
         return access_token_from_credential(

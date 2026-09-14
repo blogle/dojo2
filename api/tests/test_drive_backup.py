@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import httpx
 import pytest
 
@@ -7,11 +9,12 @@ from dojo.drive_backup import (
     GOOGLE_FOLDER_MIME_TYPE,
     GoogleDriveAuthorizationError,
     GoogleDriveError,
+    GoogleDrivePermissionError,
     verify_drive_folder,
 )
 
 
-def response(status_code: int, payload: dict[str, str]) -> httpx.Response:
+def response(status_code: int, payload: dict[str, Any]) -> httpx.Response:
     return httpx.Response(
         status_code=status_code,
         json=payload,
@@ -84,10 +87,21 @@ def test_verify_drive_folder_attempts_cleanup_when_probe_delete_fails(monkeypatc
     def delete(*_args, **_kwargs) -> httpx.Response:
         nonlocal deleted
         deleted = True
-        return response(403, {})
+        return response(403, {"error": {"errors": [{"reason": "insufficientFilePermissions"}]}})
 
     monkeypatch.setattr("dojo.drive_backup.httpx.delete", delete)
 
-    with pytest.raises(GoogleDriveAuthorizationError):
+    with pytest.raises(GoogleDrivePermissionError):
         verify_drive_folder("folder-id", access_token="access-token")
     assert deleted is True
+
+
+def test_drive_unauthorized_and_unrecognized_forbidden_are_distinct() -> None:
+    from dojo.drive_backup import _raise_drive_response
+
+    with pytest.raises(GoogleDriveAuthorizationError):
+        _raise_drive_response(response(401, {}))
+    with pytest.raises(GoogleDriveError):
+        _raise_drive_response(
+            response(403, {"error": {"errors": [{"reason": "rateLimitExceeded"}]}})
+        )

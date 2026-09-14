@@ -9,7 +9,6 @@ from fastapi import APIRouter, Header, HTTPException, Request
 
 from dojo.api.models import BackupRunEventPayload
 from dojo.api.settings import Settings
-from dojo.constants import SYSTEM_BACKUP_CREDENTIAL_ID
 from dojo.drive_backup import (
     GoogleDriveAuthorizationError,
     GoogleDriveError,
@@ -65,13 +64,7 @@ def backup_access(
     service = cast(DojoService, request.app.state.dojo_service)
     configuration = service.get_backup_configuration()
     credential = service.get_backup_credential()
-    if (
-        configuration is None
-        or configuration["status"] != "CONFIGURED"
-        or not configuration["drive_folder_id"]
-        or credential is None
-        or credential["credential_id"] != str(SYSTEM_BACKUP_CREDENTIAL_ID)
-    ):
+    if not service.has_usable_backup_configuration() or configuration is None or credential is None:
         raise HTTPException(
             status_code=503,
             detail={

@@ -24,6 +24,12 @@ Later failures or missing durable credentials leave an existing ready workspace 
 
 Choose an explicit restic snapshot ID, restore to a new PVC using `deploy/k8s/restore-job.example.yaml`, verify the manifest, run migrations, and compare representative application state before promotion. Never overwrite the production PVC. Record snapshot ID, immutable image digests, verification output, elapsed time, and result, but never credentials or passwords.
 
+### Break-glass restore
+
+The restore Job must not depend on the database it is recovering. If the source PVC or database is unavailable, first provision a temporary API with a new empty DuckDB, the normal OAuth client settings, a new credential-encryption key, and the internal status token. Open that API, authorize the `backup` purpose, and use Picker to select the existing backup folder. This creates a fresh verified configuration linked to the new encrypted credential. Point the restore Job's `--internal-api-url` at this temporary API, use the existing restic password Secret, and restore the selected snapshot to a new PVC. Discard the temporary API after the restored database passes verification.
+
+The independent local rehearsal is available with `just drive-break-glass-rehearsal`. Set `DOJO_BREAK_GLASS_API_URL` to the separately provisioned API URL, plus the same local-only status-token and restic-password file variables required by `just drive-rehearsal`. The rehearsal creates its source database independently from that API, uses the fresh API's broker, and cleans up only its unique temporary Drive repository.
+
 ## Local Drive rehearsal
 
 The local rehearsal is deliberately opt-in and local-only in its prerequisites. Configure a healthy local API with an encrypted Google credential and verified folder, provide local files through `DOJO_RESTIC_PASSWORD_FILE` and `BACKUP_STATUS_TOKEN_FILE`, then run:
