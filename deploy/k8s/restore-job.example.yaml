@@ -15,22 +15,15 @@ spec:
         command: [/bin/bash, -cu]
         args:
         - |
-          restic restore 'REPLACE_RESTIC_SNAPSHOT_ID' --target /materialized
+          /bin/dojo-backup-upload restore --snapshot-id 'REPLACE_RESTIC_SNAPSHOT_ID' --target-directory /materialized --internal-api-url http://dojo --internal-token-file /backup-status/token --restic-password-file /restic-secrets/restic-password --repository-path dojo/restic
           /bin/dojo-backup restore /materialized/stage/dojo.duckdb /materialized/stage/dojo.duckdb.manifest.json /data/dojo.duckdb
-        env:
-        - name: RESTIC_REPOSITORY
-          value: rclone:gdrive:dojo/restic
-        - name: RESTIC_PASSWORD_FILE
-          value: /restic-secrets/restic-password
-        - name: RCLONE_CONFIG
-          value: /backup-secrets/rclone.conf
         volumeMounts:
         - name: data
           mountPath: /data
         - name: materialized
           mountPath: /materialized
-        - name: backup-secrets
-          mountPath: /backup-secrets
+        - name: backup-status
+          mountPath: /backup-status
           readOnly: true
         - name: restic-secrets
           mountPath: /restic-secrets
@@ -59,14 +52,9 @@ spec:
         emptyDir: {}
       - name: verify
         emptyDir: {}
-      - name: backup-secrets
-        secret:
-          secretName: dojo-backup-google
-          items:
-          - key: service-account.json
-            path: service-account.json
-          - key: rclone.conf
-            path: rclone.conf
       - name: restic-secrets
         secret:
           secretName: dojo-backup-restic
+      - name: backup-status
+        secret:
+          secretName: dojo-backup-status

@@ -4,6 +4,66 @@ set -euo pipefail
 namespace="${DOJO_NAMESPACE:-default}"
 source_claim="${DOJO_DATA_CLAIM:-dojo-data}"
 snapshot_class="${DOJO_VOLUME_SNAPSHOT_CLASS:-}"
+if [[ "${1:-}" == "--render-job" ]]; then
+  : "${DOJO_BACKUP_JOB_NAME:?Set DOJO_BACKUP_JOB_NAME}"
+  : "${DOJO_BACKUP_RUN_ID:?Set DOJO_BACKUP_RUN_ID}"
+  : "${DOJO_BACKUP_SNAPSHOT:?Set DOJO_BACKUP_SNAPSHOT}"
+  : "${DOJO_BACKUP_IMAGE:?Set DOJO_BACKUP_IMAGE}"
+  : "${DOJO_BACKUP_CLONE:?Set DOJO_BACKUP_CLONE}"
+  cat <<EOF
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ${DOJO_BACKUP_JOB_NAME}
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: backup
+        image: ${DOJO_BACKUP_IMAGE}
+        command: [/bin/bash, -euc]
+        args:
+        - |
+          set -euo pipefail
+          /bin/dojo-backup-status --url '${DOJO_BACKUP_STATUS_URL:-http://dojo}' --token-file /backup-status/token --run-id '${DOJO_BACKUP_RUN_ID}' --trigger-kind SCHEDULED --status RUNNING --phase PREPARING --source-snapshot '${DOJO_BACKUP_SNAPSHOT}' --image-digest '${DOJO_BACKUP_IMAGE}' || true
+          /bin/dojo-backup prepare /data/dojo.duckdb /stage/dojo.duckdb --image-digest '${DOJO_BACKUP_IMAGE}' --source-snapshot '${DOJO_BACKUP_SNAPSHOT}'
+           snapshot_id="\$(/bin/dojo-backup-upload upload --staging-directory /stage --internal-api-url http://dojo --internal-token-file /backup-status/token --restic-password-file /restic/restic-password --repository-path dojo/restic --tag dojo --tag scheduled --tag '${DOJO_BACKUP_SNAPSHOT}' --retain)"
+           database_sha256="\$(python -c 'import json; print(json.load(open("/stage/dojo.duckdb.manifest.json"))["database_sha256"])')"
+           database_size="\$(python -c 'import json; print(json.load(open("/stage/dojo.duckdb.manifest.json"))["database_size"])')"
+          /bin/dojo-backup-status --url '${DOJO_BACKUP_STATUS_URL:-http://dojo}' --token-file /backup-status/token --run-id '${DOJO_BACKUP_RUN_ID}' --trigger-kind SCHEDULED --status SUCCEEDED --phase COMPLETE --source-snapshot '${DOJO_BACKUP_SNAPSHOT}' --image-digest '${DOJO_BACKUP_IMAGE}' --restic-snapshot-id "\$snapshot_id" --database-sha256 "\$database_sha256" --database-size-bytes "\$database_size" || true
+        env:
+        - name: RESTIC_REPOSITORY
+          value: rclone:gdrive:dojo/restic
+        - name: RESTIC_PASSWORD_FILE
+          value: /restic/restic-password
+        volumeMounts:
+        - name: data
+          mountPath: /data
+        - name: stage
+          mountPath: /stage
+        - name: restic
+          mountPath: /restic
+          readOnly: true
+        - name: backup-status
+          mountPath: /backup-status
+          readOnly: true
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: ${DOJO_BACKUP_CLONE}
+      - name: stage
+        emptyDir: {}
+      - name: restic
+        secret:
+          secretName: dojo-backup-restic
+      - name: backup-status
+        secret:
+          secretName: dojo-backup-status
+EOF
+  exit 0
+fi
 run_id="$(python -c 'from uuid import uuid4; print(uuid4())')"
 phase="STARTING"
 snapshot=""
@@ -99,84 +159,14 @@ spec:
   resources:
     requests:
       storage: 5Gi
----
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: $job
-spec:
-  backoffLimit: 0
-  template:
-    spec:
-      restartPolicy: Never
-      containers:
-      - name: backup
-        image: $image
-        command: [/bin/bash, -euc]
-        args:
-        - |
-          set -euo pipefail
-          client_id="$(cat /google-backup/client-id)"
-          client_secret="$(cat /google-backup/client-secret)"
-          refresh_token="$(cat /google-backup/refresh-token)"
-          folder_id="$(python -c 'import httpx; payload=httpx.get("http://dojo/api/settings/backup", timeout=10).json(); print(payload["configuration"]["folder_id"])')"
-          access_token="$(curl -sS -X POST https://oauth2.googleapis.com/token -d "client_id=$client_id" -d "client_secret=$client_secret" -d "refresh_token=$refresh_token" -d "grant_type=refresh_token" | python -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')"
-          cat > /tmp/rclone.conf <<RCLONE
-          [gdrive]
-          type = drive
-          scope = drive
-          client_id = $client_id
-          client_secret = $client_secret
-          token = {"access_token":"$access_token","token_type":"Bearer","refresh_token":"$refresh_token","expiry":"2000-01-01T00:00:00Z"}
-          root_folder_id = $folder_id
-          RCLONE
-          sed -i 's/^          //' /tmp/rclone.conf
-          export RCLONE_CONFIG=/tmp/rclone.conf
-          /bin/dojo-backup-status --url '${DOJO_BACKUP_STATUS_URL}' --token-file /backup-status/token --run-id '$run_id' --trigger-kind SCHEDULED --status RUNNING --phase PREPARING --source-snapshot '$snapshot' --image-digest '$image' || true
-          /bin/dojo-backup prepare /data/dojo.duckdb /stage/dojo.duckdb --image-digest '$image' --source-snapshot '$snapshot'
-          restic snapshots >/dev/null 2>&1 || restic init
-          restic backup /stage --tag dojo --tag scheduled --tag '$snapshot' --json > /stage/restic-result.json
-          restic check
-          restic forget --keep-daily 14 --keep-weekly 8 --keep-monthly 12 --prune
-          snapshot_id="$(python -c 'import json; from pathlib import Path; rows=[json.loads(line) for line in Path("/stage/restic-result.json").read_text().splitlines()]; print(next(row["snapshot_id"] for row in reversed(rows) if row.get("message_type") == "summary"))')"
-          database_sha256="$(python -c 'import json; print(json.load(open("/stage/dojo.duckdb.manifest.json"))["database_sha256"])')"
-          database_size="$(python -c 'import json; print(json.load(open("/stage/dojo.duckdb.manifest.json"))["database_size"])')"
-          /bin/dojo-backup-status --url '${DOJO_BACKUP_STATUS_URL}' --token-file /backup-status/token --run-id '$run_id' --trigger-kind SCHEDULED --status SUCCEEDED --phase COMPLETE --source-snapshot '$snapshot' --image-digest '$image' --restic-snapshot-id "$snapshot_id" --database-sha256 "$database_sha256" --database-size-bytes "$database_size" || true
-        env:
-        - name: RESTIC_REPOSITORY
-          value: rclone:gdrive:dojo/restic
-        - name: RESTIC_PASSWORD_FILE
-          value: /restic/restic-password
-        volumeMounts:
-        - name: data
-          mountPath: /data
-        - name: stage
-          mountPath: /stage
-        - name: google-backup
-          mountPath: /google-backup
-          readOnly: true
-        - name: restic
-          mountPath: /restic
-          readOnly: true
-        - name: backup-status
-          mountPath: /backup-status
-          readOnly: true
-      volumes:
-      - name: data
-        persistentVolumeClaim:
-          claimName: $clone
-      - name: stage
-        emptyDir: {}
-      - name: google-backup
-        secret:
-          secretName: dojo-backup-google
-      - name: restic
-        secret:
-          secretName: dojo-backup-restic
-      - name: backup-status
-        secret:
-          secretName: dojo-backup-status
 EOF
+DOJO_BACKUP_JOB_NAME="$job" \
+DOJO_BACKUP_RUN_ID="$run_id" \
+DOJO_BACKUP_SNAPSHOT="$snapshot" \
+DOJO_BACKUP_IMAGE="$image" \
+DOJO_BACKUP_CLONE="$clone" \
+DOJO_BACKUP_STATUS_URL="$DOJO_BACKUP_STATUS_URL" \
+  "$0" --render-job | kubectl -n "$namespace" apply -f -
 
 phase="VERIFYING"
 kubectl -n "$namespace" wait --for=condition=complete "job/$job" --timeout=20m

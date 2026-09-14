@@ -46,9 +46,13 @@ Use the root `justfile` as the only routine command interface.
 | `just backup-restore ...` | Restore a verified database without overwriting an existing target |
 | `just k8s-render` | Render the Kubernetes base manifests |
 | `just k8s-snapshot-backup` | Run one OpenEBS snapshot-to-Google-Drive backup |
-| `just drive-infra-validate` | Validate the OpenTofu Google backup identity root |
-| `just drive-infra-plan` | Plan Google backup identity changes |
+| `just drive-infra-validate` | Validate the OpenTofu Google project services and restricted Picker key |
+| `just drive-infra-plan` | Plan Google project-service and Picker-key changes |
 | `just drive-rehearsal` | Run the opt-in credentialed Drive round-trip rehearsal |
+
+The backup API owns the encrypted AES-256-GCM refresh credential and master key. Workers and the local rehearsal obtain only short-lived access tokens from the internal broker and use the shared platform-neutral uploader. Never add refresh tokens, encryption keys, OAuth client secrets, service-account files, or folder IDs to source, Kubernetes worker Secrets, or test fixtures.
+
+The standard consumer Web OAuth client is a manual Google Auth Platform bootstrap. OpenTofu manages the required project services, restricted Picker API key, and project number; it does not create the consumer OAuth client. Use the browser's Google Picker for folder selection rather than asking users to paste a folder ID.
 
 ## Narrow Versus Complete Checks
 

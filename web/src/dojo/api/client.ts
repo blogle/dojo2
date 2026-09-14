@@ -10,6 +10,7 @@ import type {
   Category,
   CategoryGroup,
   GoogleOnboardingStatus,
+  GoogleDrivePickerSession,
   ImportPreview,
   ImportResult,
   NetWorthResponse,
@@ -94,6 +95,10 @@ export async function configureBackupFolder(
     method: "PUT",
     body: JSON.stringify({ folder_id: folderId }),
   });
+}
+
+export async function fetchGoogleDrivePickerSession(): Promise<GoogleDrivePickerSession> {
+  return request<GoogleDrivePickerSession>("/api/google/drive/picker-session");
 }
 
 export async function fetchBootstrap(): Promise<BootstrapResponse> {
@@ -242,9 +247,12 @@ export async function fetchAssetsLiabilities(): Promise<AssetsLiabilitiesRespons
   return request<AssetsLiabilitiesResponse>("/api/assets-liabilities");
 }
 
-export async function startGoogleOnboarding(): Promise<GoogleOnboardingStatus> {
+export async function startGoogleOnboarding(
+  purpose: "aspire_migration" | "backup",
+): Promise<GoogleOnboardingStatus> {
   return request<GoogleOnboardingStatus>("/api/onboarding/google/start", {
     method: "POST",
+    body: JSON.stringify({ purpose }),
   });
 }
 

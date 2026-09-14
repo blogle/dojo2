@@ -92,6 +92,7 @@ const severityIcon = (severity: "info" | "warning" | "error") => {
   grid-template-columns: auto 1fr auto;
   align-items: start;
   gap: var(--space-md);
+  margin: var(--space-sm) 0;
   padding: 10px 14px;
   border-radius: var(--radius-all);
 }

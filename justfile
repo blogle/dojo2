@@ -13,7 +13,7 @@ api:
 	@printf '==> provisioning api database\n'
 	cd api && uv run python -m dojo.migrations "${DUCKDB_PATH:-.local/dojo.duckdb}"
 	@printf '==> starting api server\n'
-	cd api && uv run uvicorn dojo.api.main:app --reload --host 0.0.0.0 --port 8000
+	cd api && uv run python -m uvicorn dojo.api.main:app --reload --host 0.0.0.0 --port 8000
 
 web:
 	@printf '==> starting web dev server\n'
@@ -45,7 +45,7 @@ test-web:
 
 test-unit:
 	@printf '==> running backend unit tests\n'
-	cd api && uv run python -m pytest tests/test_money.py tests/test_settings.py tests/test_importer.py tests/test_loan_projection.py tests/test_operations.py tests/test_backup.py tests/test_drive_backup.py
+	cd api && uv run python -m pytest tests/test_money.py tests/test_settings.py tests/test_importer.py tests/test_loan_projection.py tests/test_operations.py tests/test_backup.py tests/test_backup_access.py tests/test_backup_credentials.py tests/test_drive_backup.py tests/test_drive_uploader.py tests/test_google.py
 
 test-property:
 	@printf '==> running backend property tests\n'
@@ -53,7 +53,7 @@ test-property:
 
 test-integration:
 	@printf '==> running backend integration tests\n'
-	cd api && uv run python -m pytest tests/test_health.py tests/test_api_endpoints.py tests/test_budget_formulas.py tests/test_account_values.py tests/test_reconciliation.py tests/test_scd.py tests/test_migrations.py tests/test_e2e.py
+	cd api && uv run python -m pytest tests/test_health.py tests/test_api_endpoints.py tests/test_backup_access.py tests/test_budget_formulas.py tests/test_account_values.py tests/test_reconciliation.py tests/test_scd.py tests/test_migrations.py tests/test_e2e.py
 
 test-e2e:
 	web/scripts/run-e2e.sh
@@ -131,8 +131,11 @@ backup-restore database manifest target:
 k8s-snapshot-backup:
 	ops/k8s/snapshot-backup.sh
 
-k8s-render:
+k8s-render: k8s-validate-backup-manifests
 	kubectl kustomize deploy/k8s/base
+
+k8s-validate-backup-manifests:
+	ops/k8s/validate-backup-manifests.sh
 
 drive-infra-fmt:
 	tofu -chdir=infra/opentofu/google-backup fmt
@@ -154,6 +157,9 @@ drive-infra-apply:
 
 drive-rehearsal:
 	ops/drive/rehearse.sh
+
+drive-break-glass-rehearsal:
+	ops/drive/rehearse-break-glass.sh
 
 # --- Benchmarks ---
 
@@ -177,7 +183,7 @@ bench-web:
 clean:
 	rm -rf api/dist api/build web/dist docs/book .pytest_cache .mypy_cache .ruff_cache
 
-check: format-check lint typecheck architecture-check migration-check test-unit test-property test-integration test-web build docs
+check: format-check lint typecheck architecture-check migration-check k8s-render test-unit test-property test-integration test-web build docs
 
 ci: check test-e2e container
 

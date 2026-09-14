@@ -132,7 +132,7 @@ The user lands in the normal application shell and may manually begin adding:
 * transactions
 * other supported records
 
-Before entering the application, the user creates a private Google Drive folder, shares it with dojo's displayed backup service-account email, and submits the folder ID. dojo verifies write access before completing onboarding.
+Before entering the application, the user authorizes Drive-only Google OAuth, chooses a folder with Google Picker, and dojo verifies write access directly through the Drive API before completing onboarding.
 
 ### Path 2: Migrate from Aspire
 
@@ -152,7 +152,7 @@ The input expects the Google Sheet ID.
 
 ### OAuth Consent
 
-After the user submits a sheet ID, dojo begins the Google authorization flow.
+After the user submits a sheet ID, dojo begins one combined Google authorization flow requesting Sheets read access and Drive file access.
 
 The user is shown the Google OAuth consent screen requesting read access to the specified sheet.
 
@@ -217,15 +217,15 @@ When migration completes successfully, the user sees a completion screen with:
 * a **Details** button
 * a **Continue to app** button
 
-#### Continue to App
+#### Continue to Backup Setup
 
-Selecting **Continue to app** advances to required backup setup. After dojo verifies the shared Google Drive folder, the user enters the normal application shell with imported data loaded.
+Selecting **Continue to backup setup** advances to required backup setup. The existing authorization is reused; after the user chooses a folder and dojo verifies it, **Continue to app** enters the normal application shell with imported data loaded.
 
 ### Backup Setup
 
-Backup setup is required for new empty and Aspire-imported workspaces. The screen displays the deployment-specific backup service-account email and accepts a Google Drive folder ID. No human Google account identity is stored in the repository or application database.
+Backup setup is required for new empty and Aspire-imported workspaces. Start empty requests Drive file access only; Aspire migration requests Sheets read access and Drive file access in one combined grant. The user chooses a folder through Google Picker, and dojo verifies it by direct Drive metadata and zero-byte write/delete probes. Refresh credentials are stored encrypted by the API; workers receive only short-lived access tokens.
 
-If Drive folder access is later revoked or a scheduled backup fails, dojo remains available and migrations continue. A persistent application warning prompts the user to repair backup access until a successful off-site backup is recorded.
+If Drive folder access is later revoked or the latest scheduled backup fails, dojo remains available and migrations continue. A persistent application warning prompts the user to repair backup access. A newly configured folder is considered configured before its first scheduled run; a successful off-site backup is still required for recovery evidence.
 
 #### Details
 

@@ -96,4 +96,77 @@ describe("dojo app", () => {
       expect.any(Object),
     );
   });
+
+  it("keeps a ready app usable and routes degraded backups to repair", async () => {
+    const { state } = useAppState();
+    state.appStatus = {
+      app: "dojo",
+      ready: true,
+      mode: "ready",
+      needs_onboarding: false,
+      needs_backup_setup: false,
+      backup: {
+        state: "degraded",
+        message: "Google Drive authorization must be renewed.",
+      },
+      latest_import_batch: null,
+      latest_import_run: null,
+    };
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: "/dev/test", component: { template: "<div>app</div>" } },
+        { path: "/onboarding", component: { template: "<div>repair</div>" } },
+      ],
+    });
+    await router.push("/dev/test");
+    await router.isReady();
+
+    const wrapper = mount(App, {
+      global: {
+        plugins: [router],
+      },
+    });
+
+    expect(wrapper.text()).toContain("Backups need attention");
+    await wrapper.get("button").trigger("click");
+    await flushPromises();
+    expect(router.currentRoute.value.fullPath).toBe(
+      "/onboarding?backup=repair",
+    );
+  });
+
+  it("does not warn when backup setup is configured before the first run", async () => {
+    const { state } = useAppState();
+    state.appStatus = {
+      app: "dojo",
+      ready: true,
+      mode: "ready",
+      needs_onboarding: false,
+      needs_backup_setup: false,
+      backup: {
+        state: "configured",
+        message: null,
+      },
+      latest_import_batch: null,
+      latest_import_run: null,
+    };
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: "/dev/test", component: { template: "<div>app</div>" } },
+      ],
+    });
+    await router.push("/dev/test");
+    await router.isReady();
+
+    const wrapper = mount(App, {
+      global: {
+        plugins: [router],
+      },
+    });
+
+    expect(wrapper.text()).not.toContain("Backups need attention");
+    expect(wrapper.text()).toContain("app");
+  });
 });

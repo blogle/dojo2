@@ -1,2 +1,4 @@
-project_id         = "replace-with-existing-google-cloud-project"
-service_account_id = "dojo-backup"
+project_id = "replace-with-existing-google-cloud-project"
+
+# Add deployed dojo web origins here; do not guess them.
+additional_allowed_referrers = []

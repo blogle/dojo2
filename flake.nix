@@ -37,10 +37,14 @@
           export PYTHONPATH=${apiSource}/app
           exec ${apiPython}/bin/python -m dojo.migrations "$@"
         '';
-        backupLauncher = pkgs.writeShellScriptBin "dojo-backup" ''
-          export PYTHONPATH=${apiSource}/app
-          exec ${apiPython}/bin/python -m dojo.backup "$@"
-        '';
+         backupLauncher = pkgs.writeShellScriptBin "dojo-backup" ''
+           export PYTHONPATH=${apiSource}/app
+           exec ${apiPython}/bin/python -m dojo.backup "$@"
+         '';
+         backupUploadLauncher = pkgs.writeShellScriptBin "dojo-backup-upload" ''
+           export PYTHONPATH=${apiSource}/app
+           exec ${apiPython}/bin/python -m dojo.drive_uploader "$@"
+         '';
         snapshotBackupLauncher = pkgs.writeShellScriptBin "dojo-snapshot-backup" ''
           exec ${pkgs.bash}/bin/bash ${./ops/k8s/snapshot-backup.sh} "$@"
         '';
@@ -96,6 +100,7 @@
             apiLauncher
             migrationLauncher
             backupLauncher
+            backupUploadLauncher
             snapshotBackupLauncher
             backupStatusLauncher
             pkgs.restic

@@ -13,6 +13,7 @@ import httpx
 
 from dojo.api.settings import get_settings
 from dojo.google import (
+    GOOGLE_ASPIRE_MIGRATION_SCOPES,
     GOOGLE_TOKEN_URL,
     build_google_auth_url,
     fetch_sheet_named_ranges,
@@ -161,7 +162,7 @@ def ensure_access_token(
     auth_url = build_google_auth_url(
         client_id=settings.google_oauth_client_id,
         redirect_uri=settings.google_oauth_redirect_uri,
-        scopes=settings.google_oauth_scopes,
+        scopes=" ".join(GOOGLE_ASPIRE_MIGRATION_SCOPES),
         state=state,
     )
     raise SystemExit(

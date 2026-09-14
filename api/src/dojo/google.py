@@ -16,6 +16,12 @@ from tenacity import (
 GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_SHEETS_BASE_URL = "https://sheets.googleapis.com/v4/spreadsheets"
+GOOGLE_DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file"
+GOOGLE_ASPIRE_MIGRATION_SCOPES = (
+    "https://www.googleapis.com/auth/spreadsheets.readonly",
+    GOOGLE_DRIVE_FILE_SCOPE,
+)
+GOOGLE_BACKUP_SCOPES = (GOOGLE_DRIVE_FILE_SCOPE,)
 
 MAX_RETRIES = 3
 
@@ -86,6 +92,7 @@ def exchange_google_code(
 class PendingOAuthAuthorization:
     session_id: str
     frontend_origin: str
+    purpose: str
 
 
 class OAuthTokenStore:
@@ -94,11 +101,14 @@ class OAuthTokenStore:
         self._pending_by_state: dict[str, PendingOAuthAuthorization] = {}
         self._lock = RLock()
 
-    def begin_authorization(self, *, state: str, session_id: str, frontend_origin: str) -> None:
+    def begin_authorization(
+        self, *, state: str, session_id: str, frontend_origin: str, purpose: str
+    ) -> None:
         with self._lock:
             self._pending_by_state[state] = PendingOAuthAuthorization(
                 session_id=session_id,
                 frontend_origin=frontend_origin,
+                purpose=purpose,
             )
 
     def consume_authorization(self, state: str) -> PendingOAuthAuthorization | None:

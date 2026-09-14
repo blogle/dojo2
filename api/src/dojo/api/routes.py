@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import secrets
-from pathlib import Path
 from typing import Annotated, Any, cast
 from urllib.parse import urlsplit
 from uuid import UUID
@@ -24,6 +23,7 @@ from dojo.api.models import (
     FundCategoryRequest,
     FundGroupRequest,
     GoalPayload,
+    GoogleOAuthStartRequest,
     ImportCommitRequest,
     ImportRequest,
     InvestmentCashSnapshotPayload,
@@ -44,9 +44,23 @@ from dojo.api.models import (
     TransferPayload,
 )
 from dojo.api.settings import Settings
+from dojo.backup_credentials import (
+    BackupCredentialError,
+    encrypt_refresh_token,
+    load_encryption_key,
+)
 from dojo.commands import CommandConflictError
-from dojo.drive_backup import verify_drive_folder
+from dojo.constants import GOOGLE_SHEETS_READONLY_SCOPE, SYSTEM_BACKUP_CREDENTIAL_ID
+from dojo.drive_backup import (
+    GoogleAccessToken,
+    GoogleDriveAuthorizationError,
+    GoogleDriveError,
+    GoogleDrivePermissionError,
+    access_token_from_credential,
+    verify_drive_folder,
+)
 from dojo.google import (
+    GOOGLE_DRIVE_FILE_SCOPE,
     OAuthTokenStore,
     build_google_auth_url,
     exchange_google_code,
@@ -96,10 +110,13 @@ def oauth_status_payload(request: Request) -> dict[str, Any]:
     settings = get_settings(request)
     session_id = get_or_create_oauth_session_id(request)
     token_store = get_oauth_token_store(request)
+    has_backup_credential = get_service(request).has_backup_credential()
     return {
         "configured": settings.oauth_configured,
         "fixture_mode": settings.dev_fixture_mode,
         "authorized": token_store.has(session_id),
+        "backup_authorized": has_backup_credential,
+        "backup_reauthorization_required": not has_backup_credential,
         "message": (
             "Google OAuth is configured and ready."
             if settings.oauth_configured
@@ -121,49 +138,89 @@ def start_empty_onboarding(request: Request) -> dict[str, Any]:
 @router.get("/settings/backup")
 def backup_settings(request: Request) -> dict[str, Any]:
     settings = get_settings(request)
-    session_id = get_or_create_oauth_session_id(request)
-    token = get_oauth_token_store(request).get(session_id)
-    has_refresh_token = bool(token and token.get("refresh_token"))
-    verification_available = bool(
-        settings.oauth_configured
-        and has_refresh_token
-        and Path(settings.backup_status_token_file).is_file()
-    )
-    return get_service(request).get_backup_settings() | {
-        "service_account_email": None,
-        "verification_available": verification_available,
+    service = get_service(request)
+    return service.get_backup_settings() | {
+        "google_drive_authorized": service.has_backup_credential(),
+        "picker_available": bool(settings.google_picker_api_key and settings.google_picker_app_id),
+        "folder_configured": service.has_usable_backup_configuration(),
+        "reauthorization_required": not service.has_backup_credential(),
     }
 
 
 @router.put("/settings/backup")
 def configure_backup(request: Request, payload: BackupFolderPayload) -> dict[str, Any]:
-    settings = get_settings(request)
-    if not Path(settings.backup_status_token_file).is_file():
-        raise HTTPException(status_code=503, detail="Backup status reporting is not configured")
-    session_id = get_or_create_oauth_session_id(request)
-    token = get_oauth_token_store(request).get(session_id)
-    if not token or not token.get("refresh_token"):
+    try:
+        access_token = _get_backup_access_token(request)
+        folder = verify_drive_folder(payload.folder_id, access_token=access_token.access_token)
+    except HTTPException:
+        raise
+    except GoogleDriveAuthorizationError as exc:
+        raise _reauthorization_required() from exc
+    except GoogleDrivePermissionError as exc:
         raise HTTPException(
             status_code=400,
-            detail="Google Drive access not granted. Sign in with Google first.",
-        )
-    refresh_token = str(token["refresh_token"])
+            detail={
+                "code": "google_drive_folder_not_writable",
+                "message": "dojo cannot write to that Google Drive folder. Choose another folder.",
+            },
+        ) from exc
+    except (GoogleDriveError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return get_service(request).configure_backup_folder(
+        folder.folder_id,
+        folder.folder_name,
+        str(SYSTEM_BACKUP_CREDENTIAL_ID),
+    )
+
+
+def _reauthorization_required() -> HTTPException:
+    return HTTPException(
+        status_code=401,
+        detail={
+            "code": "google_drive_reauthorization_required",
+            "message": "Connect Google Drive again.",
+        },
+    )
+
+
+def _get_backup_access_token(request: Request) -> GoogleAccessToken:
+    settings = get_settings(request)
+    service = get_service(request)
+    credential = service.get_backup_credential()
+    if credential is None or not service.has_backup_credential():
+        raise _reauthorization_required()
     try:
-        verify_drive_folder(
-            payload.folder_id,
+        return access_token_from_credential(
+            encrypted_refresh_token=str(credential["encrypted_refresh_token"]),
+            credential_id=str(credential["credential_id"]),
+            encryption_key_file=settings.credential_encryption_key_file,
             client_id=settings.google_oauth_client_id,
             client_secret=settings.google_oauth_client_secret,
-            refresh_token=refresh_token,
         )
-    except RuntimeError as exc:
+    except (ValueError, GoogleDriveAuthorizationError) as exc:
+        raise _reauthorization_required() from exc
+    except GoogleDriveError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return get_service(request).configure_backup_folder(payload.folder_id, refresh_token)
+
+
+@router.get("/google/drive/picker-session")
+def google_drive_picker_session(request: Request) -> dict[str, Any]:
+    settings = get_settings(request)
+    if not settings.google_picker_api_key or not settings.google_picker_app_id:
+        raise HTTPException(status_code=503, detail="Google Picker is not configured.")
+    access_token = _get_backup_access_token(request)
+    return {
+        "access_token": access_token.access_token,
+        "expires_in": access_token.expires_in,
+        "picker_api_key": settings.google_picker_api_key,
+        "picker_app_id": settings.google_picker_app_id,
+    }
 
 
 @router.post("/onboarding/google/start")
-def start_google_onboarding(request: Request) -> dict[str, Any]:
+def start_google_onboarding(
+    request: Request, request_payload: GoogleOAuthStartRequest
+) -> dict[str, Any]:
     settings = get_settings(request)
     payload = oauth_status_payload(request)
     if not settings.oauth_configured:
@@ -173,13 +230,20 @@ def start_google_onboarding(request: Request) -> dict[str, Any]:
         state=state,
         session_id=get_or_create_oauth_session_id(request),
         frontend_origin=get_frontend_origin(request),
+        purpose=request_payload.purpose,
     )
     callback = urlsplit(settings.google_oauth_redirect_uri)
     return payload | {
         "auth_url": build_google_auth_url(
             client_id=settings.google_oauth_client_id,
             redirect_uri=settings.google_oauth_redirect_uri,
-            scopes=settings.google_oauth_scopes,
+            scopes=" ".join(
+                (
+                    (GOOGLE_SHEETS_READONLY_SCOPE, GOOGLE_DRIVE_FILE_SCOPE)
+                    if request_payload.purpose == "aspire_migration"
+                    else (GOOGLE_DRIVE_FILE_SCOPE,)
+                )
+            ),
             state=state,
         ),
         "callback_origin": f"{callback.scheme}://{callback.netloc}",
@@ -205,6 +269,30 @@ def google_callback(request: Request, code: str, state: str) -> HTMLResponse:
         code=code,
     )
     token_store.set(pending.session_id, token)
+    refresh_token = token.get("refresh_token")
+    if isinstance(refresh_token, str) and refresh_token.strip():
+        try:
+            encryption_key = load_encryption_key(settings.credential_encryption_key_file)
+            granted_scopes = token.get("scope")
+            if not isinstance(granted_scopes, str) or not granted_scopes.strip():
+                granted_scopes = " ".join(
+                    (
+                        (GOOGLE_SHEETS_READONLY_SCOPE, GOOGLE_DRIVE_FILE_SCOPE)
+                        if pending.purpose == "aspire_migration"
+                        else (GOOGLE_DRIVE_FILE_SCOPE,)
+                    )
+                )
+            encrypted = encrypt_refresh_token(
+                refresh_token,
+                credential_id=SYSTEM_BACKUP_CREDENTIAL_ID,
+                key=encryption_key,
+            )
+            get_service(request).store_backup_credential(encrypted, granted_scopes)
+        except BackupCredentialError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="Google authorization succeeded, but backup credential storage is unavailable.",
+            ) from exc
     target_origin = json.dumps(pending.frontend_origin).replace("<", "\\u003c")
     return HTMLResponse(
         f"<html><body><script>window.opener?.postMessage({{type:'dojo-google-oauth',ok:true}}, {target_origin});window.close();</script>Google access granted.</body></html>"

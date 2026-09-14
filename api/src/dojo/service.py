@@ -40,6 +40,7 @@ from dojo.constants import (
     MAX_TS,
     SYSTEM_ATB_BUCKET_ID,
     SYSTEM_BACKUP_CONFIGURATION_ID,
+    SYSTEM_BACKUP_CREDENTIAL_ID,
     SYSTEM_CATEGORY_ATB,
     SYSTEM_CATEGORY_BALANCE_ADJUSTMENT,
     SYSTEM_CATEGORY_STARTING_BALANCE,
@@ -47,6 +48,7 @@ from dojo.constants import (
     SYSTEM_CREDIT_CARD_GROUP_ID,
 )
 from dojo.database import Database, json_dumps
+from dojo.google import GOOGLE_DRIVE_FILE_SCOPE
 from dojo.importer import (
     ParsedImportBundle,
     extract_sheet_id,
@@ -176,6 +178,7 @@ class DojoService:
         latest_run = self.get_import_status()
         backup_configuration = self.get_backup_configuration()
         latest_backup_run = self.get_latest_backup_run()
+        has_usable_backup_configuration = self.has_usable_backup_configuration()
         if backup_configuration and backup_configuration["status"] == "PENDING":
             ready = False
             mode = "backup_setup"
@@ -185,7 +188,8 @@ class DojoService:
             mode = "ready"
             backup_state = (
                 "configured"
-                if latest_backup_run and latest_backup_run["status"] == "SUCCEEDED"
+                if has_usable_backup_configuration
+                and (latest_backup_run is None or latest_backup_run["status"] == "SUCCEEDED")
                 else "degraded"
             )
         elif latest_batch is not None:
@@ -224,6 +228,48 @@ class DojoService:
     def get_latest_backup_run(self) -> dict[str, Any] | None:
         return self.db.fetch_one(load_sql("queries/latest_backup_run"))
 
+    def get_backup_credential(self) -> dict[str, Any] | None:
+        return self.db.fetch_one(
+            load_sql("queries/current_backup_credential"), (str(SYSTEM_BACKUP_CREDENTIAL_ID),)
+        )
+
+    def has_backup_credential(self) -> bool:
+        credential = self.get_backup_credential()
+        return bool(
+            credential
+            and GOOGLE_DRIVE_FILE_SCOPE in str(credential.get("granted_scopes", "")).split()
+        )
+
+    def has_usable_backup_configuration(self) -> bool:
+        configuration = self.get_backup_configuration()
+        credential = self.get_backup_credential()
+        return bool(
+            configuration
+            and configuration["status"] == "CONFIGURED"
+            and configuration["drive_folder_id"]
+            and configuration["verified_at"]
+            and credential
+            and configuration["credential_id"] is not None
+            and str(configuration["credential_id"]) == str(credential["credential_id"])
+            and self.has_backup_credential()
+        )
+
+    def store_backup_credential(self, encrypted_refresh_token: str, granted_scopes: str) -> None:
+        now = self.clock.now()
+        current = self.get_backup_credential()
+        created_at = current["created_at"] if current else now
+        self.db.execute(
+            load_sql("queries/upsert_backup_credential"),
+            (
+                str(SYSTEM_BACKUP_CREDENTIAL_ID),
+                encrypted_refresh_token,
+                granted_scopes,
+                1,
+                created_at,
+                now,
+            ),
+        )
+
     def get_backup_settings(self) -> dict[str, Any]:
         configuration = self.get_backup_configuration()
         return {
@@ -231,6 +277,7 @@ class DojoService:
                 {
                     "status": configuration["status"],
                     "folder_id": configuration["drive_folder_id"],
+                    "folder_name": configuration["drive_folder_name"],
                     "verified_at": configuration["verified_at"],
                 }
                 if configuration
@@ -246,7 +293,9 @@ class DojoService:
                 self._insert_pending_backup_configuration(connection, now)
         return self.get_app_status()
 
-    def configure_backup_folder(self, folder_id: str, refresh_token: str) -> dict[str, Any]:
+    def configure_backup_folder(
+        self, folder_id: str, folder_name: str, credential_id: str
+    ) -> dict[str, Any]:
         current = self.get_backup_configuration()
         now = self.clock.now()
         with self.db.transaction() as connection:
@@ -268,7 +317,8 @@ class DojoService:
                     "configuration_id": str(SYSTEM_BACKUP_CONFIGURATION_ID),
                     "status": "CONFIGURED",
                     "drive_folder_id": folder_id,
-                    "google_drive_refresh_token": refresh_token,
+                    "drive_folder_name": folder_name,
+                    "credential_id": credential_id,
                     "verified_at": now,
                     "last_error": None,
                     "valid_from": now,
@@ -294,6 +344,8 @@ class DojoService:
                 "configuration_id": str(SYSTEM_BACKUP_CONFIGURATION_ID),
                 "status": "PENDING",
                 "drive_folder_id": None,
+                "drive_folder_name": None,
+                "credential_id": None,
                 "verified_at": None,
                 "last_error": None,
                 "valid_from": now,

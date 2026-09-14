@@ -1,10 +1,10 @@
 variable "project_id" {
-  description = "Existing Google Cloud project that owns the dojo backup identity."
+  description = "Existing Google Cloud project that owns dojo's Google APIs."
   type        = string
 }
 
-variable "service_account_id" {
-  description = "Account ID for the deployment-specific backup identity."
-  type        = string
-  default     = "dojo-backup"
+variable "additional_allowed_referrers" {
+  description = "Deployment-specific browser origins allowed to use the Picker API key."
+  type        = list(string)
+  default     = []
 }

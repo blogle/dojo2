@@ -13,11 +13,14 @@ export type AppStatus = {
 };
 
 export type BackupSettings = {
-  service_account_email: string;
-  verification_available: boolean;
+  google_drive_authorized: boolean;
+  picker_available: boolean;
+  folder_configured: boolean;
+  reauthorization_required: boolean;
   configuration: {
     status: "PENDING" | "CONFIGURED";
     folder_id: string | null;
+    folder_name: string | null;
     verified_at: string | null;
   } | null;
   latest_run: Record<string, unknown> | null;
@@ -282,6 +285,15 @@ export type GoogleOnboardingStatus = {
   message: string;
   auth_url?: string | null;
   callback_origin?: string | null;
+  backup_authorized?: boolean;
+  backup_reauthorization_required?: boolean;
+};
+
+export type GoogleDrivePickerSession = {
+  access_token: string;
+  expires_in: number;
+  picker_api_key: string;
+  picker_app_id: number;
 };
 
 export type TransactionSystemCategory =

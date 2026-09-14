@@ -17,10 +17,11 @@ class Settings(BaseSettings):
     google_oauth_client_id: str = Field(default="", alias="GOOGLE_OAUTH_CLIENT_ID")
     google_oauth_client_secret: str = Field(default="", alias="GOOGLE_OAUTH_CLIENT_SECRET")
     google_oauth_redirect_uri: str = Field(default="", alias="GOOGLE_OAUTH_REDIRECT_URI")
-    google_oauth_scopes: str = Field(
-        default="https://www.googleapis.com/auth/spreadsheets.readonly https://www.googleapis.com/auth/drive.file",
-        alias="GOOGLE_OAUTH_SCOPES",
+    credential_encryption_key_file: str = Field(
+        default="", alias="DOJO_CREDENTIAL_ENCRYPTION_KEY_FILE"
     )
+    google_picker_api_key: str = Field(default="", alias="GOOGLE_PICKER_API_KEY")
+    google_picker_app_id: int = Field(default=0, alias="GOOGLE_PICKER_APP_ID")
     backup_status_token_file: str = Field(default="", alias="BACKUP_STATUS_TOKEN_FILE")
     session_secret: str = Field(default="dev-only-change-me", alias="SESSION_SECRET")
     log_level: str = Field(default="debug", alias="LOG_LEVEL")
