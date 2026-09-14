@@ -45,9 +45,11 @@ The backend intentionally does not run migrations as a side effect of Python imp
 
 `api/src/dojo/backup.py` prepares a recoverable copy rather than copying over a live database. It copies the database and any WAL into staging, opens the staged copy with DuckDB to perform recovery and checkpointing, and writes a hash- and runtime-bearing manifest. Restore verifies that manifest and refuses to overwrite an existing target.
 
-Production uses two independent layers. OpenEBS ZFS CSI `VolumeSnapshot` resources provide fast, no-downtime local recovery points. A temporary PVC restored from each scheduled snapshot is opened and verified before restic encrypts and uploads it through rclone to a human-owned Google Drive folder shared with the deployment-specific service account. Local snapshots are not considered off-site backups. Restore always targets a new PVC, which is migrated and verified before the Deployment is switched to it.
+Production uses two independent layers. OpenEBS ZFS CSI `VolumeSnapshot` resources provide fast, no-downtime local recovery points. A temporary PVC restored from each scheduled snapshot is opened and verified before a shared platform-neutral uploader encrypts and uploads it through rclone to a folder selected by the user in Google Drive. Local snapshots are not considered off-site backups. Restore always targets a new PVC, which is migrated and verified before the Deployment is switched to it. Kubernetes owns the snapshot, clone, Job, and cleanup boundary; it does not mount OAuth credentials.
 
 Google Drive is never on the migration or API-startup path. `dojo-migrate` runs without Drive credentials or network access. Backup configuration is required during first-run onboarding, while later backup failures are recorded through a bearer-authenticated internal endpoint and surfaced as a non-blocking persistent UI warning.
+
+The API owns the encrypted `backup_credentials` row and AES-256-GCM master-key boundary. It exchanges the durable refresh token for short-lived access tokens through the authenticated internal backup broker. The worker and local rehearsal use the same uploader and receive no refresh token, encryption key, OAuth client secret, or service-account identity. Folder setup uses Google Picker in the browser and direct Drive verification in the API.
 
 ## SCD2 Model
 

@@ -14,7 +14,7 @@ Expose each current transaction's physical SCD2 `row_id` as an opaque `version`.
 
 No schema migration is required. Frontends must retain and submit versions, handle conflicts without retrying stale payloads, and refresh current state before another edit.
 
-## 2026-09-03 — Layer OpenEBS snapshots with encrypted Google Drive backups
+## Historical, superseded: 2026-09-03 — Layer OpenEBS snapshots with encrypted Google Drive backups
 
 ### Context
 
@@ -22,13 +22,13 @@ The production PVC was the only durable database copy, and migration ran before 
 
 ### Decision
 
-Use OpenEBS ZFS CSI snapshots for no-downtime local recovery. Restore each scheduled snapshot to a temporary PVC, recover and verify the clone, then use restic encryption and retention over rclone's Google Drive backend with a service account. Before migration, require a verified off-site backup while the old application is stopped. Restore only to a new PVC.
+Use OpenEBS ZFS CSI snapshots for no-downtime local recovery. Restore each scheduled snapshot to a temporary PVC, recover and verify the clone, then use restic encryption and retention over rclone's Google Drive backend with user-authorized OAuth. Before migration, require a verified off-site backup while the old application is stopped. Restore only to a new PVC.
 
 ### Consequence
 
-Operators must retain the restic password outside the cluster, restrict and rotate the Google service-account credential, bind the deployment to immutable image digests, and regularly rehearse restoration. A failed pre-migration off-site backup blocks migration by design.
+Operators must retain the restic password outside the cluster, protect the API encryption key and OAuth client credentials, bind the deployment to immutable image digests, and regularly rehearse restoration. A failed pre-migration off-site backup blocks migration by design.
 
-## 2026-09-04 — Keep Google Drive outside migration and require backup onboarding
+## Historical, superseded: 2026-09-04 — Keep Google Drive outside migration and require backup onboarding
 
 ### Context
 
@@ -36,11 +36,11 @@ The first backup deployment made every pod restart depend on Google Drive availa
 
 ### Decision
 
-Migrations never depend on Google Drive. New users must complete a one-time backup onboarding step by sharing a private Drive folder with the deployment-specific service account. Scheduled Jobs report success and failure through a bearer-authenticated internal API. Later failures leave dojo available and produce a persistent warning.
+Migrations never depend on Google Drive. New users must complete a one-time backup onboarding step through user OAuth and Google Picker. Scheduled Jobs report success and failure through a bearer-authenticated internal API. Later failures leave dojo available and produce a persistent warning.
 
 ### Consequence
 
-This supersedes the earlier requirement that off-site backup failure block migration. Deployment configuration contains an application service-account identity but no human Google identity. The API may verify folder access, while restic passwords remain available only to backup workers.
+This supersedes the earlier requirement that off-site backup failure block migration and is superseded by the current user-OAuth credential boundary below. The API owns durable credentials and verifies folder access; workers receive only short-lived broker tokens, while restic passwords remain worker-scoped.
 
 ## 2026-06-13 — Make DuckDB provisioning explicit and route domain time through an injected clock
 
