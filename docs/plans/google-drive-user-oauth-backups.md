@@ -33,7 +33,7 @@ The complete local proof consists of deterministic tests, fresh and upgraded Duc
 - [x] (2026-09-13) Human Gate C: the user reported that the isolated Start-empty authorization, Picker folder selection, canonical folder display, and application entry completed successfully. The configured backup now reports healthy without a pre-first-run warning.
 - [x] (2026-09-13) Human Gate D: the user confirmed the Aspire migration onboarding flow is working, including the transition through backup setup. Google displayed its expected verification warning while granting the sensitive Sheets scope; this is an external app-verification limitation, not a dojo flow failure.
 - [x] (2026-09-14) Human Gate E: the user confirmed the existing-user warning and repair flow worked against isolated imported data. A generic shared warning-banner spacing defect was found and fixed so the warning no longer overlaps navigation branding.
-- [ ] (next 2026-09-14) Human Gate F: prepare and explicitly approve the live local Google Drive backup/restore rehearsal.
+- [ ] (blocked 2026-09-14) Human Gate F: live rehearsal approval was given, but execution stopped before any remote write because `BACKUP_STATUS_TOKEN_FILE` and `DOJO_RESTIC_PASSWORD_FILE` are unset and the expected ignored local files are absent. Create those local files, configure the paths, then retry.
 - [x] (2026-09-13) Corrected configured-backup status so a valid credential and verified folder are not marked degraded solely because no backup run has occurred yet. Added backend and App warning regression coverage; focused automated gates pass.
 - [ ] Align current documentation and commit it.
 - [ ] Run final `just check`, `just ci`, infrastructure checks, manifest rendering, searches, and diff review; update this plan and commit any final plan outcome.
@@ -103,6 +103,8 @@ The complete local proof consists of deterministic tests, fresh and upgraded Duc
   Evidence: Start empty and Aspire migration reached backup setup and application entry; the remaining external warning is Google’s sensitive-scope verification notice.
 - Observation: The existing-user repair flow worked, but the global warning banner overlapped navigation branding because it lacked vertical flow spacing.
   Evidence: The user confirmed the repair behavior otherwise worked; shared `PersistentWarningBanner` now applies consistent vertical margins, covered by the complete component suite.
+- Observation: The live rehearsal cannot start without local status-token and restic-password files, even when the API and encrypted Google credential are configured.
+  Evidence: `just drive-rehearsal` preflight found both environment variables unset and `.local/` contained no files. Execution stopped before creating a temporary DuckDB or contacting the broker/Drive.
 
 ## Decision Log
 
@@ -185,6 +187,8 @@ Human Gate C and D outcome (2026-09-13): The user confirmed the real Start-empty
 Human Gate E preparation (2026-09-14): A separate temporary database was populated through the deterministic fixture import with no backup credential. The normal API was restarted against it and returned ready application status with degraded backup status, leaving the existing app usable and the repair warning actionable. Browser validation is pending.
 
 Human Gate E outcome (2026-09-14): The user confirmed the warning, repair navigation, Google authorization, Picker selection, and return to the application behaved correctly. The generic banner spacing correction was verified by frontend tests. The next gate is the explicitly approved live Drive rehearsal.
+
+Human Gate F preparation (2026-09-14): The user explicitly approved the live rehearsal. Preflight stopped safely because local-only status-token and restic-password file paths were not configured; no remote repository or local rehearsal data was created.
 
 At each later major milestone, record what behavior became demonstrable, which gates passed, and any remaining gap. At completion, compare the result against the purpose above and explicitly list anything that could not be validated without staging or production. Production deployment must remain unperformed.
 
@@ -593,3 +597,5 @@ The OAuth start request is `POST /api/onboarding/google/start` with exactly one 
 2026-09-14: Prepared the isolated existing-user repair fixture and verified its non-secret API status. The next action is the user’s browser check of the persistent warning and real repair flow.
 
 2026-09-14: Human Gate E passed by user confirmation. Fixed shared warning-banner spacing and committed it as `c9768eb`. The next stopping point is Human Gate F: request approval before running the live Google Drive rehearsal.
+
+2026-09-14: Human Gate F approval was received, but preflight found no `BACKUP_STATUS_TOKEN_FILE` or `DOJO_RESTIC_PASSWORD_FILE` and no files under `.local/`. Added the safe restic-password path placeholder to `.env.example`; resume after local secret-file setup.
