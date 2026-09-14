@@ -28,7 +28,7 @@ The complete local proof consists of deterministic tests, fresh and upgraded Duc
 - [x] (2026-09-12) Completed legacy readiness and repair behavior with integration and web tests; 111 unit tests, 88 integration tests, 45 web unit tests, 275 Cypress component tests, migration-check, typecheck, and lint pass.
 - [x] (2026-09-12) Replaced OpenTofu service-account resources with project services and a restricted Picker API key; removed active Kubernetes service-account backup dependencies; infrastructure formatting/validation and k8s-render pass.
 - [x] (2026-09-12) Human Gate A plan was explicitly approved and applied. The four APIs and restricted Picker key are provisioned, obsolete service-account/IAM resources are removed, and no key value was recorded.
-- [x] (2026-09-13) Human Gate B: the user confirmed Google OAuth consent-screen verification is complete. The replacement standard Web OAuth client remains the manual bootstrap, and staging/production Kubernetes secret updates are intentionally deferred to the later deployment workflow.
+- [x] (2026-09-13) Human Gate B: the user confirmed Google OAuth consent-screen verification is complete. The replacement standard Web OAuth client remains the manual bootstrap; later user-directed staging/production secret updates are recorded separately below.
 - [x] (2026-09-13) Prepared local environment documentation with safe empty placeholders for all required OAuth, Picker, encryption-key, and backup-status-token settings. Confirmed `.env`, `api/.env`, `.local/`, and local secret paths are ignored without reading secret values.
 - [x] (2026-09-13) Human Gate C: the user reported that the isolated Start-empty authorization, Picker folder selection, canonical folder display, and application entry completed successfully. The configured backup now reports healthy without a pre-first-run warning.
 - [x] (2026-09-13) Human Gate D: the user confirmed the Aspire migration onboarding flow is working, including the transition through backup setup. Google displayed its expected verification warning while granting the sensitive Sheets scope; this is an external app-verification limitation, not a dojo flow failure.
@@ -37,6 +37,7 @@ The complete local proof consists of deterministic tests, fresh and upgraded Duc
 - [x] (2026-09-13) Corrected configured-backup status so a valid credential and verified folder are not marked degraded solely because no backup run has occurred yet. Added backend and App warning regression coverage; focused automated gates pass.
 - [x] (2026-09-14) Aligned current product, architecture, contributor, decision, changelog, provisioning, and backup/restore documentation with user OAuth, Picker, encrypted credentials, brokered worker access, shared rehearsal, degraded repair behavior, and the corrected migration transition. `just docs` and obsolete-guidance search pass.
 - [x] (2026-09-14) Final `just check`, `just ci`, OpenTofu checks, Kubernetes rendering, obsolete-dependency searches, whitespace checks, and final diff review passed. Rehearsal temporary data was removed and local secret files remain ignored.
+- [x] (2026-09-14) User-directed Kubernetes OAuth secret rotation completed using `/workspace/kube_config/config`: both `dojo-staging` and `dojo-prod` `dojo-google-oauth` secrets now use the replacement client values with existing redirect URIs preserved, and both dojo deployments rolled out successfully. No secret values were recorded.
 - [ ] (waiting 2026-09-14) Human Gate G: local implementation and validation are complete. Awaiting explicit approval to push the feature branch and open the PR.
 - [ ] Only after approval, push the feature branch, open a PR against `master`, wait for green CI, and stop at Human Gate H before merge or staging promotion.
 - [ ] Only after promotion approval, use the existing merge and staging workflow. Production is out of scope.
@@ -107,6 +108,8 @@ The complete local proof consists of deterministic tests, fresh and upgraded Duc
   Evidence: The seven required documentation files were aligned; `git grep` found no current service-account email/JSON, `service_account_file`, `dojo-backup-google`, or `google_drive_refresh_token` guidance in those docs.
 - Observation: The final repository checks emit pre-existing Nix evaluation-cache and compiler-library warnings in this environment, but all canonical recipes exit successfully.
   Evidence: `just check`, `just ci`, `just docs`, OpenTofu validation, and Kubernetes rendering completed successfully; no warning indicated a test or build failure.
+- Observation: The replacement OAuth client had to be applied to live cluster Secrets independently of the feature branch because deployment overlays are not checked into this repository.
+  Evidence: With the mounted kubeconfig, both namespace Secrets were updated and both `dojo` Deployments rolled out successfully; only key names and rollout status were inspected.
 - Observation: Google displayed a verification warning during Aspire authorization because the combined migration flow requests the sensitive `spreadsheets.readonly` scope.
   Evidence: The user reports that migration otherwise completed successfully. The warning is supplied by Google for app/scope verification and is not an OAuth callback or Picker failure.
 - Observation: The user accepted both onboarding paths after the migration completion transition was clarified.
@@ -203,6 +206,8 @@ Human Gate F outcome (2026-09-14): The live rehearsal created and prepared tempo
 Documentation outcome (2026-09-14): Current SPEC, ARCHITECTURE, DECISIONS, CHANGELOG, CONTRIBUTING, provisioning, and backup/restore guidance now matches the completed user-OAuth architecture. Superseded decision history is explicitly marked historical. `just docs`, diff checks, and obsolete-guidance audit pass.
 
 Final automated outcome (2026-09-14): `just check` and `just ci` passed with the full backend/frontend/build/documentation stack. `just drive-infra-fmt-check`, `just drive-infra-validate`, and `just k8s-render` passed. The final diff contains only intended feature, test, infrastructure, documentation, plan, and generic warning-spacing changes. Known limitation: Google may continue showing a sensitive-scope verification warning for `spreadsheets.readonly` until Google completes external app verification.
+
+Kubernetes secret update outcome (2026-09-14): At the user’s direction, the replacement OAuth client values were applied to the existing `dojo-google-oauth` Secrets in `dojo-staging` and `dojo-prod`, preserving each redirect URI. Both `dojo` Deployments successfully rolled out. No image, code, or production data deployment was performed.
 
 Human Gate F preparation (2026-09-14): The user explicitly approved the live rehearsal. Preflight stopped safely because local-only status-token and restic-password file paths were not configured; no remote repository or local rehearsal data was created.
 
@@ -621,3 +626,5 @@ The OAuth start request is `POST /api/onboarding/google/start` with exactly one 
 2026-09-14: Completed current documentation alignment and corrected the SPEC migration transition/status wording. `just docs` passed and current-doc obsolete-guidance audit was clean. The next stopping point is the final automated gate and diff review.
 
 2026-09-14: Final automated gates and review passed. Local implementation, real onboarding flows, repair flow, and Drive upload/restore rehearsal are complete; no push or deployment was performed. Stopped at Human Gate G pending explicit approval to push and open the PR.
+
+2026-09-14: At the user’s explicit direction, used the mounted kubeconfig to update OAuth client Secrets in staging and production and successfully rolled out both deployments. No secret values were printed or recorded. This was an operational secret rotation only; image publication and production application deployment remain unperformed.
