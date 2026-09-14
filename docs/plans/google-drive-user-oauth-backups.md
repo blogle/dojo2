@@ -30,7 +30,7 @@ The complete local proof consists of deterministic tests, fresh and upgraded Duc
 - [x] (2026-09-12) Human Gate A plan was explicitly approved and applied. The four APIs and restricted Picker key are provisioned, obsolete service-account/IAM resources are removed, and no key value was recorded.
 - [x] (2026-09-13) Human Gate B: the user confirmed Google OAuth consent-screen verification is complete. The replacement standard Web OAuth client remains the manual bootstrap, and staging/production Kubernetes secret updates are intentionally deferred to the later deployment workflow.
 - [x] (2026-09-13) Prepared local environment documentation with safe empty placeholders for all required OAuth, Picker, encryption-key, and backup-status-token settings. Confirmed `.env`, `api/.env`, `.local/`, and local secret paths are ignored without reading secret values.
-- [ ] (blocked 2026-09-13) Human Gate C: isolated API health passed, but the first OAuth callback returned HTTP 503 because the API environment had no `DOJO_CREDENTIAL_ENCRYPTION_KEY_FILE`. Create the ignored local key and configure its path, restart the isolated API, then retry Start empty.
+- [ ] (blocked 2026-09-13) Human Gate C: isolated API health passed, but the first OAuth callback returned HTTP 503 because the configured `DOJO_CREDENTIAL_ENCRYPTION_KEY_FILE` is not resolvable from the API working directory. The key file exists under `.local/`; use an absolute path or an API-relative `../.local/...` path, restart the isolated API, then retry Start empty.
 - [ ] Align current documentation and commit it.
 - [ ] Run final `just check`, `just ci`, infrastructure checks, manifest rendering, searches, and diff review; update this plan and commit any final plan outcome.
 - [ ] Stop at Human Gate G and ask: `Local implementation and validation are complete. Do you want me to push the feature branch and open the PR?`
@@ -89,6 +89,8 @@ The complete local proof consists of deterministic tests, fresh and upgraded Duc
   Evidence: `.env.example` now contains safe empty placeholders for `GOOGLE_PICKER_API_KEY`, `GOOGLE_PICKER_APP_ID`, and `BACKUP_STATUS_TOKEN_FILE`; no local credential values were read or written.
 - Observation: Gate C reached Google successfully but could not persist the returned authorization because the local API environment omitted the encryption-key file path.
   Evidence: The callback returned HTTP 503 with the safe message `Google authorization succeeded, but backup credential storage is unavailable`; `api/.env` has no configured `DOJO_CREDENTIAL_ENCRYPTION_KEY_FILE` entry. No token or key value was read or recorded.
+- Observation: After local key setup, the API still could not load the key because the configured relative path was interpreted from `api/`, while the file is under the repository-root `.local/` directory.
+  Evidence: The key file is present; an API-relative parent path resolves, while the path as currently configured does not. Picker settings were appended to ignored `api/.env`; their values were not displayed.
 
 ## Decision Log
 
@@ -160,7 +162,7 @@ Human Gate B outcome (2026-09-13): Google OAuth consent-screen verification is c
 
 Phase 8 outcome (2026-09-13): The local `.env.example` now lists all required OAuth, Picker, encryption-key, and backup-status-token variables with safe empty placeholders. `.env`, `api/.env`, `.local/`, and local secret paths are ignored. No credential values were generated, displayed, or committed. The next stopping point is Human Gate C for the isolated local Start-empty flow.
 
-Human Gate C preparation (2026-09-13): The isolated API database was selected and provisioned through the canonical `DUCKDB_PATH=.local/drive-backup-start-empty.duckdb just api` command. Both required health endpoints returned status `ok`, but the first browser OAuth callback failed safely because `DOJO_CREDENTIAL_ENCRYPTION_KEY_FILE` was unset in the API environment. The gate is blocked pending local key-file setup and an API restart.
+Human Gate C preparation (2026-09-13): The isolated API database was selected and provisioned through the canonical `DUCKDB_PATH=.local/drive-backup-start-empty.duckdb just api` command. Both required health endpoints returned status `ok`, but the first browser OAuth callback failed safely because the configured encryption-key path could not be resolved from the API working directory. The gate is blocked pending a path correction and API restart.
 
 At each later major milestone, record what behavior became demonstrable, which gates passed, and any remaining gap. At completion, compare the result against the purpose above and explicitly list anything that could not be validated without staging or production. Production deployment must remain unperformed.
 
@@ -556,4 +558,4 @@ The OAuth start request is `POST /api/onboarding/google/start` with exactly one 
 
 2026-09-13: Started Human Gate C with the isolated Start-empty database. The API health and API-health endpoints passed; no browser, Google, or Picker result has been recorded yet.
 
-2026-09-13: Gate C first attempt reached successful Google authorization but returned safe HTTP 503 because the API environment lacked `DOJO_CREDENTIAL_ENCRYPTION_KEY_FILE`. No secret material was printed. Resume by configuring the ignored local key path and restarting the isolated API.
+2026-09-13: Gate C first attempt reached successful Google authorization but returned safe HTTP 503 because the API could not resolve the configured encryption-key path from its `api/` working directory. The key file exists under ignored `.local/`; Picker outputs were appended to ignored `api/.env` without display. No secret material was printed. Resume by correcting the path and restarting the isolated API.
