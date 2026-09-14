@@ -32,7 +32,8 @@ The complete local proof consists of deterministic tests, fresh and upgraded Duc
 - [x] (2026-09-13) Prepared local environment documentation with safe empty placeholders for all required OAuth, Picker, encryption-key, and backup-status-token settings. Confirmed `.env`, `api/.env`, `.local/`, and local secret paths are ignored without reading secret values.
 - [x] (2026-09-13) Human Gate C: the user reported that the isolated Start-empty authorization, Picker folder selection, canonical folder display, and application entry completed successfully. The configured backup now reports healthy without a pre-first-run warning.
 - [x] (2026-09-13) Human Gate D: the user confirmed the Aspire migration onboarding flow is working, including the transition through backup setup. Google displayed its expected verification warning while granting the sensitive Sheets scope; this is an external app-verification limitation, not a dojo flow failure.
-- [ ] (in progress 2026-09-13) Human Gate E: isolated `.local/drive-backup-existing-user.duckdb` contains deterministic imported data and no encrypted credential. The normal API reports `ready=true`, `mode=ready`, and degraded backup status. Awaiting browser verification of the warning, Repair backups route, and successful repair.
+- [x] (2026-09-14) Human Gate E: the user confirmed the existing-user warning and repair flow worked against isolated imported data. A generic shared warning-banner spacing defect was found and fixed so the warning no longer overlaps navigation branding.
+- [ ] (next 2026-09-14) Human Gate F: prepare and explicitly approve the live local Google Drive backup/restore rehearsal.
 - [x] (2026-09-13) Corrected configured-backup status so a valid credential and verified folder are not marked degraded solely because no backup run has occurred yet. Added backend and App warning regression coverage; focused automated gates pass.
 - [ ] Align current documentation and commit it.
 - [ ] Run final `just check`, `just ci`, infrastructure checks, manifest rendering, searches, and diff review; update this plan and commit any final plan outcome.
@@ -100,6 +101,8 @@ The complete local proof consists of deterministic tests, fresh and upgraded Duc
   Evidence: The user reports that migration otherwise completed successfully. The warning is supplied by Google for app/scope verification and is not an OAuth callback or Picker failure.
 - Observation: The user accepted both onboarding paths after the migration completion transition was clarified.
   Evidence: Start empty and Aspire migration reached backup setup and application entry; the remaining external warning is Google’s sensitive-scope verification notice.
+- Observation: The existing-user repair flow worked, but the global warning banner overlapped navigation branding because it lacked vertical flow spacing.
+  Evidence: The user confirmed the repair behavior otherwise worked; shared `PersistentWarningBanner` now applies consistent vertical margins, covered by the complete component suite.
 
 ## Decision Log
 
@@ -180,6 +183,8 @@ Migration completion UX outcome (2026-09-13): The migration completion action no
 Human Gate C and D outcome (2026-09-13): The user confirmed the real Start-empty and Aspire onboarding flows are satisfactory. Both use the intended OAuth/Picker behavior and reach the application; the Sheets authorization warning remains attributable to Google’s external sensitive-scope verification state. The next gate is existing-user repair.
 
 Human Gate E preparation (2026-09-14): A separate temporary database was populated through the deterministic fixture import with no backup credential. The normal API was restarted against it and returned ready application status with degraded backup status, leaving the existing app usable and the repair warning actionable. Browser validation is pending.
+
+Human Gate E outcome (2026-09-14): The user confirmed the warning, repair navigation, Google authorization, Picker selection, and return to the application behaved correctly. The generic banner spacing correction was verified by frontend tests. The next gate is the explicitly approved live Drive rehearsal.
 
 At each later major milestone, record what behavior became demonstrable, which gates passed, and any remaining gap. At completion, compare the result against the purpose above and explicitly list anything that could not be validated without staging or production. Production deployment must remain unperformed.
 
@@ -586,3 +591,5 @@ The OAuth start request is `POST /api/onboarding/google/start` with exactly one 
 2026-09-13: The user confirmed the onboarding flow is satisfactory. Marked Human Gates C and D complete and moved to Human Gate E for existing-user upgrade/repair behavior. The Google Sheets verification warning remains a known external limitation.
 
 2026-09-14: Prepared the isolated existing-user repair fixture and verified its non-secret API status. The next action is the user’s browser check of the persistent warning and real repair flow.
+
+2026-09-14: Human Gate E passed by user confirmation. Fixed shared warning-banner spacing and committed it as `c9768eb`. The next stopping point is Human Gate F: request approval before running the live Google Drive rehearsal.
