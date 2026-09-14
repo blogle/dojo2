@@ -13,7 +13,7 @@ api:
 	@printf '==> provisioning api database\n'
 	cd api && uv run python -m dojo.migrations "${DUCKDB_PATH:-.local/dojo.duckdb}"
 	@printf '==> starting api server\n'
-	cd api && uv run uvicorn dojo.api.main:app --reload --host 0.0.0.0 --port 8000
+	cd api && uv run python -m uvicorn dojo.api.main:app --reload --host 0.0.0.0 --port 8000
 
 web:
 	@printf '==> starting web dev server\n'
