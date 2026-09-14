@@ -28,8 +28,8 @@ The complete local proof consists of deterministic tests, fresh and upgraded Duc
 - [x] (2026-09-12) Completed legacy readiness and repair behavior with integration and web tests; 111 unit tests, 88 integration tests, 45 web unit tests, 275 Cypress component tests, migration-check, typecheck, and lint pass.
 - [x] (2026-09-12) Replaced OpenTofu service-account resources with project services and a restricted Picker API key; removed active Kubernetes service-account backup dependencies; infrastructure formatting/validation and k8s-render pass.
 - [x] (2026-09-12) Human Gate A plan was explicitly approved and applied. The four APIs and restricted Picker key are provisioned, obsolete service-account/IAM resources are removed, and no key value was recorded.
-- [ ] (blocked 2026-09-12) Human Gate B: the replacement standard Web OAuth client has local configuration, but Google verification is blocked because the configured home/privacy URLs are not publicly reachable and domain ownership is not verified. Resolve the external hosting/ownership prerequisite before continuing.
-- [ ] Prepare local environment documentation and safe ignored-file placeholders without creating or displaying credentials.
+- [x] (2026-09-13) Human Gate B: the user confirmed Google OAuth consent-screen verification is complete. The replacement standard Web OAuth client remains the manual bootstrap, and staging/production Kubernetes secret updates are intentionally deferred to the later deployment workflow.
+- [x] (2026-09-13) Prepared local environment documentation with safe empty placeholders for all required OAuth, Picker, encryption-key, and backup-status-token settings. Confirmed `.env`, `api/.env`, `.local/`, and local secret paths are ignored without reading secret values.
 - [ ] Stop at Human Gates C, D, E, and F for real local Start-empty, Aspire, repair, and Drive rehearsal validation; record each result here.
 - [ ] Align current documentation and commit it.
 - [ ] Run final `just check`, `just ci`, infrastructure checks, manifest rendering, searches, and diff review; update this plan and commit any final plan outcome.
@@ -85,6 +85,8 @@ The complete local proof consists of deterministic tests, fresh and upgraded Duc
   Evidence: The replacement client is configured in local `api/.env`; staging and production deployment secrets will need the replacement client values during a later deployment workflow. No client values were read or recorded.
 - Observation: Google will not publish this external OAuth application while its home page and privacy policy are unreachable or their domain ownership is unverified.
   Evidence: Google reports the supplied `dojo.thejeffer.net` home page and `/privacy` URL as unresponsive and not registered to the user. This cannot be fixed by OpenTofu or local application credentials alone.
+- Observation: The checked-in environment example had the OAuth and encryption-key settings but omitted the Picker and backup-status-token settings required by the completed implementation.
+  Evidence: `.env.example` now contains safe empty placeholders for `GOOGLE_PICKER_API_KEY`, `GOOGLE_PICKER_APP_ID`, and `BACKUP_STATUS_TOKEN_FILE`; no local credential values were read or written.
 
 ## Decision Log
 
@@ -152,9 +154,9 @@ Phase 7 outcome (2026-09-12): OpenTofu now enables exactly Drive, Sheets, Picker
 
 Human Gate A outcome (2026-09-12): The reviewed OpenTofu plan was approved and applied. Four project APIs are enabled, the obsolete backup service account and IAM service enablement were removed, and the restricted Picker key was created with localhost, Google Docs, staging, and production dojo referrers. The initial apply required a quota-project remediation and a one-resource retry; no key value or credential was recorded.
 
-Human Gate B status (2026-09-12): A replacement Web OAuth client was created in the dojo project and its values were placed in ignored local `api/.env`. The former staging/production client was deleted externally because it belonged to an unrelated project. Gate B remains open until the replacement client is confirmed for local, staging, and production origins/redirects and is not dependent on Testing-mode refresh-token behavior.
+Human Gate B outcome (2026-09-13): Google OAuth consent-screen verification is complete after the public `dojo` home/privacy/terms site and Cloudflare ownership verification became active. The app name remains `dojo`; staging and production Kubernetes secret replacement is a later deployment task and is not performed locally now.
 
-Human Gate B blocker (2026-09-12): Google verification initially rejected the configured home and privacy URLs because the dojo hosts were not publicly reachable and domain ownership was not verified. The separate repository at `/workspace/jeffernet` is now public at `https://github.com/blogle/jeffernet`, deployed through Cloudflare Pages, and serving matching `dojo` home/privacy/terms pages over HTTPS. Cloudflare reports the custom domain and its verification as active, including the Google-issued TXT record. The remaining external step is clicking Google verification and publishing the OAuth app with the app name `dojo`.
+Phase 8 outcome (2026-09-13): The local `.env.example` now lists all required OAuth, Picker, encryption-key, and backup-status-token variables with safe empty placeholders. `.env`, `api/.env`, `.local/`, and local secret paths are ignored. No credential values were generated, displayed, or committed. The next stopping point is Human Gate C for the isolated local Start-empty flow.
 
 At each later major milestone, record what behavior became demonstrable, which gates passed, and any remaining gap. At completion, compare the result against the purpose above and explicitly list anything that could not be validated without staging or production. Production deployment must remain unperformed.
 
@@ -545,3 +547,5 @@ The OAuth start request is `POST /api/onboarding/google/start` with exactly one 
 2026-09-12: Updated ignored tfvars with the supplied staging and production dojo origins and reran Human Gate A. The plan still reports 5 additions and 3 destructions, now with both deployed referrers included. No infrastructure was applied; explicit user approval remains required.
 
 2026-09-12: Human Gate A approved and applied. The initial apply partially completed because ADC lacked a usable quota project for API-key creation; after local quota-project remediation, a one-resource retry created the restricted Picker key. The four APIs and service-account removal are complete. The next stopping point is Human Gate B for manual standard Web OAuth client verification.
+
+2026-09-13: The user confirmed Google OAuth consent-screen verification is complete. Phase 8 local environment preparation is complete with safe `.env.example` placeholders and ignored-path verification. Staging and production Kubernetes secret updates remain deferred. The next stopping point is Human Gate C for the real isolated local Start-empty flow.
