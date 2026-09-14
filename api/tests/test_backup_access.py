@@ -126,6 +126,25 @@ def test_existing_import_without_credential_remains_ready_and_degraded(imported_
     assert status["backup"]["state"] == "degraded"
 
 
+def test_configured_backup_without_run_is_ready_and_configured(service) -> None:
+    key = b"0123456789abcdef0123456789abcdef"
+    encrypted = encrypt_refresh_token(
+        "opaque-refresh-value",
+        credential_id=SYSTEM_BACKUP_CREDENTIAL_ID,
+        key=key,
+    )
+    service.store_backup_credential(encrypted, "https://www.googleapis.com/auth/drive.file")
+    service.start_empty_onboarding()
+    service.configure_backup_folder("folder-id", "Backup folder", str(SYSTEM_BACKUP_CREDENTIAL_ID))
+
+    status = service.get_app_status()
+
+    assert status["ready"] is True
+    assert status["mode"] == "ready"
+    assert status["backup"]["state"] == "configured"
+    assert status["backup"]["message"] is None
+
+
 def test_configured_backup_with_failed_run_remains_ready_and_degraded(service) -> None:
     service.start_empty_onboarding()
     service.configure_backup_folder("folder-id", "Backup folder", str(SYSTEM_BACKUP_CREDENTIAL_ID))

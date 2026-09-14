@@ -135,4 +135,38 @@ describe("dojo app", () => {
       "/onboarding?backup=repair",
     );
   });
+
+  it("does not warn when backup setup is configured before the first run", async () => {
+    const { state } = useAppState();
+    state.appStatus = {
+      app: "dojo",
+      ready: true,
+      mode: "ready",
+      needs_onboarding: false,
+      needs_backup_setup: false,
+      backup: {
+        state: "configured",
+        message: null,
+      },
+      latest_import_batch: null,
+      latest_import_run: null,
+    };
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: "/dev/test", component: { template: "<div>app</div>" } },
+      ],
+    });
+    await router.push("/dev/test");
+    await router.isReady();
+
+    const wrapper = mount(App, {
+      global: {
+        plugins: [router],
+      },
+    });
+
+    expect(wrapper.text()).not.toContain("Backups need attention");
+    expect(wrapper.text()).toContain("app");
+  });
 });

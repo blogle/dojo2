@@ -187,9 +187,8 @@ class DojoService:
             mode = "ready"
             backup_state = (
                 "configured"
-                if latest_backup_run
-                and latest_backup_run["status"] == "SUCCEEDED"
-                and has_backup_credential
+                if has_backup_credential
+                and (latest_backup_run is None or latest_backup_run["status"] == "SUCCEEDED")
                 else "degraded"
             )
         elif latest_batch is not None:

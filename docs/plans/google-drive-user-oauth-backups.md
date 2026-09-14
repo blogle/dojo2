@@ -31,6 +31,7 @@ The complete local proof consists of deterministic tests, fresh and upgraded Duc
 - [x] (2026-09-13) Human Gate B: the user confirmed Google OAuth consent-screen verification is complete. The replacement standard Web OAuth client remains the manual bootstrap, and staging/production Kubernetes secret updates are intentionally deferred to the later deployment workflow.
 - [x] (2026-09-13) Prepared local environment documentation with safe empty placeholders for all required OAuth, Picker, encryption-key, and backup-status-token settings. Confirmed `.env`, `api/.env`, `.local/`, and local secret paths are ignored without reading secret values.
 - [ ] (in progress 2026-09-13) Human Gate C: the encryption key now resolves from the API working directory after configuring the API-relative `../.local/...` path. The isolated API was restarted against `.local/drive-backup-start-empty.duckdb`; both health endpoints passed. Retry the Start-empty browser flow from the beginning.
+- [x] (2026-09-13) Corrected configured-backup status so a valid credential and verified folder are not marked degraded solely because no backup run has occurred yet. Added backend and App warning regression coverage; focused automated gates pass.
 - [ ] Align current documentation and commit it.
 - [ ] Run final `just check`, `just ci`, infrastructure checks, manifest rendering, searches, and diff review; update this plan and commit any final plan outcome.
 - [ ] Stop at Human Gate G and ask: `Local implementation and validation are complete. Do you want me to push the feature branch and open the PR?`
@@ -91,6 +92,8 @@ The complete local proof consists of deterministic tests, fresh and upgraded Duc
   Evidence: The callback returned HTTP 503 with the safe message `Google authorization succeeded, but backup credential storage is unavailable`; `api/.env` has no configured `DOJO_CREDENTIAL_ENCRYPTION_KEY_FILE` entry. No token or key value was read or recorded.
 - Observation: After local key setup, the API still could not load the key because the configured relative path was interpreted from `api/`, while the file is under the repository-root `.local/` directory.
   Evidence: The key file is present; an API-relative parent path resolves, while the path as currently configured does not. Picker settings were appended to ignored `api/.env`; their values were not displayed.
+- Observation: A newly configured backup had been treated as degraded until its first scheduled run, even though the repair action could only repeat already-complete folder configuration.
+  Evidence: `get_app_status()` now reports `configured` when a durable credential and configured folder exist with no latest run; failed latest runs and missing credentials remain degraded. The live isolated API returned `ready=true`, `backup.state=configured`, and `backup.message=null` after the fix.
 
 ## Decision Log
 
@@ -163,6 +166,8 @@ Human Gate B outcome (2026-09-13): Google OAuth consent-screen verification is c
 Phase 8 outcome (2026-09-13): The local `.env.example` now lists all required OAuth, Picker, encryption-key, and backup-status-token variables with safe empty placeholders. `.env`, `api/.env`, `.local/`, and local secret paths are ignored. No credential values were generated, displayed, or committed. The next stopping point is Human Gate C for the isolated local Start-empty flow.
 
 Human Gate C preparation (2026-09-13): The isolated API database was selected and provisioned through the canonical `DUCKDB_PATH=.local/drive-backup-start-empty.duckdb just api` command. The first browser OAuth callback failed safely because the configured encryption-key path could not be resolved from the API working directory. After the user changed it to the API-relative `../.local/...` path, the API restarted successfully and both required health endpoints returned status `ok`. Browser validation is ready to retry.
+
+Corrective backup-status outcome (2026-09-13): Configured backups without a recorded run no longer show the degraded warning or route the user back to folder setup. Missing credentials and failed latest runs retain the existing degraded warning and repair route. Backend unit/integration, migration, architecture, typecheck, lint, and complete web tests pass.
 
 At each later major milestone, record what behavior became demonstrable, which gates passed, and any remaining gap. At completion, compare the result against the purpose above and explicitly list anything that could not be validated without staging or production. Production deployment must remain unperformed.
 
@@ -561,3 +566,5 @@ The OAuth start request is `POST /api/onboarding/google/start` with exactly one 
 2026-09-13: Gate C first attempt reached successful Google authorization but returned safe HTTP 503 because the API could not resolve the configured encryption-key path from its `api/` working directory. The key file exists under ignored `.local/`; Picker outputs were appended to ignored `api/.env` without display. No secret material was printed. Resume by correcting the path and restarting the isolated API.
 
 2026-09-13: The user corrected the encryption-key path to an API-relative location. The isolated API restarted against the Start-empty database and passed both health endpoints. Resume Gate C by retrying the browser flow from the beginning.
+
+2026-09-13: Corrected the configured-but-never-run backup status dead end. The live isolated API now reports configured/healthy after folder setup; the user should refresh the browser and confirm the warning is absent.
