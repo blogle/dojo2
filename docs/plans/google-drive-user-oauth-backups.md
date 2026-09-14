@@ -33,7 +33,7 @@ The complete local proof consists of deterministic tests, fresh and upgraded Duc
 - [x] (2026-09-13) Human Gate C: the user reported that the isolated Start-empty authorization, Picker folder selection, canonical folder display, and application entry completed successfully. The configured backup now reports healthy without a pre-first-run warning.
 - [x] (2026-09-13) Human Gate D: the user confirmed the Aspire migration onboarding flow is working, including the transition through backup setup. Google displayed its expected verification warning while granting the sensitive Sheets scope; this is an external app-verification limitation, not a dojo flow failure.
 - [x] (2026-09-14) Human Gate E: the user confirmed the existing-user warning and repair flow worked against isolated imported data. A generic shared warning-banner spacing defect was found and fixed so the warning no longer overlaps navigation branding.
-- [ ] (blocked 2026-09-14) Human Gate F: live rehearsal approval was given, but execution stopped before any remote write because `BACKUP_STATUS_TOKEN_FILE` and `DOJO_RESTIC_PASSWORD_FILE` are unset and the expected ignored local files are absent. Create those local files, configure the paths, then retry.
+- [x] (2026-09-14) Human Gate F: the approved live rehearsal completed upload, restic check, snapshot discovery, separate local restore, dojo verification, and cleanup of the temporary remote repository. No production repository was touched.
 - [x] (2026-09-13) Corrected configured-backup status so a valid credential and verified folder are not marked degraded solely because no backup run has occurred yet. Added backend and App warning regression coverage; focused automated gates pass.
 - [ ] Align current documentation and commit it.
 - [ ] Run final `just check`, `just ci`, infrastructure checks, manifest rendering, searches, and diff review; update this plan and commit any final plan outcome.
@@ -97,6 +97,12 @@ The complete local proof consists of deterministic tests, fresh and upgraded Duc
   Evidence: The key file is present; an API-relative parent path resolves, while the path as currently configured does not. Picker settings were appended to ignored `api/.env`; their values were not displayed.
 - Observation: A newly configured backup had been treated as degraded until its first scheduled run, even though the repair action could only repeat already-complete folder configuration.
   Evidence: `get_app_status()` now reports `configured` when a durable credential and configured folder exist with no latest run; failed latest runs and missing credentials remain degraded. The live isolated API returned `ready=true`, `backup.state=configured`, and `backup.message=null` after the fix.
+- Observation: Live rehearsal preflight must use the API-managed Python environment rather than the bare Nix-shell Python.
+  Evidence: The original health check could not import `httpx`; running it through `api/uv run` passed.
+- Observation: Rehearsal secret paths need normalization before invoking modules from `api/`.
+  Evidence: Relative status-token and restic-password paths were resolved with `realpath` after root-level preflight checks.
+- Observation: Restic restore paths are not stable enough for a hard-coded `materialized/stage` prefix.
+  Evidence: The rehearsal now locates the restored manifest and derives its sibling database before normal verification and restore.
 - Observation: Google displayed a verification warning during Aspire authorization because the combined migration flow requests the sensitive `spreadsheets.readonly` scope.
   Evidence: The user reports that migration otherwise completed successfully. The warning is supplied by Google for app/scope verification and is not an OAuth callback or Picker failure.
 - Observation: The user accepted both onboarding paths after the migration completion transition was clarified.
@@ -187,6 +193,8 @@ Human Gate C and D outcome (2026-09-13): The user confirmed the real Start-empty
 Human Gate E preparation (2026-09-14): A separate temporary database was populated through the deterministic fixture import with no backup credential. The normal API was restarted against it and returned ready application status with degraded backup status, leaving the existing app usable and the repair warning actionable. Browser validation is pending.
 
 Human Gate E outcome (2026-09-14): The user confirmed the warning, repair navigation, Google authorization, Picker selection, and return to the application behaved correctly. The generic banner spacing correction was verified by frontend tests. The next gate is the explicitly approved live Drive rehearsal.
+
+Human Gate F outcome (2026-09-14): The live rehearsal created and prepared temporary DuckDB data, obtained brokered short-lived Drive access, uploaded a unique rehearsal repository, ran restic integrity checking, restored to a distinct local target, passed dojo backup verification, and cleaned up the remote rehearsal repository and local temporary data. The final run passed with a snapshot ID; no credential values were recorded.
 
 Human Gate F preparation (2026-09-14): The user explicitly approved the live rehearsal. Preflight stopped safely because local-only status-token and restic-password file paths were not configured; no remote repository or local rehearsal data was created.
 
@@ -599,3 +607,5 @@ The OAuth start request is `POST /api/onboarding/google/start` with exactly one 
 2026-09-14: Human Gate E passed by user confirmation. Fixed shared warning-banner spacing and committed it as `c9768eb`. The next stopping point is Human Gate F: request approval before running the live Google Drive rehearsal.
 
 2026-09-14: Human Gate F approval was received, but preflight found no `BACKUP_STATUS_TOKEN_FILE` or `DOJO_RESTIC_PASSWORD_FILE` and no files under `.local/`. Added the safe restic-password path placeholder to `.env.example`; resume after local secret-file setup.
+
+2026-09-14: Human Gate F passed after correcting three live-script issues: API-environment health probing, relative secret-path normalization, and restic restore-path discovery. The shared uploader/unit suite passed with 112 tests. The next phase is current documentation alignment.

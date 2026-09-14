@@ -14,8 +14,12 @@ api_url="${DOJO_API_URL:-http://localhost:8000}"
   printf 'Required file does not exist: %s\n' "$DOJO_RESTIC_PASSWORD_FILE" >&2
   exit 1
 }
+BACKUP_STATUS_TOKEN_FILE="$(realpath "$BACKUP_STATUS_TOKEN_FILE")"
+DOJO_RESTIC_PASSWORD_FILE="$(realpath "$DOJO_RESTIC_PASSWORD_FILE")"
 
-python -c '
+(
+  cd "$repo_root/api"
+  uv run python -c '
 import httpx
 import sys
 
@@ -26,6 +30,7 @@ try:
 except Exception as exc:
     raise SystemExit(f"A running dojo API is required at {url}: {exc}") from exc
 ' "$api_url"
+)
 
 run_id="$(python -c 'from uuid import uuid4; print(uuid4().hex)')"
 remote_path="dojo-rehearsals/$run_id/restic"
@@ -86,12 +91,22 @@ snapshot_id="$(
     --internal-token-file "$BACKUP_STATUS_TOKEN_FILE" \
     --restic-password-file "$DOJO_RESTIC_PASSWORD_FILE" \
     --repository-path "$remote_path"
+  restored_manifest="$(find "$work/materialized" -type f -name '*.manifest.json' -print -quit)"
+  [[ -n "$restored_manifest" ]] || {
+    printf 'Restored backup manifest was not found.\n' >&2
+    exit 1
+  }
+  restored_database="${restored_manifest%.manifest.json}"
+  [[ -f "$restored_database" ]] || {
+    printf 'Restored backup database was not found.\n' >&2
+    exit 1
+  }
   uv run python -m dojo.backup verify \
-    "$work/materialized/stage/dojo.duckdb" \
-    "$work/materialized/stage/dojo.duckdb.manifest.json"
+    "$restored_database" \
+    "$restored_manifest"
   uv run python -m dojo.backup restore \
-    "$work/materialized/stage/dojo.duckdb" \
-    "$work/materialized/stage/dojo.duckdb.manifest.json" \
+    "$restored_database" \
+    "$restored_manifest" \
     "$work/restored.duckdb"
   uv run python -m dojo.migrations "$work/restored.duckdb"
 )
