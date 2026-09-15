@@ -156,7 +156,7 @@ NODE
 
 cypress_args=(run --e2e --browser "$browser")
 if [[ "$recording" == "true" ]]; then
-  cypress_args+=(--headless)
+  cypress_args+=(--headless --no-runner-ui --config viewportWidth=1440,viewportHeight=900)
 fi
 if [[ -n "$spec" ]]; then
   cypress_args+=(--spec "$spec")

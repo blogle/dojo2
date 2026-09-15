@@ -94,7 +94,7 @@ format-check:
 
 typecheck:
 	@printf '==> type checking api\n'
-	cd api && uv run mypy src
+	cd api && uv run python -m mypy src
 	@printf '==> type checking web\n'
 	cd web && pnpm typecheck
 
