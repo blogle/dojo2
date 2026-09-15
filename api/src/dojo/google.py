@@ -79,10 +79,12 @@ def normalized_granted_scopes(
     token: dict[str, Any], *, requested_scopes_for: str
 ) -> tuple[str, ...]:
     """Return Google's explicit grants, or the pending purpose's scopes when omitted."""
-    returned_scopes = token.get("scope")
-    if isinstance(returned_scopes, str) and returned_scopes.strip():
+    if "scope" not in token:
+        return requested_google_scopes(requested_scopes_for)
+    returned_scopes = token["scope"]
+    if isinstance(returned_scopes, str):
         return tuple(sorted(set(returned_scopes.split())))
-    return requested_google_scopes(requested_scopes_for)
+    return ()
 
 
 @_TRANSIENT_RETRY

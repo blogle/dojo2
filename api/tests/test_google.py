@@ -112,6 +112,11 @@ class TestNormalizedGrantedScopes:
             == GOOGLE_ASPIRE_MIGRATION_SCOPES
         )
 
+    def test_does_not_treat_an_explicit_empty_scope_as_an_omission(self) -> None:
+        assert (
+            normalized_granted_scopes({"scope": ""}, requested_scopes_for="aspire_migration") == ()
+        )
+
 
 class TestExchangeGoogleCode:
     def test_returns_token_dict(self) -> None:

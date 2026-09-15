@@ -158,25 +158,6 @@ async function handleSubmitSheet() {
     }
 
     errorMessage.value = err.message;
-    try {
-      await beginGoogleOnboarding("aspire_migration");
-      await analyzeSheet(submittedSheetId);
-    } catch (reauthorizationError) {
-      errorMessage.value =
-        reauthorizationError instanceof Error
-          ? reauthorizationError.message
-          : "Google Sheets authorization is required to continue the Aspire migration.";
-      step.value = "migrate-form";
-      return;
-    }
-
-    if (state.importPreview) {
-      step.value = "net-worth-review";
-      return;
-    }
-
-    errorMessage.value =
-      "Analysis did not return review data. Please try again.";
     step.value = "migrate-form";
   }
 }

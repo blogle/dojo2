@@ -496,6 +496,7 @@ def test_google_import_rejects_missing_sheets_grant_without_calling_sheets(
             == 200
         )
         assert client.get("/api/onboarding/google/status").json()["backup_authorized"] is True
+        assert client.get("/api/onboarding/google/status").json()["authorized"] is False
 
         for path in ("/api/import/google-sheet", "/api/import/google-sheet/analyze"):
             response = client.post(path, json={"sheet_url_or_id": "sheet-123"})

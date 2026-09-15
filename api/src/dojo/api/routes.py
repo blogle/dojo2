@@ -112,11 +112,13 @@ def oauth_status_payload(request: Request) -> dict[str, Any]:
     settings = get_settings(request)
     session_id = get_or_create_oauth_session_id(request)
     token_store = get_oauth_token_store(request)
+    token = token_store.get(session_id)
     has_backup_credential = get_service(request).has_backup_credential()
     return {
         "configured": settings.oauth_configured,
         "fixture_mode": settings.dev_fixture_mode,
-        "authorized": token_store.has(session_id),
+        "authorized": token is not None
+        and GOOGLE_SHEETS_READONLY_SCOPE in token.get(DOJO_GRANTED_SCOPES_KEY, ()),
         "backup_authorized": has_backup_credential,
         "backup_reauthorization_required": not has_backup_credential,
         "message": (
