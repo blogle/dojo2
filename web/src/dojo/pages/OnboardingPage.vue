@@ -147,8 +147,36 @@ async function handleSubmitSheet() {
       throw new Error("Analysis did not return review data. Please try again.");
     }
   } catch (err) {
+    if (
+      !(err instanceof ApiError) ||
+      err.code !== "google_sheets_authorization_required"
+    ) {
+      errorMessage.value =
+        err instanceof Error ? err.message : "Import failed. Please try again.";
+      step.value = "migrate-form";
+      return;
+    }
+
+    errorMessage.value = err.message;
+    try {
+      await beginGoogleOnboarding("aspire_migration");
+      await analyzeSheet(submittedSheetId);
+    } catch (reauthorizationError) {
+      errorMessage.value =
+        reauthorizationError instanceof Error
+          ? reauthorizationError.message
+          : "Google Sheets authorization is required to continue the Aspire migration.";
+      step.value = "migrate-form";
+      return;
+    }
+
+    if (state.importPreview) {
+      step.value = "net-worth-review";
+      return;
+    }
+
     errorMessage.value =
-      err instanceof Error ? err.message : "Import failed. Please try again.";
+      "Analysis did not return review data. Please try again.";
     step.value = "migrate-form";
   }
 }
@@ -542,8 +570,7 @@ const showInvalidSheetId = computed(
                 Google authorization was denied
               </p>
               <p class="onboarding__error-desc">
-                We couldn't access your Google Account. Please try again or
-                cancel to return.
+                {{ errorMessage }}
               </p>
             </div>
           </Inline>

@@ -14,6 +14,7 @@ from dojo.google import (
     build_google_auth_url,
     exchange_google_code,
     fetch_sheet_named_ranges,
+    normalized_granted_scopes,
 )
 
 
@@ -93,6 +94,23 @@ class TestBuildGoogleAuthUrl:
         granted_scopes = set(parse_qs(urlparse(url).query)["scope"][0].split())
 
         assert granted_scopes == set(scopes)
+
+
+class TestNormalizedGrantedScopes:
+    def test_uses_explicit_google_grants(self) -> None:
+        token = {"scope": "https://www.googleapis.com/auth/drive.file"}
+
+        assert normalized_granted_scopes(token, requested_scopes_for="aspire_migration") == (
+            "https://www.googleapis.com/auth/drive.file",
+        )
+
+    def test_uses_pending_purpose_when_google_omits_scope(self) -> None:
+        assert (
+            normalized_granted_scopes(
+                {"access_token": "token"}, requested_scopes_for="aspire_migration"
+            )
+            == GOOGLE_ASPIRE_MIGRATION_SCOPES
+        )
 
 
 class TestExchangeGoogleCode:
