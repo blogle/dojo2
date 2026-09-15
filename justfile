@@ -61,6 +61,12 @@ test-e2e:
 test-e2e-spec spec:
 	web/scripts/run-e2e.sh "{{spec}}"
 
+record-flows:
+	web/scripts/run-e2e.sh --record
+
+record-flow flow:
+	web/scripts/run-e2e.sh --record "{{flow}}"
+
 profile-e2e:
 	web/scripts/profile-e2e.sh
 

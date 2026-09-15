@@ -21,14 +21,42 @@ allocate_port() {
   node -e 'const server=require("node:net").createServer(); server.listen(0,"127.0.0.1",()=>{console.log(server.address().port);server.close();});'
 }
 
+# Parse recording mode
+recording=false
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --record)
+      recording=true
+      shift
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+
+if [[ "$recording" == "true" ]]; then
+  flow="${1:-}"
+  recording_dir="${XDG_CACHE_HOME:-$HOME/.cache}/dojo/e2e/recordings/$(date -u +%Y%m%dT%H%M%S)-$$"
+  export DOJO_RECORDING=true
+  export E2E_RECORDING_DIR="$recording_dir"
+  mkdir -p "$recording_dir"
+  if [[ -n "$flow" ]]; then
+    spec="cypress/e2e/recordings/${flow}.cy.ts"
+  else
+    spec=""
+  fi
+else
+  spec="${1:-}"
+  spec="${spec#web/}"
+fi
+
 api_port="${DOJO_E2E_API_PORT:-$(allocate_port)}"
 web_port="${DOJO_E2E_WEB_PORT:-$(allocate_port)}"
 api_url="http://127.0.0.1:${api_port}"
 web_url="http://127.0.0.1:${web_port}"
 reset_token="dojo-e2e-local-token"
 browser="${DOJO_E2E_BROWSER:-chrome}"
-spec="${1:-}"
-spec="${spec#web/}"
 
 mkdir -p "$baseline_dir" "$run_dir/cypress"
 printf '%s' "$reset_token" >"$run_dir/.dojo-e2e-worker"
@@ -127,6 +155,9 @@ writeFileSync(
 NODE
 
 cypress_args=(run --e2e --browser "$browser")
+if [[ "$recording" == "true" ]]; then
+  cypress_args+=(--headless)
+fi
 if [[ -n "$spec" ]]; then
   cypress_args+=(--spec "$spec")
 fi
@@ -145,12 +176,21 @@ set -e
 if [[ -f "$run_dir/cypress/run.json" ]]; then
   node "$repo_root/web/scripts/summarize-e2e.mjs" "$run_dir"
 fi
-if [[ "$cypress_status" -eq 0 ]]; then
+if [[ "$cypress_status" -eq 0 && "$recording" != "true" ]]; then
   node "$repo_root/web/scripts/check-e2e-budget.mjs" \
     "$run_dir" \
     "$repo_root/web/cypress/e2e/performance-budgets.json"
 fi
 if [[ -n "${DOJO_E2E_PROFILE_MANIFEST:-}" ]]; then
   printf '%s\n' "$run_dir" >>"$DOJO_E2E_PROFILE_MANIFEST"
+fi
+if [[ "$recording" == "true" && "$cypress_status" -eq 0 ]]; then
+  build_cmd="web/scripts/run-e2e.sh --record"
+  if [[ -n "$flow" ]]; then
+    build_cmd+=" $flow"
+  fi
+  node "$repo_root/web/scripts/build-recording-artifacts.mjs" \
+    "$recording_dir" "$build_cmd"
+  cypress_status=$?
 fi
 exit "$cypress_status"

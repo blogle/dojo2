@@ -6,6 +6,10 @@ declare global {
   namespace Cypress {
     interface Chainable {
       resetScenario(scenario: string): Chainable<void>;
+      /** No-op in normal E2E; brief wait during recording for presentation pacing. */
+      presentationPause(): Chainable<void>;
+      /** No-op in normal E2E; records checkpoint metadata + screenshot during recording. */
+      presentationCheckpoint(label: string): Chainable<void>;
     }
   }
 }
@@ -28,6 +32,23 @@ Cypress.Commands.add("resetScenario", (scenario: string) => {
       expect(response.body).to.have.property("reopen_ms");
       Cypress.env("resetMetrics", response.body);
     });
+});
+
+Cypress.Commands.add("presentationPause", () => {
+  if (Cypress.env("recording") === true) {
+    cy.wait(350);
+  }
+});
+
+Cypress.Commands.add("presentationCheckpoint", (label: string) => {
+  if (Cypress.env("recording") === true) {
+    const safeName = label.replace(/[^a-zA-Z0-9_-]/g, "_");
+    cy.screenshot(`checkpoints/${safeName}`, { capture: "viewport" });
+    cy.task("presentationCheckpoint", {
+      label,
+      spec: Cypress.spec.relative,
+    });
+  }
 });
 
 let apiRequests: Array<{ url: string; statusCode: number }> = [];

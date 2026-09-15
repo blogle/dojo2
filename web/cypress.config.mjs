@@ -1,22 +1,34 @@
 import { fileURLToPath, URL } from "node:url";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import vue from "@vitejs/plugin-vue";
 import { defineConfig } from "cypress";
 
+const isRecording = process.env.DOJO_RECORDING === "true";
+const recordingDir = process.env.E2E_RECORDING_DIR;
+
 export default defineConfig({
-  video: false,
+  video: isRecording,
   retries: 0,
-  viewportWidth: 1280,
+  viewportWidth: isRecording ? 1440 : 1280,
   viewportHeight: 900,
+  ...(isRecording && recordingDir
+    ? {
+        screenshotsFolder: path.join(recordingDir, "screenshots"),
+        videosFolder: path.join(recordingDir, "videos"),
+      }
+    : {}),
   env: {
     apiBaseUrl: process.env.VITE_API_BASE_URL ?? "http://localhost:8000",
     e2eToken: process.env.DOJO_E2E_TOKEN ?? "",
+    recording: isRecording,
   },
   e2e: {
     baseUrl: process.env.CYPRESS_BASE_URL ?? "http://localhost:5173",
-    specPattern: "cypress/e2e/**/*.cy.ts",
+    specPattern: isRecording
+      ? "cypress/e2e/recordings/**/*.cy.ts"
+      : ["cypress/e2e/**/*.cy.ts", "!cypress/e2e/recordings/**/*.cy.ts"],
     supportFile: "cypress/support/e2e.ts",
     setupNodeEvents(on, config) {
       const tests = [];
@@ -25,6 +37,30 @@ export default defineConfig({
       on("task", {
         recordE2eTest(metrics) {
           tests.push(metrics);
+          return null;
+        },
+        presentationCheckpoint({ label, spec }) {
+          if (isRecording && recordingDir) {
+            const checkpointsDir = path.join(
+              recordingDir,
+              "screenshots",
+              "checkpoints",
+            );
+            mkdirSync(checkpointsDir, { recursive: true });
+            const entry = {
+              label,
+              spec,
+              timestamp: new Date().toISOString(),
+              screenshotPath: path.join(
+                checkpointsDir,
+                `${label.replace(/[^a-zA-Z0-9_-]/g, "_")}.png`,
+              ),
+            };
+            appendFileSync(
+              path.join(recordingDir, "checkpoints.jsonl"),
+              JSON.stringify(entry) + "\n",
+            );
+          }
           return null;
         },
       });
