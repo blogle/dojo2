@@ -10,7 +10,9 @@ from fastapi.testclient import TestClient
 
 from dojo.api.main import create_app
 from dojo.api.settings import Settings
+from dojo.constants import GOOGLE_SHEETS_READONLY_SCOPE
 from dojo.e2e import E2EScenario, build_baseline, fixed_e2e_clock
+from dojo.google import GOOGLE_DRIVE_FILE_SCOPE
 from dojo.service import DojoService
 
 
@@ -326,3 +328,68 @@ def test_e2e_reset_keeps_current_service_when_replacement_cannot_open(
         assert overview.json()["net_worth_minor"] == 36_100_000
 
     assert sorted(path.name for path in tmp_path.glob("worker*.duckdb")) == ["worker.duckdb"]
+
+
+def test_e2e_google_sheets_stub_proves_authorization_boundary(tmp_path) -> None:
+    baseline_dir = tmp_path / "baselines"
+    baseline = baseline_dir / "onboarding-empty.duckdb"
+    active_database = tmp_path / "worker.duckdb"
+    sentinel = tmp_path / ".dojo-e2e-worker"
+    build_baseline(E2EScenario.ONBOARDING_EMPTY, baseline)
+    shutil.copyfile(baseline, active_database)
+    sentinel.write_text("acceptance-secret", encoding="utf-8")
+
+    app = create_app(
+        Settings(
+            APP_ENV="e2e",
+            DUCKDB_PATH=str(active_database),
+            E2E_BASELINE_DIR=str(baseline_dir),
+            E2E_RUN_DIR=str(tmp_path),
+            E2E_RESET_TOKEN="acceptance-secret",
+        )
+    )
+
+    with TestClient(app) as client:
+        reset = client.post(
+            "/__e2e/reset",
+            headers={"X-Dojo-E2E-Token": "acceptance-secret"},
+            json={"scenario": E2EScenario.ONBOARDING_EMPTY.value},
+        )
+        assert reset.status_code == 200
+        assert client.get("/api/onboarding/google/status").status_code == 200
+
+        configure = client.post("/__e2e/google-sheets", json={"spreadsheet_id": "e2e-aspire-sheet"})
+        assert configure.status_code == 200
+        client.post("/__e2e/google-session", json={"scopes": [GOOGLE_DRIVE_FILE_SCOPE]})
+
+        denied = client.post(
+            "/api/import/google-sheet/analyze",
+            json={"sheet_url_or_id": "e2e-aspire-sheet"},
+        )
+        assert denied.status_code == 403
+        assert client.get("/__e2e/google-sheets").json()["call_count"] == 0
+
+        reset = client.post(
+            "/__e2e/reset",
+            headers={"X-Dojo-E2E-Token": "acceptance-secret"},
+            json={"scenario": E2EScenario.ONBOARDING_EMPTY.value},
+        )
+        assert reset.status_code == 200
+        assert client.get("/api/onboarding/google/status").status_code == 200
+        configure = client.post("/__e2e/google-sheets", json={"spreadsheet_id": "e2e-aspire-sheet"})
+        assert configure.status_code == 200
+        client.post(
+            "/__e2e/google-session",
+            json={"scopes": [GOOGLE_DRIVE_FILE_SCOPE, GOOGLE_SHEETS_READONLY_SCOPE]},
+        )
+
+        imported = client.post(
+            "/api/import/google-sheet/analyze",
+            json={"sheet_url_or_id": "e2e-aspire-sheet"},
+        )
+        assert imported.status_code == 200
+        assert client.get("/__e2e/google-sheets").json() == {
+            "spreadsheet_id": "e2e-aspire-sheet",
+            "call_count": 1,
+            "requested_spreadsheet_ids": ["e2e-aspire-sheet"],
+        }

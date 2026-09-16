@@ -43,6 +43,7 @@ def create_app(app_settings: Settings | None = None) -> FastAPI:
         app.state.oauth_token_store = OAuthTokenStore()
         if settings.app_env == "e2e":
             app.state.e2e_reset_lock = Lock()
+            app.state.e2e_google_sheets = None
         try:
             yield
         finally:

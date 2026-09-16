@@ -6,17 +6,19 @@ import os
 import shutil
 from argparse import ArgumentParser
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import StrEnum
 from fcntl import LOCK_EX, flock
 from importlib.metadata import version
 from pathlib import Path
 from time import perf_counter
-from typing import Iterator
+from typing import Any, Iterator, cast
 
 from dojo.clock import FrozenClock
 from dojo.database import Database
+from dojo.fixture_data import DEFAULT_FIXTURE
+from dojo.importer import NamedRangeMatrix
 from dojo.migrations import apply_migrations
 from dojo.sql import SQL_ROOT, load_sql
 
@@ -49,6 +51,43 @@ class E2EResetMetrics:
     db_bytes: int
     restore_ms: float
     reopen_ms: float
+
+
+@dataclass(slots=True)
+class E2EGoogleSheetsStub:
+    spreadsheet_id: str
+    call_count: int = 0
+    requested_spreadsheet_ids: list[str] = field(default_factory=list)
+
+    def fetch(
+        self,
+        *,
+        spreadsheet_id: str,
+        access_token: str,
+        allowed_normalized_aliases: set[str],
+    ) -> tuple[str, list[str], dict[str, NamedRangeMatrix]]:
+        del access_token
+        self.call_count += 1
+        self.requested_spreadsheet_ids.append(spreadsheet_id)
+        if spreadsheet_id != self.spreadsheet_id:
+            raise ValueError(f"Unexpected E2E spreadsheet ID: {spreadsheet_id}")
+
+        fixture = cast(dict[str, Any], DEFAULT_FIXTURE)
+        named_ranges = cast(dict[str, NamedRangeMatrix], fixture["named_ranges"])
+        selected_names = [
+            name
+            for name in named_ranges
+            if _normalize_named_range_name(name) in allowed_normalized_aliases
+        ]
+        return (
+            cast(str, fixture["spreadsheet_title"]),
+            selected_names,
+            {name: named_ranges[name] for name in selected_names},
+        )
+
+
+def _normalize_named_range_name(name: str) -> str:
+    return "".join(character for character in name.casefold() if character.isalnum())
 
 
 def fixed_e2e_clock() -> FrozenClock:

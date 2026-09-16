@@ -59,6 +59,7 @@ from dojo.drive_backup import (
     access_token_from_credential,
     verify_drive_folder,
 )
+from dojo.e2e import E2EGoogleSheetsStub
 from dojo.google import (
     DOJO_GRANTED_SCOPES_KEY,
     OAuthTokenStore,
@@ -149,6 +150,27 @@ def _require_google_sheets_authorization(token: dict[str, Any]) -> str:
             },
         )
     return cast(str, access_token)
+
+
+def _fetch_google_sheet_named_ranges(
+    request: Request,
+    *,
+    spreadsheet_id: str,
+    access_token: str,
+    allowed_normalized_aliases: set[str],
+) -> tuple[str, list[str], dict[str, list[list[str]]]]:
+    e2e_stub = getattr(request.app.state, "e2e_google_sheets", None)
+    if isinstance(e2e_stub, E2EGoogleSheetsStub):
+        return e2e_stub.fetch(
+            spreadsheet_id=spreadsheet_id,
+            access_token=access_token,
+            allowed_normalized_aliases=allowed_normalized_aliases,
+        )
+    return fetch_sheet_named_ranges(
+        spreadsheet_id=spreadsheet_id,
+        access_token=access_token,
+        allowed_normalized_aliases=allowed_normalized_aliases,
+    )
 
 
 @router.get("/app/status")
@@ -336,7 +358,8 @@ def import_google_sheet(request: Request, payload: ImportRequest) -> dict[str, A
     access_token = _require_google_sheets_authorization(token)
     try:
         spreadsheet_id = extract_sheet_id(raw)
-        title, available_named_ranges, named_ranges = fetch_sheet_named_ranges(
+        title, available_named_ranges, named_ranges = _fetch_google_sheet_named_ranges(
+            request,
             spreadsheet_id=spreadsheet_id,
             access_token=access_token,
             allowed_normalized_aliases=consumed_named_range_aliases(),
@@ -385,7 +408,8 @@ def analyze_google_sheet(request: Request, payload: ImportRequest) -> dict[str, 
     access_token = _require_google_sheets_authorization(token)
     try:
         spreadsheet_id = extract_sheet_id(raw)
-        title, available_named_ranges, named_ranges = fetch_sheet_named_ranges(
+        title, available_named_ranges, named_ranges = _fetch_google_sheet_named_ranges(
+            request,
             spreadsheet_id=spreadsheet_id,
             access_token=access_token,
             allowed_normalized_aliases=consumed_named_range_aliases(),
