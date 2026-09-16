@@ -3,6 +3,10 @@
 ## Unreleased
 
 <!-- Release automation promotes these notes to the next patch version on master. -->
+
+## v0.0.2 - 2026-09-16
+
+<!-- Release automation promotes these notes to the next patch version on master. -->
 The entries below describe the completed implementation. Earlier service-account wording in repository history is historical and superseded by the user-OAuth design described here.
 
 - Added a merge-driven patch-release workflow that keeps package metadata, release tags, container images, and GitHub Releases aligned.
