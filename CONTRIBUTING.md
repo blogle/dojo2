@@ -65,6 +65,25 @@ Use narrow commands while iterating:
 
 Before finishing a change, run `just check`. For CI-equivalent verification, run `just ci`.
 
+## Version And Release Process
+
+Git tags named `vMAJOR.MINOR.PATCH` are the release authority. The API and web
+package manifests track the latest released tag, and `CHANGELOG.md` keeps the
+latest release in a dated version section. Add meaningful notes under
+`Unreleased`; do not create a version section in a feature PR.
+
+After a merge to `master`, the release workflow promotes non-empty `Unreleased`
+notes to the next patch version, updates both package manifests, commits that
+metadata with `[skip ci]`, creates the annotated tag, publishes the matching
+`ghcr.io/blogle/dojo2:vX.Y.Z` image, and creates a GitHub Release. An empty
+`Unreleased` section is a no-op. The current post-`v0.0.1` notes will therefore
+become `v0.0.2` when this work reaches `master`.
+
+For local preparation or recovery, use `just release-next-version` to inspect
+the calculated version and `just release-prepare <version>` to perform the
+same changelog and manifest promotion without committing or tagging. Resolve
+workflow failures before retrying; do not force-move an existing release tag.
+
 ## Repository Structure
 
 - `api/src/dojo/`: backend application code

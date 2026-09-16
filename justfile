@@ -61,6 +61,30 @@ test-e2e:
 test-e2e-spec spec:
 	web/scripts/run-e2e.sh "{{spec}}"
 
+record-flows:
+	web/scripts/run-e2e.sh --record
+
+record-flow flow:
+	web/scripts/run-e2e.sh --record "{{flow}}"
+
+storyboard:
+	@set -euo pipefail; \
+	output_dir="storyboards"; \
+	log="$(mktemp)"; \
+	trap 'rm -f "$log"' EXIT; \
+	web/scripts/run-e2e.sh --record | tee "$log"; \
+	recording_dir="$(while IFS= read -r line; do case "$line" in "Recording directory: "*) printf '%s\n' "${line#Recording directory: }";; esac; done < "$log")"; \
+	test -n "$recording_dir"; \
+	mkdir -p "$output_dir"; \
+	count=0; \
+	for source in "$recording_dir"/*.storyboard.png; do \
+		if [[ ! -f "$source" ]]; then continue; fi; \
+		cp "$source" "$output_dir/"; \
+		count=$((count + 1)); \
+	done; \
+	test "$count" -eq 6; \
+	printf 'Generated %s storyboard files in %s\n' "$count" "$output_dir"
+
 profile-e2e:
 	web/scripts/profile-e2e.sh
 
@@ -88,7 +112,7 @@ format-check:
 
 typecheck:
 	@printf '==> type checking api\n'
-	cd api && uv run mypy src
+	cd api && uv run python -m mypy src
 	@printf '==> type checking web\n'
 	cd web && pnpm typecheck
 
@@ -103,6 +127,12 @@ migration-check:
 docs:
 	@printf '==> building docs\n'
 	cd docs && mdbook build
+
+release-next-version:
+	python3 scripts/release.py next-version
+
+release-prepare version:
+	python3 scripts/release.py promote "{{version}}" "$$(date -u +%F)"
 
 docs-serve:
 	cd docs && mdbook serve

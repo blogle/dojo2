@@ -2,8 +2,10 @@
 
 ## Unreleased
 
+<!-- Release automation promotes these notes to the next patch version on master. -->
 The entries below describe the completed implementation. Earlier service-account wording in repository history is historical and superseded by the user-OAuth design described here.
 
+- Added a merge-driven patch-release workflow that keeps package metadata, release tags, container images, and GitHub Releases aligned.
 - Replaced service-account Drive backups with purpose-specific user OAuth: Aspire uses one combined Sheets-and-Drive grant, Start empty uses Drive-only access, and Google Picker plus direct Drive probes configure the folder. Added API-owned AES-256-GCM credentials, short-lived broker tokens, a shared local/Kubernetes uploader, degraded readiness and repair behavior, and OpenTofu API-key/project-service provisioning.
 
 - Hardened the OAuth backup state machine so legacy folders remain degraded until reverified against the current credential with `drive.file`, distinguished writable-folder failures from reauthorization, validated generated and restore Kubernetes Jobs offline, and documented an independent break-glass restore rehearsal.
@@ -12,6 +14,9 @@ The entries below describe the completed implementation. Earlier service-account
 - Added aggregate validation and complete decision parsing to reviewed Aspire commits, including an executable reviewed-path fixture rehearsal.
 - Added transaction version tokens, stale-write conflicts, and success-only transaction form, undo, and removal feedback.
 - Added manifest-verified DuckDB backup/restore commands, OpenEBS ZFS snapshot orchestration, encrypted rotating restic backups through rclone to Google Drive, and new-PVC restore resources.
+- Added six asserted product-flow recordings, deterministic Aspire migration coverage with an insufficient-Sheets-scope regression, and `just storyboard` to generate tracked visual flow overviews without committing videos or checkpoint artifacts.
+
+## v0.0.1 - 2026-09-02
 
 - Added account-local reconciliation drafts, persisted source evidence, digest-checked idempotent apply with explicit balance adjustments, reopening status, working-set/history endpoints, and a balance-first budget-account action.
 - Fixed first-run onboarding and Aspire migration when the development frontend is opened from a non-localhost address by routing default browser API traffic through Vite's same-origin proxy and binding OAuth callbacks to the initiating session and frontend origin, with regression coverage for both paths.

@@ -10,9 +10,43 @@ on:
     tags: ["staging", "v*"]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
+  prepare-release:
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: DeterminateSystems/nix-installer-action@main
+      - name: Determine and prepare next patch release
+        id: release
+        shell: bash
+        run: |
+          version="$(nix develop --command just release-next-version)"
+          nix develop --command just release-prepare "$version"
+          if git diff --quiet -- CHANGELOG.md api/pyproject.toml api/uv.lock web/package.json; then
+            echo "created=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "created=true" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Commit and tag release
+        if: steps.release.outputs.created == 'true'
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md api/pyproject.toml api/uv.lock web/package.json
+          git commit -m "chore(release): v${VERSION} [skip ci]"
+          git tag --annotate "v${VERSION}" --message "dojo v${VERSION}"
+          git push origin HEAD:master "v${VERSION}"
+
   publish-image:
     runs-on: ubuntu-latest
     permissions:
@@ -45,3 +79,16 @@ jobs:
         run: |
           docker tag dojo-release:latest "ghcr.io/blogle/dojo2:${GITHUB_REF_NAME}"
           docker push "ghcr.io/blogle/dojo2:${GITHUB_REF_NAME}"
+
+  create-release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: publish-image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "$GITHUB_REF_NAME" --title "dojo $GITHUB_REF_NAME" --generate-notes --verify-tag

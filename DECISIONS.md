@@ -223,6 +223,20 @@ Add GitHub Actions CI now and make it run the same `just` commands developers us
 
 Local and remote verification stay consistent, and changes to workflow commands should happen in one place instead of diverging between CI and development.
 
+## 2026-09-15 — Use merge-driven patch releases
+
+### Context
+
+The repository had a `v0.0.1` tag, but its changelog entries were still grouped under `Unreleased`, package manifests reported `0.1.0`, and the release workflow only published images after a tag was created manually.
+
+### Decision
+
+Use Git tags as the release authority and promote a non-empty `CHANGELOG.md` `Unreleased` section to the next patch version on every qualifying push to `master`. The release workflow updates the API and web package versions, commits the release metadata, creates the annotated tag, publishes the versioned container, and creates a GitHub Release. Empty release notes are a no-op.
+
+### Consequence
+
+Merges are self-contained release inputs and the current post-`v0.0.1` work will become `v0.0.2` automatically. Release metadata is intentionally a bot-authored follow-up commit, so feature PRs only maintain `Unreleased` notes and do not race with a future version number.
+
 ## 2026-06-10 — Adopt self-contained ExecPlans for complex implementation work
 
 ### Context

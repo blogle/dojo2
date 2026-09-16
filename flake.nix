@@ -65,10 +65,12 @@
             just
             ruff
             duckdb
+            ffmpeg
             mdbook
             restic
             rclone
             kubectl
+            yq-go
             opentofu
             google-cloud-sdk
             git

@@ -59,12 +59,15 @@ from dojo.drive_backup import (
     access_token_from_credential,
     verify_drive_folder,
 )
+from dojo.e2e import E2EGoogleSheetsStub
 from dojo.google import (
-    GOOGLE_DRIVE_FILE_SCOPE,
+    DOJO_GRANTED_SCOPES_KEY,
     OAuthTokenStore,
     build_google_auth_url,
     exchange_google_code,
     fetch_sheet_named_ranges,
+    normalized_granted_scopes,
+    requested_google_scopes,
 )
 from dojo.importer import consumed_named_range_aliases, extract_sheet_id
 from dojo.service import (
@@ -110,11 +113,13 @@ def oauth_status_payload(request: Request) -> dict[str, Any]:
     settings = get_settings(request)
     session_id = get_or_create_oauth_session_id(request)
     token_store = get_oauth_token_store(request)
+    token = token_store.get(session_id)
     has_backup_credential = get_service(request).has_backup_credential()
     return {
         "configured": settings.oauth_configured,
         "fixture_mode": settings.dev_fixture_mode,
-        "authorized": token_store.has(session_id),
+        "authorized": token is not None
+        and GOOGLE_SHEETS_READONLY_SCOPE in token.get(DOJO_GRANTED_SCOPES_KEY, ()),
         "backup_authorized": has_backup_credential,
         "backup_reauthorization_required": not has_backup_credential,
         "message": (
@@ -123,6 +128,49 @@ def oauth_status_payload(request: Request) -> dict[str, Any]:
             else "Google OAuth is not configured in this environment."
         ),
     }
+
+
+def _require_google_sheets_authorization(token: dict[str, Any]) -> str:
+    access_token = token.get("access_token")
+    if not access_token:
+        raise HTTPException(
+            status_code=400,
+            detail="Google OAuth succeeded, but this session does not have a usable access token.",
+        )
+    granted_scopes = token.get(DOJO_GRANTED_SCOPES_KEY, ())
+    if GOOGLE_SHEETS_READONLY_SCOPE not in granted_scopes:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "google_sheets_authorization_required",
+                "message": (
+                    "Google Sheets access was not granted. Connect Google again to continue "
+                    "the Aspire migration."
+                ),
+            },
+        )
+    return cast(str, access_token)
+
+
+def _fetch_google_sheet_named_ranges(
+    request: Request,
+    *,
+    spreadsheet_id: str,
+    access_token: str,
+    allowed_normalized_aliases: set[str],
+) -> tuple[str, list[str], dict[str, list[list[str]]]]:
+    e2e_stub = getattr(request.app.state, "e2e_google_sheets", None)
+    if isinstance(e2e_stub, E2EGoogleSheetsStub):
+        return e2e_stub.fetch(
+            spreadsheet_id=spreadsheet_id,
+            access_token=access_token,
+            allowed_normalized_aliases=allowed_normalized_aliases,
+        )
+    return fetch_sheet_named_ranges(
+        spreadsheet_id=spreadsheet_id,
+        access_token=access_token,
+        allowed_normalized_aliases=allowed_normalized_aliases,
+    )
 
 
 @router.get("/app/status")
@@ -237,13 +285,7 @@ def start_google_onboarding(
         "auth_url": build_google_auth_url(
             client_id=settings.google_oauth_client_id,
             redirect_uri=settings.google_oauth_redirect_uri,
-            scopes=" ".join(
-                (
-                    (GOOGLE_SHEETS_READONLY_SCOPE, GOOGLE_DRIVE_FILE_SCOPE)
-                    if request_payload.purpose == "aspire_migration"
-                    else (GOOGLE_DRIVE_FILE_SCOPE,)
-                )
-            ),
+            scopes=" ".join(requested_google_scopes(request_payload.purpose)),
             state=state,
         ),
         "callback_origin": f"{callback.scheme}://{callback.netloc}",
@@ -268,26 +310,19 @@ def google_callback(request: Request, code: str, state: str) -> HTMLResponse:
         redirect_uri=settings.google_oauth_redirect_uri,
         code=code,
     )
+    granted_scopes = normalized_granted_scopes(token, requested_scopes_for=pending.purpose)
+    token[DOJO_GRANTED_SCOPES_KEY] = granted_scopes
     token_store.set(pending.session_id, token)
     refresh_token = token.get("refresh_token")
     if isinstance(refresh_token, str) and refresh_token.strip():
         try:
             encryption_key = load_encryption_key(settings.credential_encryption_key_file)
-            granted_scopes = token.get("scope")
-            if not isinstance(granted_scopes, str) or not granted_scopes.strip():
-                granted_scopes = " ".join(
-                    (
-                        (GOOGLE_SHEETS_READONLY_SCOPE, GOOGLE_DRIVE_FILE_SCOPE)
-                        if pending.purpose == "aspire_migration"
-                        else (GOOGLE_DRIVE_FILE_SCOPE,)
-                    )
-                )
             encrypted = encrypt_refresh_token(
                 refresh_token,
                 credential_id=SYSTEM_BACKUP_CREDENTIAL_ID,
                 key=encryption_key,
             )
-            get_service(request).store_backup_credential(encrypted, granted_scopes)
+            get_service(request).store_backup_credential(encrypted, " ".join(granted_scopes))
         except BackupCredentialError as exc:
             raise HTTPException(
                 status_code=503,
@@ -306,7 +341,7 @@ def import_google_sheet(request: Request, payload: ImportRequest) -> dict[str, A
     raw = payload.sheet_url_or_id
     normalized = raw.strip().casefold()
     if normalized in {"fixture", "fixture://default", "default"} or (
-        settings.dev_fixture_mode and not settings.oauth_configured
+        settings.dev_fixture_mode and settings.app_env != "e2e" and not settings.oauth_configured
     ):
         return service.import_sheet_data(source="fixture://default", source_kind="fixture")
 
@@ -320,17 +355,13 @@ def import_google_sheet(request: Request, payload: ImportRequest) -> dict[str, A
                 "Complete the OAuth step and try again."
             ),
         )
-    access_token = token.get("access_token")
-    if not access_token:
-        raise HTTPException(
-            status_code=400,
-            detail="Google OAuth succeeded, but this session does not have a usable access token.",
-        )
+    access_token = _require_google_sheets_authorization(token)
     try:
         spreadsheet_id = extract_sheet_id(raw)
-        title, available_named_ranges, named_ranges = fetch_sheet_named_ranges(
+        title, available_named_ranges, named_ranges = _fetch_google_sheet_named_ranges(
+            request,
             spreadsheet_id=spreadsheet_id,
-            access_token=cast(str, access_token),
+            access_token=access_token,
             allowed_normalized_aliases=consumed_named_range_aliases(),
         )
     except Exception as exc:
@@ -360,7 +391,7 @@ def analyze_google_sheet(request: Request, payload: ImportRequest) -> dict[str, 
     raw = payload.sheet_url_or_id
     normalized = raw.strip().casefold()
     if normalized in {"fixture", "fixture://default", "default"} or (
-        settings.dev_fixture_mode and not settings.oauth_configured
+        settings.dev_fixture_mode and settings.app_env != "e2e" and not settings.oauth_configured
     ):
         return service.analyze_import_draft(source="fixture://default", source_kind="fixture")
 
@@ -374,17 +405,13 @@ def analyze_google_sheet(request: Request, payload: ImportRequest) -> dict[str, 
                 "Complete the OAuth step and try again."
             ),
         )
-    access_token = token.get("access_token")
-    if not access_token:
-        raise HTTPException(
-            status_code=400,
-            detail="Google OAuth succeeded, but this session does not have a usable access token.",
-        )
+    access_token = _require_google_sheets_authorization(token)
     try:
         spreadsheet_id = extract_sheet_id(raw)
-        title, available_named_ranges, named_ranges = fetch_sheet_named_ranges(
+        title, available_named_ranges, named_ranges = _fetch_google_sheet_named_ranges(
+            request,
             spreadsheet_id=spreadsheet_id,
-            access_token=cast(str, access_token),
+            access_token=access_token,
             allowed_normalized_aliases=consumed_named_range_aliases(),
         )
     except Exception as exc:

@@ -6,17 +6,19 @@ import os
 import shutil
 from argparse import ArgumentParser
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import StrEnum
 from fcntl import LOCK_EX, flock
 from importlib.metadata import version
 from pathlib import Path
 from time import perf_counter
-from typing import Iterator
+from typing import Any, Iterator, cast
 
 from dojo.clock import FrozenClock
 from dojo.database import Database
+from dojo.fixture_data import DEFAULT_FIXTURE
+from dojo.importer import NamedRangeMatrix
 from dojo.migrations import apply_migrations
 from dojo.sql import SQL_ROOT, load_sql
 
@@ -24,6 +26,7 @@ E2E_FIXED_TIME = datetime(2026, 2, 15, 12, 0, tzinfo=timezone.utc)
 
 
 class E2EScenario(StrEnum):
+    ONBOARDING_EMPTY = "onboarding-empty"
     ASSETS_LIABILITIES_OVERVIEW = "assets-liabilities-overview"
     TANGIBLE_ASSET_CREATION = "tangible-asset-creation"
     TRACKING_SNAPSHOT_CORRECTION = "tracking-snapshot-correction"
@@ -50,12 +53,50 @@ class E2EResetMetrics:
     reopen_ms: float
 
 
+@dataclass(slots=True)
+class E2EGoogleSheetsStub:
+    spreadsheet_id: str
+    call_count: int = 0
+    requested_spreadsheet_ids: list[str] = field(default_factory=list)
+
+    def fetch(
+        self,
+        *,
+        spreadsheet_id: str,
+        access_token: str,
+        allowed_normalized_aliases: set[str],
+    ) -> tuple[str, list[str], dict[str, NamedRangeMatrix]]:
+        del access_token
+        self.call_count += 1
+        self.requested_spreadsheet_ids.append(spreadsheet_id)
+        if spreadsheet_id != self.spreadsheet_id:
+            raise ValueError(f"Unexpected E2E spreadsheet ID: {spreadsheet_id}")
+
+        fixture = cast(dict[str, Any], DEFAULT_FIXTURE)
+        named_ranges = cast(dict[str, NamedRangeMatrix], fixture["named_ranges"])
+        selected_names = [
+            name
+            for name in named_ranges
+            if _normalize_named_range_name(name) in allowed_normalized_aliases
+        ]
+        return (
+            cast(str, fixture["spreadsheet_title"]),
+            selected_names,
+            {name: named_ranges[name] for name in selected_names},
+        )
+
+
+def _normalize_named_range_name(name: str) -> str:
+    return "".join(character for character in name.casefold() if character.isalnum())
+
+
 def fixed_e2e_clock() -> FrozenClock:
     return FrozenClock(E2E_FIXED_TIME, business_date=E2E_FIXED_TIME.date())
 
 
 def fixture_sql(scenario: E2EScenario) -> tuple[str, ...]:
     scenario_sql = {
+        E2EScenario.ONBOARDING_EMPTY: (),
         E2EScenario.ASSETS_LIABILITIES_OVERVIEW: ("tests/e2e/scenarios/al_01_overview",),
         E2EScenario.TANGIBLE_ASSET_CREATION: ("tests/e2e/scenarios/al_02_tangible_creation",),
         E2EScenario.TRACKING_SNAPSHOT_CORRECTION: (
@@ -66,6 +107,8 @@ def fixture_sql(scenario: E2EScenario) -> tuple[str, ...]:
         E2EScenario.LINKED_LOAN_PAYMENT: ("tests/e2e/scenarios/al_06_linked_loan_payment",),
         E2EScenario.TRACKING_CUTOVER: ("tests/e2e/scenarios/al_07_tracking_cutover",),
     }
+    if scenario is E2EScenario.ONBOARDING_EMPTY:
+        return ()
     return ("tests/e2e/core", *scenario_sql[scenario])
 
 

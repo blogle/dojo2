@@ -22,6 +22,7 @@ GOOGLE_ASPIRE_MIGRATION_SCOPES = (
     GOOGLE_DRIVE_FILE_SCOPE,
 )
 GOOGLE_BACKUP_SCOPES = (GOOGLE_DRIVE_FILE_SCOPE,)
+DOJO_GRANTED_SCOPES_KEY = "dojo_granted_scopes"
 
 MAX_RETRIES = 3
 
@@ -64,6 +65,26 @@ def build_google_auth_url(
         login_hint="",
     )
     return str(url)
+
+
+def requested_google_scopes(purpose: str) -> tuple[str, ...]:
+    if purpose == "aspire_migration":
+        return GOOGLE_ASPIRE_MIGRATION_SCOPES
+    if purpose == "backup":
+        return GOOGLE_BACKUP_SCOPES
+    raise ValueError(f"Unsupported Google OAuth purpose: {purpose}")
+
+
+def normalized_granted_scopes(
+    token: dict[str, Any], *, requested_scopes_for: str
+) -> tuple[str, ...]:
+    """Return Google's explicit grants, or the pending purpose's scopes when omitted."""
+    if "scope" not in token:
+        return requested_google_scopes(requested_scopes_for)
+    returned_scopes = token["scope"]
+    if isinstance(returned_scopes, str):
+        return tuple(sorted(set(returned_scopes.split())))
+    return ()
 
 
 @_TRANSIENT_RETRY

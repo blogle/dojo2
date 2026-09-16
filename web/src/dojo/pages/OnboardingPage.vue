@@ -147,8 +147,17 @@ async function handleSubmitSheet() {
       throw new Error("Analysis did not return review data. Please try again.");
     }
   } catch (err) {
-    errorMessage.value =
-      err instanceof Error ? err.message : "Import failed. Please try again.";
+    if (
+      !(err instanceof ApiError) ||
+      err.code !== "google_sheets_authorization_required"
+    ) {
+      errorMessage.value =
+        err instanceof Error ? err.message : "Import failed. Please try again.";
+      step.value = "migrate-form";
+      return;
+    }
+
+    errorMessage.value = err.message;
     step.value = "migrate-form";
   }
 }
@@ -542,8 +551,7 @@ const showInvalidSheetId = computed(
                 Google authorization was denied
               </p>
               <p class="onboarding__error-desc">
-                We couldn't access your Google Account. Please try again or
-                cancel to return.
+                {{ errorMessage }}
               </p>
             </div>
           </Inline>

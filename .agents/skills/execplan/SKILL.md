@@ -1,6 +1,6 @@
 ---
 name: execplan
-description: Create and execute self-contained, living implementation plans (ExecPlans) for complex coding tasks involving multiple files, schema changes, migrations, or significant refactoring. Use before starting non-trivial work; do not use for typo fixes or trivial edits.
+description: Create and execute self-contained, living implementation plans (ExecPlans) for complex coding work. ExecPlans follow the canonical OpenAI ExecPlan discipline but persist their specification, milestones, progress, discoveries, decisions, and retrospective in Lific rather than repository-side plan files. Use before non-trivial multi-file, schema, migration, infrastructure, or refactoring work; do not use for trivial edits.
 license: MIT
 metadata:
   audience: agents
@@ -9,148 +9,478 @@ metadata:
 
 # Execution Plans (ExecPlans)
 
-This document describes the requirements for an execution plan ("ExecPlan"), a design document that a coding agent can follow to deliver a working feature or system change. Treat the reader as a complete beginner to this repository: they have only the current working tree and the single ExecPlan file you provide. There is no memory of prior plans and no external context.
+An ExecPlan is a self-contained, living implementation specification that a coding agent can follow to deliver a working feature or system change.
 
-## How to use ExecPlans and PLANS.md
+Follow the canonical OpenAI ExecPlan principles from:
 
-When authoring an executable specification (ExecPlan), follow PLANS.md _to the letter_. If it is not in your context, refresh your memory by reading the entire PLANS.md file. Be thorough in reading (and re-reading) source material to produce an accurate specification. When creating a spec, start from the skeleton and flesh it out as you do your research.
+https://developers.openai.com/cookbook/articles/codex_exec_plans
 
-All ExecPlans in this repository live under the `./docs/plans` directory. When you create a new plan, add a Markdown file inside `./docs/plans/`, name it after the feature or system being delivered, and reference it by that path in reviews. Do not scatter ExecPlans elsewhere; consolidating them here keeps discovery, maintenance, and retrospectives consistent.
+This skill adapts that planning discipline to Lific.
 
-When implementing an executable specification (ExecPlan), do not prompt the user for "next steps"; simply proceed to the next milestone. Keep all sections up to date, add or split entries in the list at every stopping point to affirmatively state the progress made and next steps. Resolve ambiguities autonomously, and commit frequently.
+Lific is the persistent system of record for ExecPlans. Do not create, maintain, or update repository-side Markdown ExecPlan files unless project-local instructions explicitly override this rule.
 
-When discussing an executable specification (ExecPlan), record decisions in a log in the spec for posterity; it should be unambiguously clear why any change to the specification was made. ExecPlans are living documents, and it should always be possible to restart from _only_ the ExecPlan and no other work.
+Use the companion `lific` skill for the mechanics and semantics of reading and modifying Lific.
 
-When researching a design with challenging requirements or significant unknowns, use milestones to implement proof of concepts, "toy implementations", etc., that allow validating whether the user's proposal is feasible. Read the source code of libraries by finding or acquiring them, research deeply, and include prototypes to guide a fuller implementation.
+## The central rule
 
-## Requirements
+An ExecPlan is a planning protocol, not a Markdown file.
 
-NON-NEGOTIABLE REQUIREMENTS:
+For this repository, the persistent representation of an ExecPlan is:
 
-- Every ExecPlan must be fully self-contained. Self-contained means that in its current form it contains all knowledge and instructions needed for a novice to succeed.
-- Every ExecPlan is a living document. Contributors are required to revise it as progress is made, as discoveries occur, and as design decisions are finalized. Each revision must remain fully self-contained.
-- Every ExecPlan must enable a complete novice to implement the feature end-to-end without prior knowledge of this repo.
-- Every ExecPlan must produce a demonstrably working behavior, not merely code changes to "meet a definition".
-- Every ExecPlan must define every term of art in plain language or do not use it.
+* one anchor Lific issue containing the durable outcome specification;
+* one Lific Plan containing milestones and executable steps;
+* linked Lific issues for independently meaningful deliverables when useful;
+* comments recording progress, discoveries, decisions, evidence, and retrospective material.
 
-Purpose and intent come first. Begin by explaining, in a few sentences, why the work matters from a user's perspective: what someone can do after this change that they could not do before, and how to see it working. Then guide the reader through the exact steps to achieve that outcome, including what to edit, what to run, and what they should observe.
+Together these objects form the ExecPlan.
 
-The agent executing your plan can list files, read files, search, run the project, and run tests. It does not know any prior context and cannot infer what you meant from earlier milestones. Repeat any assumption you rely on. Do not point to external blogs or docs; if knowledge is required, embed it in the plan itself in your own words. If an ExecPlan builds upon a prior ExecPlan and that file is checked in, incorporate it by reference. If it is not, you must include all relevant context from that plan.
+Do not create a second mutable representation under `docs/plans`, `plans`, or another repository directory. Two living copies create divergence.
 
-## Formatting
+Source-controlled documents remain authoritative for permanent product and architecture knowledge. If an ExecPlan discovers information future contributors must know independent of this execution effort, promote that information into the appropriate repository document, code comment, test, ADR, specification, or runbook.
 
-Format and envelope are simple and strict. Each ExecPlan must be one single fenced code block labeled as `md` that begins and ends with triple backticks. Do not nest additional triple-backtick code fences inside; when you need to show commands, transcripts, diffs, or code, present them as indented blocks within that single fence. Use indentation for clarity rather than code fences inside an ExecPlan to avoid prematurely closing the ExecPlan's code fence. Use two newlines after every heading, use # and ## and so on, and correct syntax for ordered and unordered lists.
+## When an ExecPlan is required
 
-When writing an ExecPlan to a Markdown (.md) file where the content of the file *is only* the single ExecPlan, you should omit the triple backticks.
+Use an ExecPlan before beginning work that has meaningful execution complexity, such as:
 
-Write in plain prose. Prefer sentences over lists. Avoid checklists, tables, and long enumerations unless brevity would obscure meaning. Checklists are permitted only in the `Progress` section, where they are mandatory. Narrative sections must remain prose-first.
+* changes spanning several subsystems or files;
+* schema or data migrations;
+* architectural changes;
+* significant refactoring;
+* infrastructure or deployment changes;
+* features requiring coordinated frontend and backend work;
+* changes with non-trivial rollback or data-safety concerns;
+* work with important unknowns that should be de-risked through prototypes;
+* tasks likely to outlive one agent context;
+* tasks containing several independently verifiable milestones.
 
-## Guidelines
+Do not create an ExecPlan for typo fixes, obvious one-file changes, tiny styling adjustments, mechanical dependency bumps, or similarly trivial edits.
 
-Self-containment and plain language are paramount. If you introduce a phrase that is not ordinary English ("daemon", "middleware", "RPC gateway", "filter graph"), define it immediately and remind the reader how it manifests in this repository (for example, by naming the files or commands where it appears). Do not say "as defined previously" or "according to the architecture doc." Include the needed explanation here, even if you repeat yourself.
+When uncertain, prefer an ExecPlan if loss of reasoning or execution state would make a stateless agent meaningfully less likely to complete the task safely.
 
-Avoid common failure modes. Do not rely on undefined jargon. Do not describe "the letter of a feature" so narrowly that the resulting code compiles but does nothing meaningful. Do not outsource key decisions to the reader. When ambiguity exists, resolve it in the plan itself and explain why you chose that path. Err on the side of over-explaining user-visible effects and under-specifying incidental implementation details.
+## Required properties
 
-Anchor the plan with observable outcomes. State what the user can do after implementation, the commands to run, and the outputs they should see. Acceptance should be phrased as behavior a human can verify ("after starting the server, navigating to [http://localhost:8080/health](http://localhost:8080/health) returns HTTP 200 with body OK") rather than internal attributes ("added a HealthCheck struct"). If a change is internal, explain how its impact can still be demonstrated (for example, by running tests that fail before and pass after, and by showing a scenario that uses the new behavior).
+Every ExecPlan must remain:
 
-Specify repository context explicitly. Name files with full repository-relative paths, name functions and modules precisely, and describe where new files should be created. If touching multiple areas, include a short orientation paragraph that explains how those parts fit together so a novice can navigate confidently. When running commands, show the working directory and exact command line. When outcomes depend on environment, state the assumptions and provide alternatives when reasonable.
+* self-contained;
+* self-sufficient;
+* understandable by a contributor unfamiliar with the repository;
+* explicit about purpose and user-visible outcome;
+* executable without access to prior conversation context;
+* living and updated throughout implementation;
+* outcome-focused rather than code-change-focused;
+* independently verifiable at meaningful milestones;
+* explicit about validation and recovery.
 
-Be idempotent and safe. Write the steps so they can be run multiple times without causing damage or drift. If a step can fail halfway, include how to retry or adapt. If a migration or destructive operation is necessary, spell out backups or safe fallbacks. Prefer additive, testable changes that can be validated as you go.
+A stateless agent must be able to reconstruct the current implementation state by reading the anchor issue, Lific Plan, relevant linked issues, and execution comments.
 
-Validation is not optional. Include instructions to run tests, to start the system if applicable, and to observe it doing something useful. Describe comprehensive testing for any new features or capabilities. Include expected outputs and error messages so a novice can tell success from failure. Where possible, show how to prove that the change is effective beyond compilation (for example, through a small end-to-end scenario, a CLI invocation, or an HTTP request/response transcript). State the exact test commands appropriate to the project's toolchain and how to interpret their results.
+Do not rely on conversational memory.
 
-Capture evidence. When your steps produce terminal output, short diffs, or logs, include them inside the single fenced block as indented examples. Keep them concise and focused on what proves success. If you need to include a patch, prefer file-scoped diffs or small excerpts that a reader can recreate by following your instructions rather than pasting large blobs.
+## Persistence model
 
-## Milestones
+### Anchor issue
 
-Milestones are narrative, not bureaucracy. If you break the work into milestones, introduce each with a brief paragraph that describes the scope, what will exist at the end of the milestone that did not exist before, the commands to run, and the acceptance you expect to observe. Keep it readable as a story: goal, work, result, proof. Progress and milestones are distinct: milestones tell the story, progress tracks granular work. Both must exist. Never abbreviate a milestone merely for the sake of brevity, do not leave out details that could be crucial to a future implementation.
+Every ExecPlan must have an anchor issue.
 
-Each milestone must be independently verifiable and incrementally implement the overall goal of the execution plan.
+The anchor issue contains the durable contract for the initiative. It should remain relatively stable while implementation history accumulates elsewhere.
 
-## Living plans and design decisions
-
-- ExecPlans are living documents. As you make key design decisions, update the plan to record both the decision and the thinking behind it. Record all decisions in the `Decision Log` section.
-- ExecPlans must contain and maintain a `Progress` section, a `Surprises & Discoveries` section, a `Decision Log`, and an `Outcomes & Retrospective` section. These are not optional.
-- When you discover optimizer behavior, performance tradeoffs, unexpected bugs, or inverse/unapply semantics that shaped your approach, capture those observations in the `Surprises & Discoveries` section with short evidence snippets (test output is ideal).
-- If you change course mid-implementation, document why in the `Decision Log` and reflect the implications in `Progress`. Plans are guides for the next contributor as much as checklists for you.
-- At completion of a major task or the full plan, write an `Outcomes & Retrospective` entry summarizing what was achieved, what remains, and lessons learned.
-
-## Prototyping milestones and parallel implementations
-
-It is acceptable, and often encouraged, to include explicit prototyping milestones when they de-risk a larger change. Examples: adding a low-level operator to a dependency to validate feasibility, or exploring two composition orders while measuring optimizer effects. Keep prototypes additive and testable. Clearly label the scope as "prototyping"; describe how to run and observe results; and state the criteria for promoting or discarding the prototype.
-
-Prefer additive code changes followed by subtractions that keep tests passing. Parallel implementations (e.g., keeping an adapter alongside an older path during migration) are fine when they reduce risk or enable tests to continue passing during a large migration. Describe how to validate both paths and how to retire one safely with tests. When working with multiple new libraries or feature areas, consider creating spikes that evaluate the feasibility of these features _independently_ of one another, proving that the external library performs as expected and implements the features we need in isolation.
-
-## Skeleton of a Good ExecPlan
-
-```text
-# <Short, action-oriented description>
-
-This ExecPlan is a living document. The sections `Progress`, `Surprises & Discoveries`, `Decision Log`, and `Outcomes & Retrospective` must be kept up to date as work proceeds.
-
-If PLANS.md file is checked into the repo, reference the path to that file here from the repository root and note that this document must be maintained in accordance with PLANS.md.
+The anchor issue should contain, as appropriate:
 
 ## Purpose / Big Picture
 
-Explain in a few sentences what someone gains after this change and how they can see it working. State the user-visible behavior you will enable.
-
-## Progress
-
-Use a list with checkboxes to summarize granular steps. Every stopping point must be documented here, even if it requires splitting a partially completed task into two ("done" vs. "remaining"). This section must always reflect the actual current state of the work.
-
-- [x] (2025-10-01 13:00Z) Example completed step.
-- [ ] Example incomplete step.
-- [ ] Example partially completed step (completed: X; remaining: Y).
-
-Use timestamps to measure rates of progress.
-
-## Surprises & Discoveries
-
-Document unexpected behaviors, bugs, optimizations, or insights discovered during implementation. Provide concise evidence.
-
-- Observation: ...
-  Evidence: ...
-
-## Decision Log
-
-Record every decision made while working on the plan in the format:
-
-- Decision: ...
-  Rationale: ...
-  Date/Author: ...
-
-## Outcomes & Retrospective
-
-Summarize outcomes, gaps, and lessons learned at major milestones or at completion. Compare the result against the original purpose.
+Explain what becomes possible after the work and how someone can observe that outcome.
 
 ## Context and Orientation
 
-Describe the current state relevant to this task as if the reader knows nothing. Name the key files and modules by full path. Define any non-obvious term you will use. Do not refer to prior plans.
+Explain the relevant current architecture as if the reader is new to the repository.
 
-## Plan of Work
+Name repository-relative paths, major modules, important functions, APIs, data stores, and services.
 
-Describe, in prose, the sequence of edits and additions. For each edit, name the file and location (function, module) and what to insert or change. Keep it concrete and minimal.
+Define non-obvious terminology immediately.
 
-## Concrete Steps
+## Scope
 
-State the exact commands to run and where to run them (working directory). When a command generates output, show a short expected transcript so the reader can compare. This section must be updated as work proceeds.
+Describe the behavior and system changes required to achieve the outcome.
 
 ## Validation and Acceptance
 
-Describe how to start or exercise the system and what to observe. Phrase acceptance as behavior, with specific inputs and outputs. If tests are involved, say "run <project's test command> and expect <N> passed; the new test <name> fails before the change and passes after>".
+Describe observable acceptance behavior and the commands, tests, UI flows, API calls, or other checks that prove completion.
 
 ## Idempotence and Recovery
 
-If steps can be repeated safely, say so. If a step is risky, provide a safe retry or rollback path. Keep the environment clean after completion.
-
-## Artifacts and Notes
-
-Include the most important transcripts, diffs, or snippets as indented examples. Keep them concise and focused on what proves success.
+Document retry behavior, migration safety, rollback or recovery expectations, and any destructive operations.
 
 ## Interfaces and Dependencies
 
-Be prescriptive. Name the libraries, modules, and services to use and why. Specify the types, traits/interfaces, and function signatures that must exist at the end of the milestone. Prefer stable names and paths such as `crate::module::function` or `package.submodule.Interface`.
+Name important libraries, services, interfaces, functions, types, routes, schemas, or external systems the implementation must use.
 
-If you follow the guidance above, a single, stateless agent -- or a human novice -- can read your ExecPlan from top to bottom and produce a working, observable result. That is the bar: SELF-CONTAINED, SELF-SUFFICIENT, NOVICE-GUIDING, OUTCOME-FOCUSED.
+## Constraints
 
-When you revise a plan, you must ensure your changes are comprehensively reflected across all sections, including the living document sections, and you must write a note at the bottom of the plan describing the change and the reason why. ExecPlans must describe not just the what but the why for almost everything.
+Record architecture, compatibility, UX, data-integrity, terminology, design-system, performance, security, or deployment constraints that materially limit implementation choices.
+
+## References
+
+Link relevant repository documentation, designs, external references, issues, commits, PRs, or other evidence.
+
+Do not use the anchor issue as a chronological development log.
+
+### Lific Plan
+
+Every ExecPlan must also have a Lific Plan attached to or associated with the anchor issue.
+
+The Lific Plan replaces the repository-side `Progress` checklist and milestone hierarchy.
+
+Its tree expresses the current executable decomposition.
+
+Top-level steps should normally be meaningful milestones.
+
+Nested steps may represent concrete implementation or validation work.
+
+Each milestone must explain:
+
+* what will exist afterward that does not exist beforehand;
+* the implementation area involved;
+* how to execute the work;
+* how to validate it;
+* what evidence demonstrates success.
+
+Milestones must incrementally advance the overall feature and be independently verifiable where practical.
+
+Do not decompose every command or edit into a plan node. Use enough structure to make state and next actions obvious.
+
+### Linked issues
+
+Create or link separate issues only for work that is independently meaningful.
+
+A plan step is a good candidate for a linked issue when it is independently:
+
+* assignable;
+* schedulable;
+* reviewable;
+* blockable;
+* prioritizable;
+* testable;
+* useful to track outside this one plan.
+
+Do not create tickets merely to mirror every subsection of the ExecPlan.
+
+The ExecPlan remains the canonical cross-cutting implementation model. Linked issues add independently meaningful work tracking; they must not become competing mini-specifications.
+
+### Comments
+
+Use comments as the living chronological record.
+
+Prefer clearly recognizable prefixes:
+
+`[Progress]`
+
+Record meaningful execution progress, stopping points, milestone completion, and the immediate next state.
+
+`[Discovery]`
+
+Record surprising implementation facts, unexpected behavior, library behavior, test evidence, architectural discoveries, performance observations, or other findings that materially affect execution.
+
+Use the shape:
+
+Observation: ...
+
+Evidence: ...
+
+Implication: ...
+
+`[Decision]`
+
+Record implementation or design decisions made during execution.
+
+Use the shape:
+
+Decision: ...
+
+Rationale: ...
+
+Alternatives considered: ...
+
+Author/date: ...
+
+`[Retrospective]`
+
+At major milestones and final completion, record outcomes, remaining gaps, lessons learned, and whether the original purpose was achieved.
+
+Important terminal output, test results, logs, or evidence may also be recorded in comments when they materially help a future agent resume the work.
+
+Do not copy large irrelevant transcripts into Lific.
+
+## Creating a new ExecPlan
+
+Before writing code for qualifying work:
+
+1. Read the relevant repository documentation and implementation thoroughly.
+2. Search Lific for an existing issue or active Plan covering the same outcome.
+3. If one exists, resume or extend it rather than creating a parallel ExecPlan.
+4. Identify unresolved product or architectural seams.
+5. Resolve material product decisions from authoritative project context or explicit user direction rather than silently delegating them to implementation.
+6. Create or identify the anchor issue.
+7. Create the Lific Plan and associate it with the anchor issue.
+8. Populate the milestone tree sufficiently for another stateless agent to execute it.
+9. Add linked implementation issues only where independently useful.
+10. Ensure validation, recovery, and observable outcomes are explicit before substantial implementation begins.
+
+Do not create a repository-side ExecPlan file.
+
+## Research before planning
+
+Be thorough before committing to an implementation path.
+
+Read:
+
+* authoritative product specifications;
+* architecture documentation;
+* design documentation;
+* relevant implementation code;
+* tests;
+* migrations;
+* project-local skills and agent instructions;
+* related Lific issues and plans.
+
+When a requirement depends on a library or system whose behavior is uncertain, investigate before prescribing the implementation.
+
+For difficult unknowns, create an explicit prototype or proof-of-concept milestone.
+
+A prototype milestone must define:
+
+* what uncertainty it tests;
+* the smallest implementation needed to test it;
+* the commands or behavior used as evidence;
+* the criteria for adopting or discarding the approach.
+
+Do not bury unresolved architectural uncertainty inside a later implementation step.
+
+## Writing milestones
+
+Milestones are narrative implementation units, not administrative buckets.
+
+A good milestone tells the next agent:
+
+* what the system currently does;
+* what this milestone changes;
+* which files and components are involved;
+* the intended implementation;
+* exact or sufficiently prescriptive commands;
+* expected observable behavior;
+* relevant tests;
+* what completion means.
+
+Prefer prose explaining why the work is done in a particular order.
+
+Do not leave meaningful design decisions to the implementing agent merely to keep the Plan shorter.
+
+At the same time, do not prescribe incidental syntax when several equivalent implementations satisfy the same proven architecture.
+
+Be prescriptive about semantics and expensive-to-reverse decisions.
+
+## Concrete execution instructions
+
+Plan step descriptions should contain concrete implementation instructions where necessary.
+
+Name repository-relative files and relevant functions, modules, types, routes, tables, schemas, or components.
+
+When commands matter, include:
+
+* expected working directory;
+* exact command;
+* meaningful expected output or success condition.
+
+For example:
+
+From the repository root run:
+
+```
+just test-api
+```
+
+Expect the focused API test suite to succeed. The new regression test covering the failure mode must fail before the implementation and pass afterward.
+
+Do not use vague instructions such as:
+
+* update backend;
+* fix tests;
+* wire frontend;
+* make it work;
+* verify manually.
+
+## Validation
+
+Validation is mandatory.
+
+An ExecPlan must prove working behavior, not merely compilation or implementation existence.
+
+Prefer the smallest comprehensive validation set that covers:
+
+* focused unit or component tests;
+* relevant integration tests;
+* migration or persistence checks;
+* lint/type/build checks where applicable;
+* user-visible or end-to-end behavior when the change affects user interaction.
+
+For UI behavior, require an actual local interactive validation flow where project conventions expect it.
+
+When the user must inspect or interact with the application, reach a locally runnable state first and explicitly record the human validation gate.
+
+Do not declare a human gate passed without the human performing it.
+
+## Incremental progress
+
+Execute milestones sequentially unless the Plan explicitly identifies safe parallel work.
+
+At every meaningful stopping point:
+
+1. update the Lific Plan step state;
+2. record new discoveries;
+3. record decisions made;
+4. update affected issue states;
+5. record validation evidence;
+6. ensure the next unfinished step is unambiguous.
+
+Do not wait until the end of the task to reconstruct plan state from memory.
+
+The persistent ExecPlan must reflect reality continuously.
+
+## Commits
+
+Commit at coherent implementation checkpoints unless project-local instructions say otherwise.
+
+A commit should normally correspond to an independently understandable piece of working or safely transitional state.
+
+Do not bundle unrelated milestones solely to reduce commit count.
+
+When useful, reference the Lific Plan or issue in the commit message, PR, or completion comment.
+
+## Surprises and discoveries
+
+Unexpected information is first-class plan state.
+
+Examples include:
+
+* an API behaving differently than documented;
+* an existing invariant not previously visible;
+* migration ordering constraints;
+* generated code changing unexpected files;
+* a dependency lacking a required capability;
+* test behavior revealing hidden coupling;
+* performance characteristics affecting architecture;
+* an existing bug discovered during implementation.
+
+Record these promptly as `[Discovery]` comments with evidence.
+
+If the discovery permanently affects how the repository should be understood, also update the appropriate repository documentation or tests.
+
+Lific preserves the history of how the discovery affected this ExecPlan; repository documentation preserves the resulting durable truth.
+
+## Decisions
+
+Every material change in implementation direction must be recorded.
+
+A decision is material when a future contributor could reasonably ask:
+
+“Why was it done this way instead of the obvious alternative?”
+
+Record those decisions as `[Decision]` comments.
+
+Do not rely on commit history alone to explain architectural intent.
+
+If the decision is a durable architecture rule that applies beyond this implementation effort, also promote it to the repository's canonical architectural documentation or ADR mechanism.
+
+## Resuming an ExecPlan
+
+A stateless agent resuming work must:
+
+1. read the anchor issue in full;
+2. rehydrate the entire Lific Plan tree;
+3. inspect linked issues relevant to unfinished steps;
+4. read material `[Decision]`, `[Discovery]`, `[Progress]`, and `[Retrospective]` comments;
+5. inspect the current repository state;
+6. verify that completed steps still correspond to repository reality;
+7. identify the first unfinished executable milestone;
+8. continue without asking the user merely what comes next.
+
+Ask the user only when an actual unresolved product decision, missing credential, permission gate, destructive action, human-validation requirement, or other necessary external input blocks progress.
+
+Do not ask for routine “next steps.”
+
+## Completion
+
+Before completing an ExecPlan:
+
+1. verify every acceptance condition;
+2. run the required test and validation suite;
+3. complete any required human validation;
+4. ensure no hidden unfinished work remains inside comments;
+5. create linked follow-up issues for independently meaningful deferred work;
+6. update permanent repository documentation where discoveries or decisions created durable knowledge;
+7. record a final `[Retrospective]`;
+8. mark all completed Plan steps appropriately;
+9. close the relevant implementation issues;
+10. close the anchor issue according to project workflow;
+11. mark/archive the Lific Plan according to project workflow.
+
+The final retrospective must compare the outcome to the original purpose and capture:
+
+* what was delivered;
+* what changed from the original plan;
+* significant discoveries;
+* remaining gaps;
+* follow-up work;
+* lessons useful to future implementation.
+
+## Repository-side plans
+
+Do not create new repository-side ExecPlan files.
+
+Do not maintain a repository Markdown file in parallel with a Lific ExecPlan.
+
+If an existing repository-side ExecPlan is being migrated:
+
+* preserve its active implementation state in a Lific anchor issue and Plan;
+* preserve important decisions and discoveries as Lific comments;
+* preserve its final retrospective when completed;
+* promote permanent architecture/product knowledge into canonical repository documentation;
+* retain the old file only until migration is verified;
+* then remove it from the current tree.
+
+Git history remains the historical copy of removed plan files.
+
+For completed historical plans, do not mechanically reproduce every checkbox and command. Preserve valuable purpose, major milestones, decisions, discoveries, outcome, and references, then archive the Lific representation.
+
+For obsolete or superseded plans with no enduring execution value, promote any durable knowledge and allow Git history to remain the historical record.
+
+## Relationship to repository documentation
+
+ExecPlans do not replace product specifications, architecture documentation, design systems, ADRs, runbooks, or tests.
+
+Use this rule:
+
+Repository documentation describes enduring truth.
+
+Lific issues describe tracked outcomes.
+
+Lific relationships describe dependencies.
+
+Lific Plans describe execution structure.
+
+Lific comments describe execution history and reasoning.
+
+ExecPlan is the discipline binding those Lific objects into a resumable implementation process.
+
+## Non-negotiable standard
+
+A single stateless agent must be able to start with:
+
+* the current repository;
+* the anchor Lific issue;
+* the Lific Plan;
+* relevant linked issues;
+* the execution comments;
+
+and complete the remaining work without access to the original conversation.
+
+If it cannot, the ExecPlan is incomplete.
+
