@@ -4,6 +4,8 @@
 
 <!-- Release automation promotes these notes to the next patch version on master. -->
 
+- Rebuilt the frontend around a persistent, expandable application shell with route-aware navigation, lower utility controls, persisted rail preference, content-scoped backup warnings, and bounded page sizing.
+
 ## v0.0.2 - 2026-09-16
 
 <!-- Release automation promotes these notes to the next patch version on master. -->

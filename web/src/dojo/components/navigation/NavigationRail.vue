@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
+import { PhCaretLeft, PhCaretRight } from "@phosphor-icons/vue";
 
 const emit = defineEmits<{
-  toggle: [];
+  toggle: [expanded: boolean];
+  action: [key: string];
 }>();
 
 interface IconPart {
@@ -11,12 +13,12 @@ interface IconPart {
 }
 
 export interface NavigationRailItem {
-  kind: "route" | "anchor";
+  kind: "route" | "anchor" | "action";
   key: string;
   label: string;
   visibleLabel?: string;
   icon: string;
-  href: string;
+  href?: string;
   badge?: string | number;
   current?: boolean;
   interactive?: boolean;
@@ -24,21 +26,17 @@ export interface NavigationRailItem {
 
 const props = withDefaults(
   defineProps<{
-    items: NavigationRailItem[];
+    primaryItems: NavigationRailItem[];
+    secondaryItems?: NavigationRailItem[];
     expanded?: boolean | null;
     ariaLabel?: string;
-    width?: string;
-    fullHeight?: boolean;
-    fixed?: boolean;
     collapsible?: boolean;
     brand?: string;
   }>(),
   {
+    secondaryItems: () => [],
     expanded: null,
     ariaLabel: "Navigation rail",
-    width: undefined,
-    fullHeight: false,
-    fixed: false,
     collapsible: true,
     brand: undefined,
   },
@@ -90,8 +88,10 @@ const iconParts = (icon: string): IconPart[] => {
         attrs: { d: "M5 12h14M12 5a10 10 0 010 14M12 5a10 10 0 000 14" },
       },
     ],
-    expand: [{ tag: "path", attrs: { d: "M9 6l6 6-6 6" } }],
-    collapse: [{ tag: "path", attrs: { d: "M15 6l-6 6 6 6" } }],
+    account: [
+      { tag: "circle", attrs: { cx: 12, cy: 8, r: 3 } },
+      { tag: "path", attrs: { d: "M5 20a7 7 0 0114 0" } },
+    ],
   };
 
   return glyphs[icon] ?? [{ tag: "circle", attrs: { cx: 12, cy: 12, r: 4 } }];
@@ -100,103 +100,154 @@ const iconParts = (icon: string): IconPart[] => {
 const onItemClick = (event: MouseEvent, item: NavigationRailItem) => {
   if (item.interactive === false) {
     event.preventDefault();
+    return;
   }
+  if (item.kind === "action") emit("action", item.key);
 };
 
 const toggleExpanded = () => {
+  const nextExpanded = !effectiveExpanded.value;
   if (props.expanded === null) {
-    internalExpanded.value = !internalExpanded.value;
+    internalExpanded.value = nextExpanded;
   }
-  emit("toggle");
+  emit("toggle", nextExpanded);
 };
 </script>
 
 <template>
   <nav
     class="navigation-rail"
-    :class="{
-      'navigation-rail--expanded': effectiveExpanded,
-      'navigation-rail--full-height': fullHeight,
-      'navigation-rail--fixed': fixed,
-    }"
-    :style="width && !effectiveExpanded ? { width } : undefined"
+    :class="{ 'navigation-rail--expanded': effectiveExpanded }"
     :aria-label="ariaLabel"
     data-cy="navigation-rail-root"
   >
     <div class="navigation-rail__items">
       <span v-if="brand" class="navigation-rail__brand">{{ brand }}</span>
-      <a
-        v-for="item in items"
-        :key="item.key"
-        :href="item.href"
-        class="navigation-rail__item"
-        :class="{ 'navigation-rail__item--current': item.current }"
-        :data-cy="`navigation-rail-item-${item.key}`"
-        :aria-label="item.label"
-        :aria-current="item.current ? 'page' : undefined"
-        :aria-disabled="item.interactive === false ? 'true' : undefined"
-        @click="onItemClick($event, item)"
-      >
-        <span class="navigation-rail__icon" aria-hidden="true">
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.8"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          >
-            <component
-              :is="part.tag"
-              v-for="(part, index) in iconParts(item.icon)"
-              :key="`${item.key}-${index}`"
-              v-bind="part.attrs"
-            />
-          </svg>
-        </span>
-        <span v-if="effectiveExpanded" class="navigation-rail__label">{{
-          item.visibleLabel ?? item.label
-        }}</span>
-        <span
-          v-if="item.badge !== undefined && effectiveExpanded"
-          class="navigation-rail__badge"
-          >{{ item.badge }}</span
+      <div class="navigation-rail__primary" aria-label="Primary destinations">
+        <a
+          v-for="item in primaryItems"
+          :key="item.key"
+          :href="item.href"
+          class="navigation-rail__item"
+          :class="{ 'navigation-rail__item--current': item.current }"
+          :data-cy="`navigation-rail-item-${item.key}`"
+          :title="!effectiveExpanded ? item.label : undefined"
+          :aria-label="item.label"
+          :aria-current="item.current ? 'page' : undefined"
+          :aria-disabled="item.interactive === false ? 'true' : undefined"
+          @click="onItemClick($event, item)"
         >
-      </a>
+          <span class="navigation-rail__icon" aria-hidden="true">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <component
+                :is="part.tag"
+                v-for="(part, index) in iconParts(item.icon)"
+                :key="`${item.key}-${index}`"
+                v-bind="part.attrs"
+              />
+            </svg>
+          </span>
+          <span v-if="effectiveExpanded" class="navigation-rail__label">{{
+            item.visibleLabel ?? item.label
+          }}</span>
+          <span
+            v-if="item.badge !== undefined && effectiveExpanded"
+            class="navigation-rail__badge"
+            >{{ item.badge }}</span
+          >
+        </a>
+      </div>
     </div>
 
-    <button
-      v-if="collapsible"
-      type="button"
-      class="navigation-rail__toggle"
-      data-cy="navigation-rail-toggle"
-      :aria-label="
-        effectiveExpanded
-          ? 'Collapse navigation rail'
-          : 'Expand navigation rail'
-      "
-      @click="toggleExpanded"
-    >
-      <span class="navigation-rail__icon" aria-hidden="true">
-        <svg
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.8"
-          stroke-linecap="round"
-          stroke-linejoin="round"
+    <div class="navigation-rail__lower" aria-label="Navigation utilities">
+      <template v-for="item in secondaryItems" :key="item.key">
+        <button
+          v-if="item.kind === 'action'"
+          type="button"
+          class="navigation-rail__item navigation-rail__action"
+          :data-cy="`navigation-rail-item-${item.key}`"
+          :title="!effectiveExpanded ? item.label : undefined"
+          :aria-label="item.label"
+          :aria-disabled="item.interactive === false ? 'true' : undefined"
+          :disabled="item.interactive === false"
+          @click="onItemClick($event, item)"
         >
-          <component
-            :is="part.tag"
-            v-for="(part, index) in iconParts(
-              effectiveExpanded ? 'collapse' : 'expand',
-            )"
-            :key="`toggle-${index}`"
-            v-bind="part.attrs"
-          />
-        </svg>
-      </span>
-    </button>
+          <span class="navigation-rail__icon" aria-hidden="true">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <component
+                :is="part.tag"
+                v-for="(part, index) in iconParts(item.icon)"
+                :key="`${item.key}-${index}`"
+                v-bind="part.attrs"
+              />
+            </svg>
+          </span>
+          <span v-if="effectiveExpanded" class="navigation-rail__label">{{
+            item.visibleLabel ?? item.label
+          }}</span>
+        </button>
+        <a
+          v-else
+          :href="item.href"
+          class="navigation-rail__item"
+          :class="{ 'navigation-rail__item--current': item.current }"
+          :data-cy="`navigation-rail-item-${item.key}`"
+          :title="!effectiveExpanded ? item.label : undefined"
+          :aria-label="item.label"
+          :aria-current="item.current ? 'page' : undefined"
+          @click="onItemClick($event, item)"
+        >
+          <span class="navigation-rail__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <component
+                :is="part.tag"
+                v-for="(part, index) in iconParts(item.icon)"
+                :key="`${item.key}-${index}`"
+                v-bind="part.attrs"
+              />
+            </svg>
+          </span>
+          <span v-if="effectiveExpanded" class="navigation-rail__label">{{
+            item.visibleLabel ?? item.label
+          }}</span>
+        </a>
+      </template>
+
+      <button
+        v-if="collapsible"
+        type="button"
+        class="navigation-rail__toggle"
+        data-cy="navigation-rail-toggle"
+        :aria-label="
+          effectiveExpanded
+            ? 'Collapse navigation rail'
+            : 'Expand navigation rail'
+        "
+        @click="toggleExpanded"
+      >
+        <PhCaretLeft
+          v-if="effectiveExpanded"
+          :size="20"
+          weight="regular"
+          aria-hidden="true"
+        />
+        <PhCaretRight v-else :size="20" weight="regular" aria-hidden="true" />
+      </button>
+    </div>
   </nav>
 </template>
 
@@ -204,45 +255,48 @@ const toggleExpanded = () => {
 .navigation-rail {
   box-sizing: border-box;
   width: var(--space-nav-collapsed);
-  display: grid;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
   gap: 0;
   padding: var(--space-sm);
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  height: 100vh;
   border-right: 1px solid var(--color-outline);
   background: var(--color-surface);
   overflow: hidden;
   transition: width var(--transition-normal) var(--transition-ease-out);
 }
 
-.navigation-rail--fixed:not(.navigation-rail--full-height) {
-  position: fixed;
-  inset: 0 auto 0 0;
-  z-index: 10;
-}
-
 .navigation-rail--expanded {
   width: var(--space-nav-expanded);
 }
 
-.navigation-rail--full-height {
-  position: sticky;
-  top: 0;
-  align-self: flex-start;
-  min-height: 100vh;
-  height: 100vh;
-  grid-template-rows: 1fr auto;
+.navigation-rail__items,
+.navigation-rail__lower,
+.navigation-rail__primary {
+  display: grid;
+  gap: var(--space-xs);
+  min-width: 0;
+  width: 100%;
 }
 
 .navigation-rail__items {
-  display: grid;
-  gap: var(--space-xs);
   align-content: start;
-  min-width: 0;
-  padding: 0;
+}
+
+.navigation-rail__lower {
+  margin-top: auto;
 }
 
 .navigation-rail__item,
 .navigation-rail__toggle {
   appearance: none;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
   min-height: 40px;
   display: flex;
   align-items: center;
@@ -262,10 +316,14 @@ const toggleExpanded = () => {
   padding-right: 0;
 }
 
+.navigation-rail__action:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
 .navigation-rail__toggle {
   width: 100%;
   cursor: pointer;
-  justify-content: center;
 }
 
 .navigation-rail__item:hover,
@@ -275,8 +333,8 @@ const toggleExpanded = () => {
 }
 
 .navigation-rail__item--current {
-  background: var(--color-primary);
-  color: var(--color-on-primary);
+  background: var(--color-primary-container);
+  color: var(--color-on-primary-container);
 }
 
 .navigation-rail__brand {
@@ -314,6 +372,7 @@ const toggleExpanded = () => {
   font-size: var(--text-label-md-font-size);
   font-weight: var(--text-label-md-font-weight);
   line-height: var(--text-label-md-line-height);
+  white-space: nowrap;
 }
 
 .navigation-rail__badge {
@@ -327,11 +386,5 @@ const toggleExpanded = () => {
   font-weight: 600;
   line-height: 1.2;
   text-align: center;
-}
-
-@media (max-width: 720px) {
-  .navigation-rail--fixed:not(.navigation-rail--full-height) {
-    position: static;
-  }
 }
 </style>

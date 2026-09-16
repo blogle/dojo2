@@ -16,7 +16,6 @@ import {
   ApiError,
 } from "../api/client";
 
-import NavigationRail from "../components/navigation/NavigationRail.vue";
 import PageHeader from "../components/data/PageHeader.vue";
 import MetricStrip from "../components/data/MetricStrip.vue";
 import type { MetricStripItem } from "../components/data/MetricStrip.vue";
@@ -197,38 +196,6 @@ const transactionFilters = computed<TransactionFilters>(() => ({
   ...amountPresetToFilter(amountFilter.value),
 }));
 
-const navItems = computed(() => [
-  {
-    kind: "route" as const,
-    key: "home",
-    label: "Dashboard",
-    icon: "dashboard",
-    href: "/",
-  },
-  {
-    kind: "route" as const,
-    key: "budget",
-    label: "Budget",
-    icon: "budget",
-    href: "/budgets",
-  },
-  {
-    kind: "route" as const,
-    key: "transactions",
-    label: "Transactions",
-    icon: "transactions",
-    href: "/transactions",
-    current: true,
-  },
-  {
-    kind: "route" as const,
-    key: "assets-liabilities",
-    label: "Assets & Liabilities",
-    icon: "assets",
-    href: "/assets-liabilities",
-  },
-]);
-
 const metrics = computed<MetricStripItem[]>(() => [
   {
     key: "inflow",
@@ -394,13 +361,6 @@ onUnmounted(() => {
 
 <template>
   <div class="transactions-page" data-cy="transactions-page-root">
-    <NavigationRail
-      :items="navItems"
-      :full-height="true"
-      brand="dojo"
-      aria-label="Main navigation"
-    />
-
     <main class="transactions-page__main">
       <PageHeader title="Transactions" />
 
@@ -471,13 +431,12 @@ onUnmounted(() => {
 
 <style scoped>
 .transactions-page {
-  display: flex;
-  min-height: 100vh;
+  min-width: 0;
   background: var(--color-background);
 }
 
 .transactions-page__main {
-  flex: 1;
+  min-width: 0;
   padding: var(--space-page-block) var(--space-page-inline);
   display: grid;
   gap: var(--space-lg);

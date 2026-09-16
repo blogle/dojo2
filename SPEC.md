@@ -122,7 +122,7 @@ The layout should be simple, centered, and low-friction.
 
 ### Path 1: Start Empty
 
-Selecting **Start empty** creates an empty workspace and advances to required backup setup.
+Selecting **Start empty** creates an empty workspace and advances to required backup setup. The user cannot enter the normal application shell until off-site Google Drive recovery has been configured and verified.
 
 The user lands in the normal application shell and may manually begin adding:
 
@@ -223,7 +223,7 @@ Selecting **Continue to backup setup** advances to required backup setup. The ex
 
 ### Backup Setup
 
-Backup setup is required for new empty and Aspire-imported workspaces. Start empty requests Drive file access only; Aspire migration requests Sheets read access and Drive file access in one combined grant. The user chooses a folder through Google Picker, and dojo verifies it by direct Drive metadata and zero-byte write/delete probes. Refresh credentials are stored encrypted by the API; workers receive only short-lived access tokens.
+Backup setup is required for new empty and Aspire-imported workspaces before normal application use. Start empty requests Drive file access only; Aspire migration requests Sheets read access and Drive file access in one combined grant. The user chooses a folder through Google Picker, and dojo verifies it by direct Drive metadata and zero-byte write/delete probes. Refresh credentials are stored encrypted by the API; workers receive only short-lived access tokens.
 
 If Drive folder access is later revoked or the latest scheduled backup fails, dojo remains available and migrations continue. A persistent application warning prompts the user to repair backup access. A newly configured folder is considered configured before its first scheduled run; a successful off-site backup is still required for recovery evidence.
 

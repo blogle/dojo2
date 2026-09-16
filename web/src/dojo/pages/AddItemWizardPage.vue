@@ -14,7 +14,6 @@ import DatePicker from "@/dojo/components/forms/DatePicker.vue";
 import InstitutionCombobox from "@/dojo/components/forms/InstitutionCombobox.vue";
 import SelectField from "@/dojo/components/forms/SelectField.vue";
 import TextField from "@/dojo/components/forms/TextField.vue";
-import AssetsLiabilitiesPage from "@/dojo/pages/AssetsLiabilitiesPage.vue";
 import { institutionSuggestions } from "@/dojo/utils/institutions";
 
 type EntityType =
@@ -362,8 +361,6 @@ const backWizard = () => {
 
 <template>
   <div class="add-item-page" data-cy="add-item-wizard-page">
-    <AssetsLiabilitiesPage />
-
     <div class="add-item-page__scrim" role="presentation">
       <section
         class="add-item-modal"

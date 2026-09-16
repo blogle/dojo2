@@ -14,9 +14,8 @@ export default defineFixtures<NavigationRailProps>({
       name: "collapsed",
       props: {
         expanded: false,
-        fixed: false,
         brand: "dojo",
-        items: [
+        primaryItems: [
           {
             kind: "route",
             key: "transactions",
@@ -53,9 +52,8 @@ export default defineFixtures<NavigationRailProps>({
       name: "expanded",
       props: {
         expanded: true,
-        fixed: false,
         brand: "dojo",
-        items: [
+        primaryItems: [
           {
             kind: "route",
             key: "transactions",

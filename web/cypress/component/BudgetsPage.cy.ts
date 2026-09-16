@@ -233,10 +233,10 @@ function mountPage(
 }
 
 describe("BudgetsPage", () => {
-  it("renders the budget page with navigation and header", () => {
+  it("renders the budget page and header without owning navigation", () => {
     mountPage();
     cy.get("[data-cy=budgets-page-root]").should("be.visible");
-    cy.get("[data-cy=navigation-rail-root]").should("be.visible");
+    cy.get("[data-cy=navigation-rail-root]").should("not.exist");
     cy.get("[data-cy=page-header-root]").should("contain.text", "Budget");
   });
 
