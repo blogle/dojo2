@@ -52,7 +52,6 @@ import DatePicker from "@/dojo/components/forms/DatePicker.vue";
 import InstitutionCombobox from "@/dojo/components/forms/InstitutionCombobox.vue";
 import SelectField from "@/dojo/components/forms/SelectField.vue";
 import TextField from "@/dojo/components/forms/TextField.vue";
-import NavigationRail from "@/dojo/components/navigation/NavigationRail.vue";
 import FormModal from "@/dojo/components/overlays/FormModal.vue";
 import TableShell from "@/dojo/components/tables/TableShell.vue";
 import TransactionFilterBar from "@/dojo/components/transactions/TransactionFilterBar.vue";
@@ -66,38 +65,6 @@ const router = useRouter();
 const queryClient = useQueryClient();
 const accountId = computed(() => route.params.id as string);
 const TRANSACTION_PAGE_SIZE = 100;
-
-const navItems = computed(() => [
-  {
-    kind: "route" as const,
-    key: "home",
-    label: "Dashboard",
-    icon: "dashboard",
-    href: "/",
-  },
-  {
-    kind: "route" as const,
-    key: "budget",
-    label: "Budget",
-    icon: "budget",
-    href: "/budgets",
-  },
-  {
-    kind: "route" as const,
-    key: "transactions",
-    label: "Transactions",
-    icon: "transactions",
-    href: "/transactions",
-  },
-  {
-    kind: "route" as const,
-    key: "assets-liabilities",
-    label: "Assets & Liabilities",
-    icon: "assets",
-    href: "/assets-liabilities",
-    current: true,
-  },
-]);
 
 const { data: accounts, isLoading: accountsLoading } = useQuery({
   queryKey: ["accounts"],
@@ -1761,13 +1728,6 @@ function formatTaxTreatment(value: string | null | undefined): string {
 
 <template>
   <div class="account-detail-page" data-cy="account-detail-page">
-    <NavigationRail
-      :items="navItems"
-      :full-height="true"
-      brand="dojo"
-      aria-label="Main navigation"
-    />
-
     <main class="account-detail-page__main">
       <div v-if="accountsLoading" class="account-detail-page__loading">
         Loading...
@@ -3197,13 +3157,12 @@ function formatTaxTreatment(value: string | null | undefined): string {
 
 <style scoped>
 .account-detail-page {
-  display: flex;
-  min-height: 100vh;
+  min-width: 0;
   background: var(--color-background);
 }
 
 .account-detail-page__main {
-  flex: 1;
+  min-width: 0;
   display: grid;
   gap: var(--space-lg);
   padding: var(--space-page-block) var(--space-page-inline);
@@ -3291,6 +3250,7 @@ function formatTaxTreatment(value: string | null | undefined): string {
   display: grid;
   grid-template-columns: 1fr 280px;
   gap: var(--space-lg);
+  min-width: 0;
 }
 
 .account-detail-page__left {

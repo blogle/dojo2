@@ -31,7 +31,6 @@ import HistoricalBanner from "../components/feedback/HistoricalBanner.vue";
 import ReorderModeBanner from "../components/feedback/ReorderModeBanner.vue";
 import GoalEditor from "../components/budget/GoalEditor.vue";
 import IconPicker from "../components/forms/IconPicker.vue";
-import NavigationRail from "../components/navigation/NavigationRail.vue";
 import HierarchicalCategoryTable from "../components/tables/HierarchicalCategoryTable.vue";
 import type { HierarchicalCategoryRow } from "../components/tables/HierarchicalCategoryTable.vue";
 import FormModal from "../components/overlays/FormModal.vue";
@@ -97,38 +96,6 @@ const isHistorical = computed(
   () =>
     selectedMonth.value !== "" && selectedMonth.value !== currentMonth.value,
 );
-
-const navItems = computed(() => [
-  {
-    kind: "route" as const,
-    key: "home",
-    label: "Dashboard",
-    icon: "dashboard",
-    href: "/",
-  },
-  {
-    kind: "route" as const,
-    key: "budget",
-    label: "Budget",
-    icon: "budget",
-    href: "/budgets",
-    current: true,
-  },
-  {
-    kind: "route" as const,
-    key: "transactions",
-    label: "Transactions",
-    icon: "transactions",
-    href: "/transactions",
-  },
-  {
-    kind: "route" as const,
-    key: "assets-liabilities",
-    label: "Assets & Liabilities",
-    icon: "assets",
-    href: "/assets-liabilities",
-  },
-]);
 
 const columns = [
   { key: "category", label: "Category" },
@@ -742,13 +709,6 @@ async function submitFundGroup(
 
 <template>
   <div class="budgets-page" data-cy="budgets-page-root">
-    <NavigationRail
-      :items="navItems"
-      :full-height="true"
-      brand="dojo"
-      aria-label="Main navigation"
-    />
-
     <main class="budgets-page__main">
       <PersistentWarningBanner
         v-if="mutationError"
@@ -1018,13 +978,12 @@ async function submitFundGroup(
 
 <style scoped>
 .budgets-page {
-  display: flex;
-  min-height: 100vh;
+  min-width: 0;
   background: var(--color-background);
 }
 
 .budgets-page__main {
-  flex: 1;
+  min-width: 0;
   padding: var(--space-page-block) var(--space-page-inline);
   display: grid;
   gap: var(--space-lg);

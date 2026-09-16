@@ -4,6 +4,10 @@ import { h } from "vue";
 import fixtures from "../../src/dojo/components/navigation/NavigationRail.fixtures";
 
 describe("NavigationRail", () => {
+  beforeEach(() => {
+    cy.clearLocalStorage();
+  });
+
   fixtures.scenarios.forEach((scenario) => {
     it(`renders: ${scenario.name}`, () => {
       mount(fixtures.component, {
@@ -27,7 +31,9 @@ describe("NavigationRail", () => {
 
         return {
           items:
-            expandedScenario?.props?.items ?? collapsed?.props?.items ?? [],
+            expandedScenario?.props?.primaryItems ??
+            collapsed?.props?.primaryItems ??
+            [],
         };
       },
       render() {
@@ -39,9 +45,8 @@ describe("NavigationRail", () => {
           },
           [
             h(fixtures.component, {
-              items: this.items,
+              primaryItems: this.items,
               collapsible: true,
-              fullHeight: true,
             }),
           ],
         );
@@ -65,6 +70,7 @@ describe("NavigationRail", () => {
         expect(expandedRect.width).to.be.greaterThan(160);
       });
 
+      cy.wait(200);
       cy.get("[data-cy=navigation-rail-root]").then(($expandedRail) => {
         const expandedRect = $expandedRail[0].getBoundingClientRect();
         cy.get("[data-cy=navigation-rail-item-transactions]").then(($item) => {
@@ -81,7 +87,7 @@ describe("NavigationRail", () => {
     mount(fixtures.component, {
       props: {
         expanded: true,
-        items: [
+        primaryItems: [
           {
             kind: "anchor",
             key: "foundations",
@@ -111,7 +117,7 @@ describe("NavigationRail", () => {
     const Harness = {
       setup() {
         return {
-          items: scenario?.props?.items ?? [],
+          primaryItems: scenario?.props?.primaryItems ?? [],
         };
       },
       render() {
@@ -123,8 +129,7 @@ describe("NavigationRail", () => {
           },
           [
             h(fixtures.component, {
-              items: this.items,
-              fullHeight: true,
+              primaryItems: this.primaryItems,
             }),
             h("main", { style: "flex: 1;" }, "Scrollable content"),
           ],
@@ -145,7 +150,7 @@ describe("NavigationRail", () => {
     mount(fixtures.component, {
       props: {
         expanded: true,
-        items: [
+        primaryItems: [
           {
             kind: "anchor",
             key: "budget",
@@ -173,5 +178,44 @@ describe("NavigationRail", () => {
       .click();
 
     cy.location("hash").should("eq", "");
+  });
+
+  it("renders lower utilities and persists uncontrolled expansion", () => {
+    mount(fixtures.component, {
+      props: {
+        primaryItems: [],
+        secondaryItems: [
+          {
+            kind: "action",
+            key: "account",
+            label: "Account",
+            icon: "account",
+            interactive: false,
+          },
+        ],
+      },
+    });
+
+    cy.get("[data-cy=navigation-rail-item-account]")
+      .should("have.attr", "aria-label", "Account")
+      .should("be.visible");
+    cy.get("[data-cy=navigation-rail-toggle]").click();
+    cy.get("[data-cy=navigation-rail-root]").should(
+      "have.class",
+      "navigation-rail--expanded",
+    );
+    cy.get("[data-cy=navigation-rail-toggle]")
+      .should("have.attr", "aria-label", "Collapse navigation rail")
+      .should("not.contain.text", "Collapse")
+      .find("svg")
+      .should("be.visible");
+
+    mount(fixtures.component, {
+      props: { primaryItems: [] },
+    });
+    cy.get("[data-cy=navigation-rail-root]").should(
+      "have.class",
+      "navigation-rail--expanded",
+    );
   });
 });

@@ -7,6 +7,8 @@ dojo has two runtime applications:
 - `api/src/dojo/api/main.py`: FastAPI application
 - `web/src/dojo/`: Vue 3 frontend built with Vite
 
+The frontend routes normal application pages through `web/src/dojo/layouts/AppShell.vue`, which owns the persistent navigation rail, content column, and global backup attention. Onboarding and development routes remain outside that shell. The assets route uses `AssetsLiabilitiesLayout.vue` so its list, add-item wizard, and account detail are sibling surfaces sharing the application shell rather than nesting page-owned navigation.
+
 The backend persists application state in DuckDB. The frontend treats the backend as the system of record and fetches small bootstrap data first, then budget, transactions, accounts, categories, and net-worth data on demand.
 
 ## Domain Boundaries

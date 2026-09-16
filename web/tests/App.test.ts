@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRouter, createMemoryHistory } from "vue-router";
 
 import App from "../src/dojo/App.vue";
+import AppShell from "../src/dojo/layouts/AppShell.vue";
 import { useAppState } from "../src/dojo/state/app";
 
 describe("dojo app", () => {
@@ -122,14 +123,16 @@ describe("dojo app", () => {
     await router.push("/dev/test");
     await router.isReady();
 
-    const wrapper = mount(App, {
+    const wrapper = mount(AppShell, {
       global: {
         plugins: [router],
       },
     });
 
     expect(wrapper.text()).toContain("Backups need attention");
-    await wrapper.get("button").trigger("click");
+    await wrapper
+      .get('[data-cy="persistent-warning-banner-root"] button')
+      .trigger("click");
     await flushPromises();
     expect(router.currentRoute.value.fullPath).toBe(
       "/onboarding?backup=repair",

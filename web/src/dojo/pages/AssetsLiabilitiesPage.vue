@@ -6,44 +6,11 @@ import { useRouter } from "vue-router";
 import { fetchAssetsLiabilities } from "@/dojo/api/client";
 import Button from "@/dojo/components/actions/Button.vue";
 import MetricStrip from "@/dojo/components/data/MetricStrip.vue";
-import NavigationRail from "@/dojo/components/navigation/NavigationRail.vue";
 import PageHeader from "@/dojo/components/data/PageHeader.vue";
 import StateBadge from "@/dojo/components/display/StateBadge.vue";
 import { formatCurrency } from "@/dojo/utils/currency";
 
 const router = useRouter();
-
-const navItems = computed(() => [
-  {
-    kind: "route" as const,
-    key: "home",
-    label: "Dashboard",
-    icon: "dashboard",
-    href: "/",
-  },
-  {
-    kind: "route" as const,
-    key: "budget",
-    label: "Budget",
-    icon: "budget",
-    href: "/budgets",
-  },
-  {
-    kind: "route" as const,
-    key: "transactions",
-    label: "Transactions",
-    icon: "transactions",
-    href: "/transactions",
-  },
-  {
-    kind: "route" as const,
-    key: "assets-liabilities",
-    label: "Assets & Liabilities",
-    icon: "assets",
-    href: "/assets-liabilities",
-    current: true,
-  },
-]);
 
 const { data, isLoading } = useQuery({
   queryKey: ["assets-liabilities"],
@@ -226,13 +193,6 @@ const getSourceLabel = (source: string) => {
 
 <template>
   <div class="assets-liabilities-page" data-cy="assets-liabilities-page">
-    <NavigationRail
-      :items="navItems"
-      :full-height="true"
-      brand="dojo"
-      aria-label="Main navigation"
-    />
-
     <main class="assets-liabilities-page__main">
       <PageHeader title="Assets & Liabilities" :primary-actions="true">
         <template #actions>
@@ -482,13 +442,12 @@ const getSourceLabel = (source: string) => {
 
 <style scoped>
 .assets-liabilities-page {
-  display: flex;
-  min-height: 100vh;
+  min-width: 0;
   background: var(--color-background);
 }
 
 .assets-liabilities-page__main {
-  flex: 1;
+  min-width: 0;
   display: grid;
   gap: var(--space-lg);
   padding: var(--space-page-block) var(--space-page-inline);

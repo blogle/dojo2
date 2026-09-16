@@ -143,13 +143,12 @@ const showScenarioName = (
       data-cy="design-system-page-nav-shell"
     >
       <NavigationRail
-        :items="quickNavItems"
+        :primary-items="quickNavItems"
         :expanded="railIsExpanded"
         :collapsible="!isCompactRail"
-        :full-height="true"
         brand="dojo"
         aria-label="Design system sections"
-        @toggle="railExpanded = !railExpanded"
+        @toggle="railExpanded = $event"
       />
     </aside>
 
