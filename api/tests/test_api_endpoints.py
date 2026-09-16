@@ -11,6 +11,7 @@ import dojo.api.main as main_module
 import dojo.api.routes as routes_module
 from dojo.api.settings import get_settings
 from dojo.drive_backup import GoogleAccessToken, VerifiedDriveFolder
+from dojo.fixture_data import DEFAULT_FIXTURE
 from dojo.migrations import provision_database
 
 
@@ -394,6 +395,114 @@ def test_google_callback_stores_token_in_memory_and_updates_status(monkeypatch, 
         assert status.json()["authorized"] is True
         assert status.json()["backup_authorized"] is False
         assert status.json()["backup_reauthorization_required"] is True
+        stored_token = next(
+            iter(main_module.app.state.oauth_token_store._tokens_by_session_id.values())
+        )
+        assert stored_token["dojo_granted_scopes"] == (
+            "https://www.googleapis.com/auth/spreadsheets.readonly",
+            "https://www.googleapis.com/auth/drive.file",
+        )
+
+
+def test_google_callback_defaults_missing_aspire_scopes_and_analyze_succeeds(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setenv("SESSION_SECRET", "test-secret")
+    monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_ID", "client-id")
+    monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_SECRET", "client-secret")
+    monkeypatch.setenv(
+        "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
+    )
+    provisioned_main_module(monkeypatch, tmp_path, "api-test.duckdb")
+    monkeypatch.setattr(
+        routes_module,
+        "exchange_google_code",
+        lambda **_: {"access_token": "access-token", "token_type": "Bearer"},
+    )
+    monkeypatch.setattr(
+        routes_module,
+        "fetch_sheet_named_ranges",
+        lambda **_: (
+            "Aspire export",
+            list(DEFAULT_FIXTURE["named_ranges"]),
+            DEFAULT_FIXTURE["named_ranges"],
+        ),
+    )
+
+    with TestClient(main_module.app) as client:
+        start = client.post("/api/onboarding/google/start", json={"purpose": "aspire_migration"})
+        assert start.status_code == 200
+        state = parse_qs(urlparse(start.json()["auth_url"]).query)["state"][0]
+
+        callback = client.get(
+            "/api/onboarding/google/callback",
+            params={"code": "abc", "state": state},
+        )
+        assert callback.status_code == 200
+
+        stored_token = next(
+            iter(main_module.app.state.oauth_token_store._tokens_by_session_id.values())
+        )
+        assert stored_token["dojo_granted_scopes"] == (
+            "https://www.googleapis.com/auth/spreadsheets.readonly",
+            "https://www.googleapis.com/auth/drive.file",
+        )
+
+        analysis = client.post(
+            "/api/import/google-sheet/analyze", json={"sheet_url_or_id": "sheet-123"}
+        )
+        assert analysis.status_code == 200
+        assert analysis.json()["draft_id"]
+        assert analysis.json()["review_items"]
+
+
+def test_google_import_rejects_missing_sheets_grant_without_calling_sheets(
+    monkeypatch, tmp_path
+) -> None:
+    key_path = tmp_path / "credential-key"
+    key_path.write_text(
+        base64.b64encode(b"0123456789abcdef0123456789abcdef").decode(), encoding="utf-8"
+    )
+    monkeypatch.setenv("SESSION_SECRET", "test-secret")
+    monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_ID", "client-id")
+    monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_SECRET", "client-secret")
+    monkeypatch.setenv("DOJO_CREDENTIAL_ENCRYPTION_KEY_FILE", str(key_path))
+    monkeypatch.setenv(
+        "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
+    )
+    provisioned_main_module(monkeypatch, tmp_path, "api-test.duckdb")
+    monkeypatch.setattr(
+        routes_module,
+        "exchange_google_code",
+        lambda **_: {
+            "access_token": "access-token",
+            "refresh_token": "refresh-token",
+            "scope": "https://www.googleapis.com/auth/drive.file",
+        },
+    )
+
+    def sheets_must_not_be_called(**_kwargs):
+        raise AssertionError("Google Sheets must not be called without its granted scope")
+
+    monkeypatch.setattr(routes_module, "fetch_sheet_named_ranges", sheets_must_not_be_called)
+
+    with TestClient(main_module.app) as client:
+        start = client.post("/api/onboarding/google/start", json={"purpose": "aspire_migration"})
+        state = parse_qs(urlparse(start.json()["auth_url"]).query)["state"][0]
+        assert (
+            client.get(
+                "/api/onboarding/google/callback", params={"code": "abc", "state": state}
+            ).status_code
+            == 200
+        )
+        assert client.get("/api/onboarding/google/status").json()["backup_authorized"] is True
+        assert client.get("/api/onboarding/google/status").json()["authorized"] is False
+
+        for path in ("/api/import/google-sheet", "/api/import/google-sheet/analyze"):
+            response = client.post(path, json={"sheet_url_or_id": "sheet-123"})
+            assert response.status_code == 403
+            assert response.json()["detail"]["code"] == "google_sheets_authorization_required"
+            assert "Connect Google again" in response.json()["detail"]["message"]
 
 
 def test_google_callback_persists_refresh_token_encrypted(monkeypatch, tmp_path) -> None:

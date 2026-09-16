@@ -7,7 +7,8 @@
     "AL-04 reconciles an investment statement without holdings",
     "AL-05 preserves contribution provenance and net worth",
     "AL-06 shows one mortgage payment across transaction, budget, and loan views",
-    "AL-07 replaces one tracking asset with three signed successors"
+    "AL-07 replaces one tracking asset with three signed successors",
+    "requires Sheets authorization without contacting Google Sheets"
   ],
   "ceilings": {
     "baselineGenerationMs": 3000,
@@ -17,6 +18,6 @@
     "testMs": 10000,
     "suiteMs": 45000,
     "apiRequests": 350,
-    "failedApiRequests": 0
+    "failedApiRequests": 1
   }
 }
