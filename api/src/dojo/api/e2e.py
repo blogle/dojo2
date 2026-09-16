@@ -15,7 +15,7 @@ from dojo.e2e import (
     fixture_fingerprint,
     stage_baseline,
 )
-from dojo.google import OAuthTokenStore
+from dojo.google import DOJO_GRANTED_SCOPES_KEY, OAuthTokenStore
 from dojo.service import DojoService
 
 router = APIRouter(prefix="/__e2e", tags=["e2e"])
@@ -32,6 +32,10 @@ class E2EResetResponse(BaseModel):
     db_bytes: int
     restore_ms: float
     reopen_ms: float
+
+
+class E2EGoogleGrantRequest(BaseModel):
+    scopes: list[str]
 
 
 @router.post("/reset", response_model=E2EResetResponse)
@@ -90,3 +94,20 @@ async def reset(
         restore_ms=restore_ms,
         reopen_ms=reopen_ms,
     )
+
+
+@router.post("/google-session")
+async def set_google_session(
+    request: Request, payload: E2EGoogleGrantRequest
+) -> dict[str, list[str]]:
+    session_id = request.session.get("google_oauth_session_id")
+    if not isinstance(session_id, str) or not session_id:
+        raise HTTPException(status_code=409, detail="Google OAuth session has not been initialized")
+    request.app.state.oauth_token_store.set(
+        session_id,
+        {
+            "access_token": "e2e-google-access-token",
+            DOJO_GRANTED_SCOPES_KEY: tuple(sorted(set(payload.scopes))),
+        },
+    )
+    return {"scopes": payload.scopes}

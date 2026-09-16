@@ -24,6 +24,7 @@ E2E_FIXED_TIME = datetime(2026, 2, 15, 12, 0, tzinfo=timezone.utc)
 
 
 class E2EScenario(StrEnum):
+    ONBOARDING_EMPTY = "onboarding-empty"
     ASSETS_LIABILITIES_OVERVIEW = "assets-liabilities-overview"
     TANGIBLE_ASSET_CREATION = "tangible-asset-creation"
     TRACKING_SNAPSHOT_CORRECTION = "tracking-snapshot-correction"
@@ -56,6 +57,7 @@ def fixed_e2e_clock() -> FrozenClock:
 
 def fixture_sql(scenario: E2EScenario) -> tuple[str, ...]:
     scenario_sql = {
+        E2EScenario.ONBOARDING_EMPTY: (),
         E2EScenario.ASSETS_LIABILITIES_OVERVIEW: ("tests/e2e/scenarios/al_01_overview",),
         E2EScenario.TANGIBLE_ASSET_CREATION: ("tests/e2e/scenarios/al_02_tangible_creation",),
         E2EScenario.TRACKING_SNAPSHOT_CORRECTION: (
@@ -66,6 +68,8 @@ def fixture_sql(scenario: E2EScenario) -> tuple[str, ...]:
         E2EScenario.LINKED_LOAN_PAYMENT: ("tests/e2e/scenarios/al_06_linked_loan_payment",),
         E2EScenario.TRACKING_CUTOVER: ("tests/e2e/scenarios/al_07_tracking_cutover",),
     }
+    if scenario is E2EScenario.ONBOARDING_EMPTY:
+        return ()
     return ("tests/e2e/core", *scenario_sql[scenario])
 
 

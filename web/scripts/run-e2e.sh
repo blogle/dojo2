@@ -8,6 +8,7 @@ run_id=$(date -u +%Y%m%dT%H%M%S)-$$
 run_dir="${cache_root}/runs/${run_id}"
 active_database="${run_dir}/worker.duckdb"
 scenarios=(
+  "onboarding-empty"
   "assets-liabilities-overview"
   "tangible-asset-creation"
   "tracking-snapshot-correction"
@@ -113,6 +114,10 @@ api_started=$(date +%s%N)
 (
   cd "$repo_root/api"
   APP_ENV=e2e \
+    DEV_FIXTURE_MODE=true \
+    GOOGLE_OAUTH_CLIENT_ID="" \
+    GOOGLE_OAUTH_CLIENT_SECRET="" \
+    GOOGLE_OAUTH_REDIRECT_URI="" \
     DUCKDB_PATH="$active_database" \
     E2E_BASELINE_DIR="$baseline_dir" \
     E2E_RUN_DIR="$run_dir" \

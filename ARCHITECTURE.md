@@ -100,7 +100,7 @@ Core read-path SQL such as account listing, transaction paging, account balances
 - Shared XDG baselines use an inter-process file lock and atomic publication, allowing concurrent E2E runs without exposing partial database files.
 - Generated baselines, logs, failure databases, and timing reports live under `${XDG_CACHE_HOME:-$HOME/.cache}/dojo/e2e/`, never in the repository or developer database.
 - `web/cypress/e2e/performance-budgets.json` contains the required scenario names plus generous reviewed ceilings for setup, reset, test, suite, and request-count regressions; `just profile-e2e` produces median and p95 evidence used to ratchet them downward.
-- Recording-only Cypress specs live in `web/cypress/e2e/recordings/`. `just record-flow <flow>` and `just record-flows` use the same E2E worker path, enable video only for those runs, and write MP4s, checkpoint storyboards, and review manifests beneath `${XDG_CACHE_HOME:-$HOME/.cache}/dojo/e2e/recordings/`.
+- Recording-only Cypress specs live in `web/cypress/e2e/recordings/`. `just record-flow <flow>` and `just record-flows` use the same E2E worker path, enable video only for those runs, and write MP4s, checkpoint storyboards, and review manifests beneath `${XDG_CACHE_HOME:-$HOME/.cache}/dojo/e2e/recordings/`. `just storyboard` copies only the final per-flow storyboard PNGs into the tracked `storyboards/` directory for lightweight demos.
 
 ## Import Architecture
 

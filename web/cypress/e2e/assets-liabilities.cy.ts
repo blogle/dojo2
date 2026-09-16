@@ -58,6 +58,28 @@ describe("Assets & Liabilities", () => {
   });
 });
 
+describe("Aspire authorization regression", () => {
+  it("requires Sheets authorization without contacting Google Sheets", () => {
+    const apiBaseUrl = String(Cypress.env("apiBaseUrl")).replace(/\/$/, "");
+    cy.resetScenario("onboarding-empty");
+    cy.request(`${apiBaseUrl}/api/onboarding/google/status`);
+    cy.request("POST", `${apiBaseUrl}/__e2e/google-session`, {
+      scopes: ["https://www.googleapis.com/auth/drive.file"],
+    });
+    cy.intercept("https://sheets.googleapis.com/**").as("googleSheets");
+
+    cy.visit("/onboarding");
+    cy.contains("button", "Migrate from Aspire").click();
+    cy.contains("label", "Google Sheet ID").find("input").type("sheet-123");
+    cy.contains("button", "Submit").click();
+    cy.contains("h1", "Migrate from Aspire").should("be.visible");
+    cy.contains(
+      "Google Sheets access was not granted. Connect Google again to continue the Aspire migration.",
+    ).should("be.visible");
+    cy.get("@googleSheets.all").should("have.length", 0);
+  });
+});
+
 describe("Tangible asset creation", () => {
   beforeEach(() => {
     cy.resetScenario("tangible-asset-creation");

@@ -319,7 +319,7 @@ def import_google_sheet(request: Request, payload: ImportRequest) -> dict[str, A
     raw = payload.sheet_url_or_id
     normalized = raw.strip().casefold()
     if normalized in {"fixture", "fixture://default", "default"} or (
-        settings.dev_fixture_mode and not settings.oauth_configured
+        settings.dev_fixture_mode and settings.app_env != "e2e" and not settings.oauth_configured
     ):
         return service.import_sheet_data(source="fixture://default", source_kind="fixture")
 
@@ -368,7 +368,7 @@ def analyze_google_sheet(request: Request, payload: ImportRequest) -> dict[str, 
     raw = payload.sheet_url_or_id
     normalized = raw.strip().casefold()
     if normalized in {"fixture", "fixture://default", "default"} or (
-        settings.dev_fixture_mode and not settings.oauth_configured
+        settings.dev_fixture_mode and settings.app_env != "e2e" and not settings.oauth_configured
     ):
         return service.analyze_import_draft(source="fixture://default", source_kind="fixture")
 
