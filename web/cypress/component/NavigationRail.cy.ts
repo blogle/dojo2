@@ -180,7 +180,7 @@ describe("NavigationRail", () => {
     cy.location("hash").should("eq", "");
   });
 
-  it("renders lower utilities and persists uncontrolled expansion", () => {
+  it("renders lower utilities and toggles uncontrolled expansion", () => {
     mount(fixtures.component, {
       props: {
         primaryItems: [],
@@ -209,13 +209,21 @@ describe("NavigationRail", () => {
       .should("not.contain.text", "Collapse")
       .find("svg")
       .should("be.visible");
+  });
 
+  it("does not persist a controlled expansion toggle", () => {
     mount(fixtures.component, {
-      props: { primaryItems: [] },
+      props: {
+        expanded: false,
+        primaryItems: [],
+      },
     });
-    cy.get("[data-cy=navigation-rail-root]").should(
-      "have.class",
-      "navigation-rail--expanded",
-    );
+
+    cy.get("[data-cy=navigation-rail-toggle]").click();
+    cy.window().then((window) => {
+      expect(
+        window.localStorage.getItem("dojo.navigation-rail-expanded"),
+      ).to.equal(null);
+    });
   });
 });

@@ -54,4 +54,40 @@ describe("AppShell", () => {
       });
     });
   });
+
+  it("owns and restores the rail expansion preference", () => {
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        {
+          path: "/transactions",
+          component: {
+            template: '<div data-cy="shell-page">Transactions</div>',
+          },
+        },
+      ],
+    });
+
+    cy.window().then((window) => {
+      window.localStorage.removeItem("dojo.navigation-rail-expanded");
+    });
+
+    router.push("/transactions");
+    router.isReady().then(() => {
+      mount(AppShell, { global: { plugins: [router] } });
+
+      cy.get("[data-cy=navigation-rail-toggle]").click();
+      cy.window().should((window) => {
+        expect(
+          window.localStorage.getItem("dojo.navigation-rail-expanded"),
+        ).to.equal("true");
+      });
+
+      mount(AppShell, { global: { plugins: [router] } });
+      cy.get("[data-cy=navigation-rail-root]").should(
+        "have.class",
+        "navigation-rail--expanded",
+      );
+    });
+  });
 });

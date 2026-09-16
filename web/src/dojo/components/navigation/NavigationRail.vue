@@ -2,11 +2,6 @@
 import { computed, ref } from "vue";
 import { PhCaretLeft, PhCaretRight } from "@phosphor-icons/vue";
 
-import {
-  readNavigationExpanded,
-  writeNavigationExpanded,
-} from "../../state/navigation";
-
 const emit = defineEmits<{
   toggle: [expanded: boolean];
   action: [key: string];
@@ -47,7 +42,7 @@ const props = withDefaults(
   },
 );
 
-const internalExpanded = ref(readNavigationExpanded());
+const internalExpanded = ref(false);
 const effectiveExpanded = computed(
   () => props.expanded ?? internalExpanded.value,
 );
@@ -115,7 +110,6 @@ const toggleExpanded = () => {
   if (props.expanded === null) {
     internalExpanded.value = nextExpanded;
   }
-  writeNavigationExpanded(nextExpanded);
   emit("toggle", nextExpanded);
 };
 </script>
