@@ -83,6 +83,8 @@ For local preparation or recovery, use `just release-next-version` to inspect
 the calculated version and `just release-prepare <version>` to perform the
 same changelog and manifest promotion without committing or tagging. Resolve
 workflow failures before retrying; do not force-move an existing release tag.
+For an existing tag whose image or GitHub Release needs recovery, run the
+`Release` workflow manually with the version entered without the `v` prefix.
 
 ## Repository Structure
 
