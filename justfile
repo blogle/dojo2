@@ -132,7 +132,7 @@ release-next-version:
 	python3 scripts/release.py next-version
 
 release-prepare version:
-	python3 scripts/release.py promote "{{version}}" "$$(date -u +%F)"
+	python3 scripts/release.py promote "{{version}}" "$(date -u +%F)"
 
 docs-serve:
 	cd docs && mdbook serve
