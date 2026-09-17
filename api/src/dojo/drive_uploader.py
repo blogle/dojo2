@@ -128,6 +128,14 @@ def request_backup_access(internal_api_url: str, internal_token: str) -> dict[st
     try:
         response.raise_for_status()
     except httpx.HTTPStatusError as exc:
+        try:
+            detail = response.json().get("detail")
+        except ValueError:
+            detail = None
+        if isinstance(detail, dict) and isinstance(detail.get("message"), str):
+            raise DriveUploadError(detail["message"]) from exc
+        if isinstance(detail, str) and detail:
+            raise DriveUploadError(detail) from exc
         raise DriveUploadError("The dojo API did not provide backup access.") from exc
     payload = cast(dict[str, Any], response.json())
     if not all(

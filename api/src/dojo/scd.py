@@ -130,7 +130,18 @@ def close_current_version_if_expected(
     *,
     now: datetime,
 ) -> bool:
-    result = connection.execute(
+    current = connection.execute(
+        render_sql(
+            "templates/select_current_version_if_expected",
+            table=table,
+            logical_column=logical_column,
+            max_ts=MAX_TS,
+        ),
+        (logical_id, expected_row_id),
+    ).fetchone()
+    if current is None:
+        return False
+    connection.execute(
         render_sql(
             "templates/close_current_version_if_expected",
             table=table,
@@ -139,4 +150,4 @@ def close_current_version_if_expected(
         ),
         (now, logical_id, expected_row_id),
     )
-    return result.fetchone() is not None
+    return True

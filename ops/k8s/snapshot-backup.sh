@@ -77,11 +77,12 @@ run_id="$(python -c 'from uuid import uuid4; print(uuid4())')"
 phase="STARTING"
 snapshot=""
 image=""
+failure_message=""
 
 report_status() {
   [[ -f "${DOJO_BACKUP_STATUS_TOKEN_FILE:-}" ]] || return 0
   args=(
-    --url "${DOJO_BACKUP_STATUS_URL}"
+    --url "${DOJO_BACKUP_STATUS_URL:-http://dojo}"
     --token-file "${DOJO_BACKUP_STATUS_TOKEN_FILE}"
     --run-id "$run_id"
     --trigger-kind SCHEDULED
@@ -123,13 +124,37 @@ cleanup() {
   result=$?
   set +e
   if [[ "$result" -ne 0 ]]; then
-    report_status FAILED "$phase" "Scheduled backup failed during ${phase}."
+    report_status FAILED "$phase" "${failure_message:-Scheduled backup failed during ${phase}.}"
   fi
   kubectl -n "$namespace" delete job "$job" --ignore-not-found --wait=true
   kubectl -n "$namespace" delete pvc "$clone" --ignore-not-found --wait=true
   exit "$result"
 }
 trap cleanup EXIT
+
+wait_for_backup_job() {
+  for _ in $(seq 1 1200); do
+    complete="$(kubectl -n "$namespace" get job "$job" -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}')"
+    [[ "$complete" == "True" ]] && return 0
+
+    failed="$(kubectl -n "$namespace" get job "$job" -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}')"
+    if [[ "$failed" == "True" ]]; then
+      failure_message="$(kubectl -n "$namespace" get job "$job" -o jsonpath='{.status.conditions[?(@.type=="Failed")].message}')"
+      if [[ -z "$failure_message" ]]; then
+        failure_message="$(kubectl -n "$namespace" logs "job/$job" -c backup --tail=50 2>&1 || true)"
+        failure_message="${failure_message//$'\n'/ }"
+        failure_message="${failure_message:0:900}"
+        [[ -n "$failure_message" ]] && failure_message="Backup worker failed: $failure_message"
+      fi
+      [[ -n "$failure_message" ]] || failure_message="Backup worker failed without a diagnostic."
+      return 1
+    fi
+    sleep 1
+  done
+
+  failure_message="Scheduled backup timed out waiting for the backup worker to complete."
+  return 1
+}
 
 kubectl -n "$namespace" apply -f - <<EOF
 apiVersion: snapshot.storage.k8s.io/v1
@@ -174,11 +199,11 @@ DOJO_BACKUP_RUN_ID="$run_id" \
 DOJO_BACKUP_SNAPSHOT="$snapshot" \
 DOJO_BACKUP_IMAGE="$image" \
 DOJO_BACKUP_CLONE="$clone" \
-DOJO_BACKUP_STATUS_URL="$DOJO_BACKUP_STATUS_URL" \
+DOJO_BACKUP_STATUS_URL="${DOJO_BACKUP_STATUS_URL:-http://dojo}" \
   render_job | kubectl -n "$namespace" apply -f -
 
 phase="VERIFYING"
-kubectl -n "$namespace" wait --for=condition=complete "job/$job" --timeout=20m
+wait_for_backup_job
 report_status SUCCEEDED COMPLETE ""
 
 # Local snapshots are only the fast recovery layer. Keep the newest seven.

@@ -48,6 +48,23 @@ def test_request_backup_access_uses_internal_endpoint(monkeypatch) -> None:
     ]
 
 
+def test_request_backup_access_preserves_broker_failure_message(monkeypatch) -> None:
+    response = httpx.Response(
+        status_code=503,
+        json={
+            "detail": {
+                "code": "google_drive_reauthorization_required",
+                "message": "Google Drive authorization must be renewed.",
+            }
+        },
+        request=httpx.Request("POST", "http://dojo/api/internal/backup-access"),
+    )
+    monkeypatch.setattr("dojo.drive_uploader.httpx.post", lambda *_args, **_kwargs: response)
+
+    with pytest.raises(DriveUploadError, match="Google Drive authorization must be renewed"):
+        request_backup_access("http://dojo", "internal-token")
+
+
 def test_upload_creates_ephemeral_config_and_returns_snapshot_id(
     monkeypatch, tmp_path: Path
 ) -> None:

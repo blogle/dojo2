@@ -4,6 +4,13 @@
 
 <!-- Release automation promotes these notes to the next patch version on master. -->
 
+## v0.0.4 - 2026-09-17
+
+<!-- Release automation promotes these notes to the next patch version on master. -->
+
+- Fixed transaction edits on production DuckDB by avoiding the incompatible conditional-update `RETURNING` path.
+- Preserved actionable Google Drive broker failures in backup status and stopped scheduled backup failures from being reported only as `VERIFYING`.
+
 ## v0.0.3 - 2026-09-16
 
 <!-- Release automation promotes these notes to the next patch version on master. -->
