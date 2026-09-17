@@ -4,7 +4,7 @@
 
 <!-- Release automation promotes these notes to the next patch version on master. -->
 
-- Added an inspectable Available to budget breakdown on the Budget page, with canonical signed components, contributing records, stable identifiers, and explicit current-state context.
+- Added a subordinate Available to budget explanation page with canonical signed components, anomaly-oriented constituent ordering, progressive zoom into bounded virtualized source entries, shared sticky calculation subtotals, and explicit current-state context.
 
 ## v0.0.4 - 2026-09-17
 

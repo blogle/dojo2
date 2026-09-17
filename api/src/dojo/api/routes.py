@@ -456,9 +456,52 @@ def budget(
 
 
 @router.get("/budget/available-to-budget-breakdown")
-def available_to_budget_breakdown(request: Request, *, month: str | None = None) -> dict[str, Any]:
+def available_to_budget_breakdown(
+    request: Request,
+    *,
+    month: str | None = Query(default=None, pattern=r"^\d{4}-(0[1-9]|1[0-2])$"),
+) -> dict[str, Any]:
     service = get_service(request)
     return service.explain_available_to_budget(month=month or service.default_budget_month())
+
+
+@router.get("/budget/available-to-budget-breakdown/{component_key}")
+def available_to_budget_component(
+    request: Request,
+    component_key: str,
+    *,
+    month: str | None = Query(default=None, pattern=r"^\d{4}-(0[1-9]|1[0-2])$"),
+) -> dict[str, Any]:
+    service = get_service(request)
+    try:
+        return service.explain_available_to_budget_component(
+            month=month or service.default_budget_month(), component_key=component_key
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/budget/available-to-budget-breakdown/{component_key}/records")
+def available_to_budget_records(
+    request: Request,
+    component_key: str,
+    *,
+    group_key: str,
+    month: str | None = Query(default=None, pattern=r"^\d{4}-(0[1-9]|1[0-2])$"),
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=100),
+) -> dict[str, Any]:
+    service = get_service(request)
+    try:
+        return service.explain_available_to_budget_records(
+            month=month or service.default_budget_month(),
+            component_key=component_key,
+            group_key=group_key,
+            offset=offset,
+            limit=limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.post("/allocations/fund")

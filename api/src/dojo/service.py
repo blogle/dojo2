@@ -2209,10 +2209,10 @@ class DojoService:
             ),
         }
 
-    def explain_available_to_budget(
-        self, *, month: str, include_details: bool = True
+    def _collect_available_to_budget_contributions(
+        self, *, month: str, include_details: bool
     ) -> dict[str, Any]:
-        """Return the canonical ATB total together with its contributing records."""
+        """Collect the canonical ATB terms and optional provenance records."""
         as_of = self.clock.today()
         component_specs = [
             ("transactions", "Available to budget transactions"),
@@ -2281,7 +2281,9 @@ class DojoService:
                     "version": str(row["version"]),
                     "date": row["date"].isoformat(),
                     "source_type": system_category,
+                    "account_id": str(row["account_id"]),
                     "account_name": row["account_name"],
+                    "category_id": None,
                     "category_name": None,
                     "memo": row["memo"] or "",
                     "contribution_minor": amount_minor,
@@ -2330,8 +2332,14 @@ class DojoService:
                     "version": str(row["version"]),
                     "date": row["effective_date"].isoformat(),
                     "source_type": str(row["account_class"]),
+                    "account_id": str(row["account_id"]),
                     "account_name": row["account_name"],
+                    "category_id": None,
                     "category_name": None,
+                    "counterparty_account_id": (
+                        str(operation["counterpart_account_id"]) if operation else None
+                    ),
+                    "counterparty_account_name": (operation["account_name"] if operation else None),
                     "memo": row["memo"] or "",
                     "contribution_minor": contribution_minor,
                     "operation_id": str(operation["operation_id"]) if operation else None,
@@ -2355,7 +2363,7 @@ class DojoService:
             contribution_minor = int(row["amount_minor"])
             category = (
                 category_by_bucket_id.get(to_bucket_id)
-                if to_bucket_id == atb_bucket_id
+                if from_bucket_id == atb_bucket_id
                 else category_by_bucket_id.get(from_bucket_id)
             )
             if from_bucket_id == atb_bucket_id:
@@ -2369,7 +2377,9 @@ class DojoService:
                     "version": str(row["row_id"]),
                     "date": row["date"].isoformat(),
                     "source_type": "Category allocation",
+                    "account_id": None,
                     "account_name": None,
+                    "category_id": (str(category["category_id"]) if category is not None else None),
                     "category_name": category["name"] if category else "Unknown category",
                     "memo": row["memo"] or "",
                     "contribution_minor": contribution_minor,
@@ -2393,6 +2403,193 @@ class DojoService:
             "as_of_date": as_of.isoformat(),
             "temporal_scope": "current-state",
             "components": list(components.values()),
+        }
+
+    @staticmethod
+    def _atb_component_summary(component: dict[str, Any]) -> dict[str, Any]:
+        amount_minor = int(component["amount_minor"])
+        return {
+            "key": component["key"],
+            "label": component["label"],
+            "amount_minor": amount_minor,
+            "direction": (
+                "increases" if amount_minor > 0 else "decreases" if amount_minor < 0 else "neutral"
+            ),
+            "group_count": 0,
+            "contribution_count": len(component["contributions"]),
+        }
+
+    @staticmethod
+    def _atb_group_for_contribution(
+        component_key: str, contribution: dict[str, Any]
+    ) -> tuple[str, str]:
+        if component_key == "allocations":
+            return (
+                str(contribution.get("category_id") or "unknown-category"),
+                str(contribution.get("category_name") or "Unknown category"),
+            )
+        if component_key == "transfers":
+            account_name = str(contribution.get("account_name") or "Unknown account")
+            counterparty_name = contribution.get("counterparty_account_name")
+            counterparty_id = contribution.get("counterparty_account_id")
+            if counterparty_name and counterparty_id:
+                if contribution["contribution_minor"] >= 0:
+                    return (
+                        f"{counterparty_id}:{contribution['account_id']}",
+                        f"{counterparty_name} -> {account_name}",
+                    )
+                return (
+                    f"{contribution['account_id']}:{counterparty_id}",
+                    f"{account_name} -> {counterparty_name}",
+                )
+            direction = "in" if contribution["contribution_minor"] >= 0 else "out"
+            return (
+                f"{contribution['account_id']}:{direction}",
+                f"{account_name} ({'inflow' if direction == 'in' else 'outflow'})",
+            )
+        account_id = str(contribution.get("account_id") or "unknown-account")
+        return account_id, str(contribution.get("account_name") or "Unknown account")
+
+    @staticmethod
+    def _atb_record_for_api(contribution: dict[str, Any]) -> dict[str, Any]:
+        source_labels = {
+            SYSTEM_CATEGORY_ATB: "Available to budget transaction",
+            SYSTEM_CATEGORY_STARTING_BALANCE: "Starting balance",
+            SYSTEM_CATEGORY_BALANCE_ADJUSTMENT: "Balance adjustment",
+            "BUDGET": "Account transfer",
+            "INVESTMENT": "Account transfer",
+            "Category allocation": "Category allocation",
+        }
+        provenance_labels = {
+            "ACCOUNT_DETAIL": "Account detail",
+            "INVESTMENT_CONTRIBUTION": "Investment contribution",
+            "INVESTMENT_WITHDRAWAL": "Investment withdrawal",
+            "CREDIT_CARD_PAYMENT": "Credit card payment",
+        }
+        provenance = contribution.get("origin") or contribution.get("operation_kind")
+        return {
+            "id": contribution["id"],
+            "kind": contribution["kind"],
+            "record_id": contribution["record_id"],
+            "version": contribution["version"],
+            "date": contribution["date"],
+            "source_label": source_labels.get(contribution["source_type"], "Other contribution"),
+            "provenance_label": provenance_labels.get(provenance) if provenance else None,
+            "account_name": contribution.get("account_name"),
+            "category_name": contribution.get("category_name"),
+            "memo": contribution.get("memo") or "",
+            "contribution_minor": int(contribution["contribution_minor"]),
+        }
+
+    def explain_available_to_budget(
+        self, *, month: str, include_details: bool = False
+    ) -> dict[str, Any]:
+        collected = self._collect_available_to_budget_contributions(
+            month=month, include_details=True
+        )
+        if include_details:
+            return collected
+        return {
+            "available_to_budget_minor": collected["available_to_budget_minor"],
+            "budget_month": collected["budget_month"],
+            "as_of_date": collected["as_of_date"],
+            "temporal_scope": collected["temporal_scope"],
+            "components": [
+                self._atb_component_summary(component)
+                | {
+                    "group_count": len(
+                        {
+                            self._atb_group_for_contribution(component["key"], contribution)[0]
+                            for contribution in component["contributions"]
+                        }
+                    )
+                }
+                for component in collected["components"]
+            ],
+        }
+
+    def explain_available_to_budget_component(
+        self, *, month: str, component_key: str
+    ) -> dict[str, Any]:
+        explanation = self.explain_available_to_budget(month=month, include_details=True)
+        return self._atb_component_detail_from_explanation(explanation, component_key)
+
+    def _atb_component_detail_from_explanation(
+        self, explanation: dict[str, Any], component_key: str
+    ) -> dict[str, Any]:
+        component = next(
+            (item for item in explanation["components"] if item["key"] == component_key), None
+        )
+        if component is None:
+            raise ValueError("Available to budget component not found")
+        groups: dict[str, dict[str, Any]] = {}
+        for contribution in component["contributions"]:
+            key, label = self._atb_group_for_contribution(component_key, contribution)
+            group = groups.setdefault(
+                key,
+                {"key": key, "label": label, "amount_minor": 0, "record_count": 0},
+            )
+            group["amount_minor"] += int(contribution["contribution_minor"])
+            group["record_count"] += 1
+        group_rows = []
+        for group in groups.values():
+            amount_minor = int(group["amount_minor"])
+            group_rows.append(
+                group
+                | {
+                    "amount_minor": amount_minor,
+                    "direction": (
+                        "increases"
+                        if amount_minor > 0
+                        else "decreases"
+                        if amount_minor < 0
+                        else "neutral"
+                    ),
+                }
+            )
+        group_rows.sort(
+            key=lambda item: (-abs(item["amount_minor"]), item["label"].casefold(), item["key"])
+        )
+        return {
+            key: explanation[key]
+            for key in ("available_to_budget_minor", "budget_month", "as_of_date", "temporal_scope")
+        } | {
+            "component": self._atb_component_summary(component) | {"group_count": len(group_rows)},
+            "groups": group_rows,
+        }
+
+    def explain_available_to_budget_records(
+        self,
+        *,
+        month: str,
+        component_key: str,
+        group_key: str,
+        offset: int,
+        limit: int,
+    ) -> dict[str, Any]:
+        collected = self.explain_available_to_budget(month=month, include_details=True)
+        detail = self._atb_component_detail_from_explanation(collected, component_key)
+        group = next((item for item in detail["groups"] if item["key"] == group_key), None)
+        if group is None:
+            raise ValueError("Available to budget group not found")
+        component = next(item for item in collected["components"] if item["key"] == component_key)
+        records = [
+            self._atb_record_for_api(contribution)
+            for contribution in component["contributions"]
+            if self._atb_group_for_contribution(component_key, contribution)[0] == group_key
+        ]
+        page = records[offset : offset + limit]
+        return {
+            key: detail[key]
+            for key in ("available_to_budget_minor", "budget_month", "as_of_date", "temporal_scope")
+        } | {
+            "component": detail["component"],
+            "group": group,
+            "items": page,
+            "total": len(records),
+            "offset": offset,
+            "limit": limit,
+            "has_more": offset + limit < len(records),
         }
 
     def get_net_worth(self) -> dict[str, Any]:
@@ -4661,7 +4858,7 @@ class DojoService:
 
     def compute_available_to_budget(self) -> int:
         return int(
-            self.explain_available_to_budget(
+            self._collect_available_to_budget_contributions(
                 month=self.default_budget_month(), include_details=False
             )["available_to_budget_minor"]
         )

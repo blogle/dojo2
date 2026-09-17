@@ -3,6 +3,7 @@ import type { ComponentFixtureSet } from "@/dojo/components/fixtures";
 import button from "@/dojo/components/actions/Button.fixtures";
 import dropdownButton from "@/dojo/components/actions/DropdownButton.fixtures";
 import introCallout from "@/dojo/components/content/IntroCallout.fixtures";
+import calculationFooter from "@/dojo/components/data/CalculationFooter.fixtures";
 import metricStrip from "@/dojo/components/data/MetricStrip.fixtures";
 import pageHeader from "@/dojo/components/data/PageHeader.fixtures";
 import periodSelector from "@/dojo/components/data/PeriodSelector.fixtures";
@@ -45,6 +46,7 @@ export const fixtureRegistry: Record<string, ComponentFixtureSet> = {
   "actions/Button.fixtures.ts": button,
   "actions/DropdownButton.fixtures.ts": dropdownButton,
   "content/IntroCallout.fixtures.ts": introCallout,
+  "data/CalculationFooter.fixtures.ts": calculationFooter,
   "data/MetricStrip.fixtures.ts": metricStrip,
   "data/PageHeader.fixtures.ts": pageHeader,
   "data/PeriodSelector.fixtures.ts": periodSelector,

@@ -53,16 +53,12 @@ def test_available_to_budget_explanation_ties_to_canonical_total(
 ) -> None:
     explanation = imported_service.explain_available_to_budget(month="2026-02")
     components = explanation["components"]
-    contributions = [
-        contribution for component in components for contribution in component["contributions"]
-    ]
 
     assert explanation["available_to_budget_minor"] == 424000
     assert (
         explanation["available_to_budget_minor"] == imported_service.compute_available_to_budget()
     )
     assert sum(component["amount_minor"] for component in components) == 424000
-    assert sum(contribution["contribution_minor"] for contribution in contributions) == 424000
     assert {component["key"] for component in components} == {
         "transactions",
         "starting-balances",
@@ -70,9 +66,64 @@ def test_available_to_budget_explanation_ties_to_canonical_total(
         "transfers",
         "allocations",
     }
-    assert len(contributions) > 1
-    assert all(contribution["record_id"] for contribution in contributions)
-    assert all(contribution["date"] for contribution in contributions)
+    assert all("contributions" not in component for component in components)
+
+    for component in components:
+        detail = imported_service.explain_available_to_budget_component(
+            month="2026-02", component_key=component["key"]
+        )
+        assert sum(group["amount_minor"] for group in detail["groups"]) == component["amount_minor"]
+        assert (
+            sum(group["record_count"] for group in detail["groups"])
+            == component["contribution_count"]
+        )
+        amounts = [abs(group["amount_minor"]) for group in detail["groups"]]
+        assert amounts == sorted(amounts, reverse=True)
+
+
+def test_available_to_budget_allocation_groups_resolve_both_directions(
+    imported_service: DojoService,
+) -> None:
+    detail = imported_service.explain_available_to_budget_component(
+        month="2026-02", component_key="allocations"
+    )
+    labels = {group["label"] for group in detail["groups"]}
+
+    assert {"Grocery", "Utilities", "Secret Stash", "Reserve Card Payment"} <= labels
+    assert "Unknown category" not in labels
+
+
+def test_available_to_budget_records_are_bounded_and_deterministic(
+    imported_service: DojoService,
+) -> None:
+    detail = imported_service.explain_available_to_budget_component(
+        month="2026-02", component_key="allocations"
+    )
+    group = next(group for group in detail["groups"] if group["label"] == "Grocery")
+
+    first_page = imported_service.explain_available_to_budget_records(
+        month="2026-02",
+        component_key="allocations",
+        group_key=group["key"],
+        offset=0,
+        limit=1,
+    )
+    second_page = imported_service.explain_available_to_budget_records(
+        month="2026-02",
+        component_key="allocations",
+        group_key=group["key"],
+        offset=1,
+        limit=1,
+    )
+
+    assert len(first_page["items"]) == 1
+    assert first_page["has_more"] is True
+    assert first_page["items"][0]["category_name"] == "Grocery"
+    assert first_page["items"][0]["id"] != second_page["items"][0]["id"]
+    assert (
+        first_page["items"][0]["contribution_minor"] + second_page["items"][0]["contribution_minor"]
+        == group["amount_minor"]
+    )
 
 
 def test_fund_category_persists_allocation_and_allows_negative_atb(
