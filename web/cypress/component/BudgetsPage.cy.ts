@@ -118,6 +118,82 @@ const mockAllocations = [
   },
 ];
 
+const mockAvailableToBudgetBreakdown = {
+  available_to_budget_minor: 50000,
+  budget_month: currentMonth,
+  as_of_date: "2026-06-15",
+  temporal_scope: "current-state" as const,
+  components: [
+    {
+      key: "transactions",
+      label: "Available to budget transactions",
+      amount_minor: 70000,
+      direction: "increases" as const,
+      contributions: [
+        {
+          id: "transaction:t-income:v1",
+          kind: "transaction" as const,
+          record_id: "t-income",
+          version: "v1",
+          date: "2026-06-02",
+          source_type: "TX_AVAILABLE_TO_BUDGET",
+          account_name: "Checking",
+          category_name: null,
+          memo: "Paycheck",
+          contribution_minor: 70000,
+          operation_id: null,
+          operation_kind: null,
+          origin: null,
+        },
+      ],
+    },
+    {
+      key: "starting-balances",
+      label: "Positive starting balances",
+      amount_minor: 0,
+      direction: "neutral" as const,
+      contributions: [],
+    },
+    {
+      key: "balance-adjustments",
+      label: "Balance adjustments",
+      amount_minor: 0,
+      direction: "neutral" as const,
+      contributions: [],
+    },
+    {
+      key: "transfers",
+      label: "Transfers across the budget boundary",
+      amount_minor: 0,
+      direction: "neutral" as const,
+      contributions: [],
+    },
+    {
+      key: "allocations",
+      label: "Category allocations",
+      amount_minor: -20000,
+      direction: "decreases" as const,
+      contributions: [
+        {
+          id: "allocation:a1:v1",
+          kind: "allocation" as const,
+          record_id: "a1",
+          version: "v1",
+          date: "2026-06-01",
+          source_type: "Category allocation",
+          account_name: null,
+          category_name: "Groceries",
+          memo: "Monthly funding",
+          contribution_minor: -20000,
+          operation_id: null,
+          operation_kind: null,
+          origin: null,
+        },
+      ],
+    },
+  ],
+};
+
 const mockTransactions = [
   {
     transaction_id: "t1",
@@ -156,6 +232,8 @@ function stubFetch(
         import_status: null,
         default_budget_month: currentMonth,
       };
+    } else if (path === "/api/budget/available-to-budget-breakdown") {
+      body = mockAvailableToBudgetBreakdown;
     } else if (path.startsWith("/api/budget")) {
       body = mockBudget;
     } else if (
@@ -247,6 +325,95 @@ describe("BudgetsPage", () => {
       "contain.text",
       "Available to budget",
     );
+  });
+
+  it("opens the Available to budget breakdown from the metric", () => {
+    mountPage();
+    cy.get("[data-cy=metric-atb]").click();
+    cy.get("[data-cy=available-to-budget-breakdown-summary]")
+      .should("be.visible")
+      .and("contain.text", "$500.00");
+    cy.get("[data-cy=available-to-budget-breakdown-components]")
+      .should("contain.text", "Paycheck")
+      .and("contain.text", "Monthly funding")
+      .and("contain.text", "-$200.00");
+  });
+
+  it("requests the breakdown for the active budget month", () => {
+    mountPage();
+    cy.get("[data-cy=metric-atb]").click();
+    cy.window().then((win) => {
+      const calls = (
+        win.fetch as unknown as {
+          getCalls: () => Array<{ args: [string, RequestInit?] }>;
+        }
+      ).getCalls();
+      const breakdownCall = calls.find(
+        (call) =>
+          new URL(call.args[0], "http://localhost").pathname ===
+          "/api/budget/available-to-budget-breakdown",
+      );
+      expect(breakdownCall).not.to.eq(undefined);
+      expect(
+        new URL(
+          breakdownCall?.args[0] as string,
+          "http://localhost",
+        ).searchParams.get("month"),
+      ).to.equal(currentMonth);
+    });
+  });
+
+  it("shows an empty explanation when Available to budget is zero", () => {
+    mountPage((path) => {
+      if (path === "/api/budget") {
+        return new Response(
+          JSON.stringify({ ...mockBudget, available_to_budget_minor: 0 }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      }
+      if (path === "/api/budget/available-to-budget-breakdown") {
+        return new Response(
+          JSON.stringify({
+            ...mockAvailableToBudgetBreakdown,
+            available_to_budget_minor: 0,
+            components: mockAvailableToBudgetBreakdown.components.map(
+              (component) => ({
+                ...component,
+                amount_minor: 0,
+                direction: "neutral",
+                contributions: [],
+              }),
+            ),
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return undefined;
+    });
+    cy.get("[data-cy=metric-atb]").click();
+    cy.get("[data-cy=available-to-budget-breakdown-empty]").should(
+      "contain.text",
+      "Available to budget is zero",
+    );
+  });
+
+  it("shows a retryable error when the explanation request fails", () => {
+    mountPage((path) => {
+      if (path !== "/api/budget/available-to-budget-breakdown")
+        return undefined;
+      return new Response(JSON.stringify({ detail: "Temporary failure" }), {
+        status: 503,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    cy.get("[data-cy=metric-atb]").click();
+    cy.get("[data-cy=available-to-budget-breakdown-error]")
+      .should("be.visible")
+      .and("contain.text", "Temporary failure");
+    cy.contains("button", "Retry").should("be.visible");
   });
 
   it("displays the hierarchical category table", () => {

@@ -4,6 +4,8 @@
 
 <!-- Release automation promotes these notes to the next patch version on master. -->
 
+- Added an inspectable Available to budget breakdown on the Budget page, with canonical signed components, contributing records, stable identifiers, and explicit current-state context.
+
 ## v0.0.4 - 2026-09-17
 
 - Fixed transaction edits on production DuckDB by avoiding the incompatible conditional-update `RETURNING` path.

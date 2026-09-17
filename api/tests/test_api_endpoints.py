@@ -52,6 +52,18 @@ def test_app_bootstrap_and_import_flow(monkeypatch, tmp_path) -> None:
         assert budget.json()["available_to_budget_minor"] == 424000
         assert budget.json()["groups"][0]["totals"]["available_minor"] == 26000
 
+        breakdown = client.get(
+            "/api/budget/available-to-budget-breakdown", params={"month": "2026-02"}
+        )
+        assert breakdown.status_code == 200
+        breakdown_json = breakdown.json()
+        assert breakdown_json["available_to_budget_minor"] == 424000
+        assert breakdown_json["budget_month"] == "2026-02"
+        assert breakdown_json["temporal_scope"] == "current-state"
+        assert (
+            sum(component["amount_minor"] for component in breakdown_json["components"]) == 424000
+        )
+
         transactions = client.get("/api/transactions", params={"show_hidden": "true", "limit": 100})
         assert transactions.status_code == 200
         assert len(transactions.json()["items"]) == 12

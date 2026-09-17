@@ -48,6 +48,33 @@ def test_available_to_budget_ignores_liability_starting_balance_outflows(
     assert imported_service.compute_available_to_budget() == 424000
 
 
+def test_available_to_budget_explanation_ties_to_canonical_total(
+    imported_service: DojoService,
+) -> None:
+    explanation = imported_service.explain_available_to_budget(month="2026-02")
+    components = explanation["components"]
+    contributions = [
+        contribution for component in components for contribution in component["contributions"]
+    ]
+
+    assert explanation["available_to_budget_minor"] == 424000
+    assert (
+        explanation["available_to_budget_minor"] == imported_service.compute_available_to_budget()
+    )
+    assert sum(component["amount_minor"] for component in components) == 424000
+    assert sum(contribution["contribution_minor"] for contribution in contributions) == 424000
+    assert {component["key"] for component in components} == {
+        "transactions",
+        "starting-balances",
+        "balance-adjustments",
+        "transfers",
+        "allocations",
+    }
+    assert len(contributions) > 1
+    assert all(contribution["record_id"] for contribution in contributions)
+    assert all(contribution["date"] for contribution in contributions)
+
+
 def test_fund_category_persists_allocation_and_allows_negative_atb(
     imported_service: DojoService,
 ) -> None:

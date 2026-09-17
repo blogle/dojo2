@@ -1,4 +1,5 @@
 import type {
+  AvailableToBudgetBreakdown,
   Account,
   Allocation,
   AppStatus,
@@ -114,6 +115,15 @@ export async function fetchBudget(
     show_hidden: String(showHidden),
   });
   return request<BudgetResponse>(`/api/budget?${params.toString()}`);
+}
+
+export async function fetchAvailableToBudgetBreakdown(
+  month: string,
+): Promise<AvailableToBudgetBreakdown> {
+  const params = new URLSearchParams({ month });
+  return request<AvailableToBudgetBreakdown>(
+    `/api/budget/available-to-budget-breakdown?${params.toString()}`,
+  );
 }
 
 export type TransactionPage = {

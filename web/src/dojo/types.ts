@@ -170,6 +170,38 @@ export type BudgetResponse = {
   unconfigured_goal_count: number;
 };
 
+export type AvailableToBudgetContribution = {
+  id: string;
+  kind: "transaction" | "transfer" | "allocation";
+  record_id: string;
+  version: string;
+  date: string;
+  source_type: string;
+  account_name: string | null;
+  category_name: string | null;
+  memo: string;
+  contribution_minor: number;
+  operation_id: string | null;
+  operation_kind: string | null;
+  origin: string | null;
+};
+
+export type AvailableToBudgetComponent = {
+  key: string;
+  label: string;
+  amount_minor: number;
+  direction: "increases" | "decreases" | "neutral";
+  contributions: AvailableToBudgetContribution[];
+};
+
+export type AvailableToBudgetBreakdown = {
+  available_to_budget_minor: number;
+  budget_month: string;
+  as_of_date: string;
+  temporal_scope: "current-state";
+  components: AvailableToBudgetComponent[];
+};
+
 export type BootstrapResponse = {
   app_status: AppStatus;
   import_status: Record<string, unknown> | null;

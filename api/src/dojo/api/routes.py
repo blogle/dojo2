@@ -455,6 +455,12 @@ def budget(
     return service.get_budget(month or service.default_budget_month(), show_hidden=show_hidden)
 
 
+@router.get("/budget/available-to-budget-breakdown")
+def available_to_budget_breakdown(request: Request, *, month: str | None = None) -> dict[str, Any]:
+    service = get_service(request)
+    return service.explain_available_to_budget(month=month or service.default_budget_month())
+
+
 @router.post("/allocations/fund")
 def fund_category(request: Request, payload: FundCategoryRequest) -> dict[str, Any]:
     try:

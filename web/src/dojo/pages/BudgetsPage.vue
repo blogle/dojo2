@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/vue-query";
 import type { Category, CategoryGroup } from "../types";
 import { formatCurrency, formatMonth } from "../utils/currency";
 import {
+  fetchAvailableToBudgetBreakdown,
   fetchBudget,
   fetchAllocations,
   fetchCategoryActivity,
@@ -41,12 +42,14 @@ import CategoryDetailModal from "../components/budget/CategoryDetailModal.vue";
 import MoveFundsModal from "../components/budget/MoveFundsModal.vue";
 import FundGroupModal from "../components/budget/FundGroupModal.vue";
 import FundingModal from "../components/budget/FundingModal.vue";
+import AvailableToBudgetDetailModal from "../components/budget/AvailableToBudgetDetailModal.vue";
 
 const queryClient = useQueryClient();
 
 const QUERY_KEYS = {
   budget: ["budget"] as const,
   allocations: ["allocations"] as const,
+  availableToBudget: ["available-to-budget"] as const,
   categoryActivity: ["category-activity"] as const,
 } as const;
 
@@ -75,6 +78,7 @@ const activeModal = ref<
   | "move-funds"
   | "retired"
   | "funding"
+  | "available-to-budget-detail"
 >(null);
 const selectedCategory = ref<Category | null>(null);
 const selectedGroup = ref<CategoryGroup | null>(null);
@@ -164,6 +168,22 @@ const { data: categoryActivity } = useQuery({
   queryFn: fetchCategoryActivity,
 });
 
+const availableToBudgetQuery = useQuery({
+  queryKey: computed(() => [
+    ...QUERY_KEYS.availableToBudget,
+    selectedMonth.value || currentMonth.value,
+  ]),
+  queryFn: () =>
+    fetchAvailableToBudgetBreakdown(selectedMonth.value || currentMonth.value),
+  enabled: computed(() => activeModal.value === "available-to-budget-detail"),
+});
+
+const availableToBudgetError = computed(() => {
+  const error = availableToBudgetQuery.error.value;
+  if (error instanceof Error) return error.message;
+  return error ? "The explanation request failed." : null;
+});
+
 const { data: hiddenCategoriesResponse } = useQuery({
   queryKey: computed(() => ["categories", selectedMonth.value, "with-hidden"]),
   queryFn: () => fetchCategories(selectedMonth.value, true),
@@ -180,6 +200,7 @@ const categories = computed(
 function invalidateBudgetQueries() {
   queryClient.invalidateQueries({ queryKey: QUERY_KEYS.budget });
   queryClient.invalidateQueries({ queryKey: QUERY_KEYS.allocations });
+  queryClient.invalidateQueries({ queryKey: QUERY_KEYS.availableToBudget });
 }
 
 type CategoryMutationRequest =
@@ -274,7 +295,12 @@ const metrics = computed(() => {
   if (!budget.value) {
     return [
       { key: "month", label: "Month", value: "\u2014" },
-      { key: "atb", label: "Available to budget", value: "\u2014" },
+      {
+        key: "atb",
+        label: "Available to budget",
+        value: "\u2014",
+        clickable: true,
+      },
       { key: "activity", label: "Activity", value: "\u2014" },
       { key: "budgeted", label: "Budgeted", value: "\u2014" },
     ];
@@ -290,6 +316,7 @@ const metrics = computed(() => {
       key: "atb",
       label: "Available to budget",
       value: formatCurrency(b.available_to_budget_minor),
+      clickable: true,
       status:
         b.available_to_budget_minor < 0
           ? { label: "Negative", variant: "error" as const }
@@ -545,7 +572,11 @@ function submitFundCategory(payload: {
   fundCategoryMutation.mutate(payload);
 }
 
-function handleMonthSelect() {
+function handleMonthSelect(key: string) {
+  if (key === "atb") {
+    activeModal.value = "available-to-budget-detail";
+    return;
+  }
   if (selectedMonth.value) {
     queryClient.invalidateQueries({ queryKey: QUERY_KEYS.budget });
     queryClient.invalidateQueries({ queryKey: QUERY_KEYS.allocations });
@@ -903,6 +934,16 @@ async function submitFundGroup(
       @fund="handleFundCategory"
       @move-funds="handleMoveFundsFromDetail"
       @edit-config="handleEditConfig"
+    />
+
+    <AvailableToBudgetDetailModal
+      :visible="activeModal === 'available-to-budget-detail'"
+      :header-total="budget?.available_to_budget_minor ?? 0"
+      :breakdown="availableToBudgetQuery.data.value ?? null"
+      :loading="availableToBudgetQuery.isPending.value"
+      :error="availableToBudgetError"
+      @close="closeModal"
+      @retry="availableToBudgetQuery.refetch()"
     />
 
     <FundGroupModal

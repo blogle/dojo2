@@ -58,6 +58,9 @@ const formatDelta = (delta: number) => `${delta > 0 ? "+" : ""}${delta}`;
       :data-cy="`metric-${item.key}`"
       :role="item.clickable ? 'button' : undefined"
       :tabindex="item.clickable ? 0 : undefined"
+      :aria-label="
+        item.clickable ? `${item.label}: inspect details` : undefined
+      "
       @click="item.clickable && emit('select', item.key)"
       @keydown.enter="item.clickable && emit('select', item.key)"
       @keydown.space.prevent="item.clickable && emit('select', item.key)"
@@ -128,6 +131,12 @@ const formatDelta = (delta: number) => `${delta > 0 ? "+" : ""}${delta}`;
 
 .metric-strip__item--clickable {
   cursor: pointer;
+}
+
+.metric-strip__item--clickable:hover,
+.metric-strip__item--clickable:focus-visible {
+  background: var(--color-surface-selected);
+  outline: none;
 }
 
 .metric-strip__label,
