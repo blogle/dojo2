@@ -6,20 +6,15 @@
 
 ## v0.0.4 - 2026-09-17
 
-<!-- Release automation promotes these notes to the next patch version on master. -->
-
 - Fixed transaction edits on production DuckDB by avoiding the incompatible conditional-update `RETURNING` path.
 - Preserved actionable Google Drive broker failures in backup status and stopped scheduled backup failures from being reported only as `VERIFYING`.
 
 ## v0.0.3 - 2026-09-16
 
-<!-- Release automation promotes these notes to the next patch version on master. -->
-
 - Rebuilt the frontend around a persistent, expandable application shell with route-aware navigation, lower utility controls, persisted rail preference, content-scoped backup warnings, and bounded page sizing.
 
 ## v0.0.2 - 2026-09-16
 
-<!-- Release automation promotes these notes to the next patch version on master. -->
 The entries below describe the completed implementation. Earlier service-account wording in repository history is historical and superseded by the user-OAuth design described here.
 
 - Added a merge-driven patch-release workflow that keeps package metadata, release tags, container images, and GitHub Releases aligned.

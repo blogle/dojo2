@@ -12,6 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+$")
 TAG_PATTERN = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
+RELEASE_COMMENT = "<!-- Release automation promotes these notes to the next patch version on master. -->"
 
 
 def repository_tags() -> list[tuple[int, int, int]]:
@@ -63,6 +64,13 @@ def promote(version: str, release_date: str) -> bool:
 
     changelog_path = ROOT / "CHANGELOG.md"
     changelog = changelog_path.read_text(encoding="utf-8")
+    # Keep the automation marker scoped to Unreleased rather than copying it
+    # into every historical version section.
+    changelog = re.sub(
+        rf"(?m)^(## v\d+\.\d+\.\d+[^\n]*)\n\n{re.escape(RELEASE_COMMENT)}\n",
+        r"\1\n",
+        changelog,
+    )
     unreleased = re.search(r"(?m)^## Unreleased\s*$", changelog)
     if unreleased is None:
         raise ValueError("CHANGELOG.md must contain an Unreleased section")
@@ -78,7 +86,7 @@ def promote(version: str, release_date: str) -> bool:
     suffix = changelog[body_end:] if next_heading else ""
     replacement = (
         "## Unreleased\n\n"
-        "<!-- Release automation promotes these notes to the next patch version on master. -->\n\n"
+        f"{RELEASE_COMMENT}\n\n"
         f"## v{version} - {release_date}\n\n"
         f"{body}\n\n"
     )

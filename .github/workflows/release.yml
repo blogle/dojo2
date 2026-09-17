@@ -145,4 +145,4 @@ jobs:
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release create "v${RELEASE_VERSION}" --title "dojo v${RELEASE_VERSION}" --generate-notes --verify-tag
+        run: gh release create "${RELEASE_VERSION}" --title "dojo ${RELEASE_VERSION}" --generate-notes --verify-tag
