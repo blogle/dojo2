@@ -5,6 +5,8 @@
 - Added a subordinate Available to budget explanation page with canonical signed components, anomaly-oriented constituent ordering, progressive zoom into bounded virtualized source entries, shared sticky calculation subtotals, and explicit current-state context.
 - Added commit-title release directives with serialized tag-only release publishing for patch, minor, major, and skipped changes.
 
+- Added a subordinate Available to budget explanation page with canonical signed components, anomaly-oriented constituent ordering, progressive zoom into bounded virtualized source entries, shared sticky calculation subtotals, and explicit current-state context.
+
 ## v0.0.4 - 2026-09-17
 
 - Fixed transaction edits on production DuckDB by avoiding the incompatible conditional-update `RETURNING` path.
