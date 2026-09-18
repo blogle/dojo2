@@ -94,12 +94,20 @@ def test_available_to_budget_allocation_groups_resolve_both_directions(
 
 
 def test_available_to_budget_records_are_bounded_and_deterministic(
-    imported_service: DojoService,
+    imported_service: DojoService, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     detail = imported_service.explain_available_to_budget_component(
         month="2026-02", component_key="allocations"
     )
     group = next(group for group in detail["groups"] if group["label"] == "Grocery")
+    queries: list[tuple[str, tuple[object, ...]]] = []
+    fetch_all = imported_service.db.fetch_all
+
+    def record_query(query: str, params: tuple[object, ...] = ()) -> list[dict[str, object]]:
+        queries.append((query, params))
+        return fetch_all(query, params)
+
+    monkeypatch.setattr(imported_service.db, "fetch_all", record_query)
 
     first_page = imported_service.explain_available_to_budget_records(
         month="2026-02",
@@ -124,6 +132,10 @@ def test_available_to_budget_records_are_bounded_and_deterministic(
         first_page["items"][0]["contribution_minor"] + second_page["items"][0]["contribution_minor"]
         == group["amount_minor"]
     )
+    record_queries = [(query, params) for query, params in queries if "LIMIT ? OFFSET ?" in query]
+    assert len(record_queries) == 2
+    assert record_queries[0][1][1:] == ("allocations", group["key"], 1, 0)
+    assert record_queries[1][1][1:] == ("allocations", group["key"], 1, 1)
 
 
 def test_fund_category_persists_allocation_and_allows_negative_atb(

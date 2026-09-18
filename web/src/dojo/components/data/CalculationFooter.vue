@@ -30,9 +30,8 @@ defineProps<{
   gap: var(--space-lg);
   padding: var(--space-md) var(--space-lg);
   border: 1px solid var(--color-outline-strong);
-  border-radius: var(--radius-md);
-  background: var(--color-surface-raised);
-  box-shadow: var(--shadow-popover);
+  border-radius: var(--radius-all);
+  background: var(--color-surface);
 }
 
 .calculation-footer__label {

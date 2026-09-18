@@ -2227,6 +2227,7 @@ class DojoService:
                 "label": label,
                 "amount_minor": 0,
                 "direction": "neutral",
+                "contribution_count": 0,
                 "contributions": [],
             }
             for key, label in component_specs
@@ -2235,6 +2236,7 @@ class DojoService:
         def add_contribution(component_key: str, contribution: dict[str, Any]) -> None:
             component = components[component_key]
             component["amount_minor"] += int(contribution["contribution_minor"])
+            component["contribution_count"] += 1
             if include_details:
                 component["contributions"].append(contribution)
 
@@ -2416,39 +2418,8 @@ class DojoService:
                 "increases" if amount_minor > 0 else "decreases" if amount_minor < 0 else "neutral"
             ),
             "group_count": 0,
-            "contribution_count": len(component["contributions"]),
+            "contribution_count": component["contribution_count"],
         }
-
-    @staticmethod
-    def _atb_group_for_contribution(
-        component_key: str, contribution: dict[str, Any]
-    ) -> tuple[str, str]:
-        if component_key == "allocations":
-            return (
-                str(contribution.get("category_id") or "unknown-category"),
-                str(contribution.get("category_name") or "Unknown category"),
-            )
-        if component_key == "transfers":
-            account_name = str(contribution.get("account_name") or "Unknown account")
-            counterparty_name = contribution.get("counterparty_account_name")
-            counterparty_id = contribution.get("counterparty_account_id")
-            if counterparty_name and counterparty_id:
-                if contribution["contribution_minor"] >= 0:
-                    return (
-                        f"{counterparty_id}:{contribution['account_id']}",
-                        f"{counterparty_name} -> {account_name}",
-                    )
-                return (
-                    f"{contribution['account_id']}:{counterparty_id}",
-                    f"{account_name} -> {counterparty_name}",
-                )
-            direction = "in" if contribution["contribution_minor"] >= 0 else "out"
-            return (
-                f"{contribution['account_id']}:{direction}",
-                f"{account_name} ({'inflow' if direction == 'in' else 'outflow'})",
-            )
-        account_id = str(contribution.get("account_id") or "unknown-account")
-        return account_id, str(contribution.get("account_name") or "Unknown account")
 
     @staticmethod
     def _atb_record_for_api(contribution: dict[str, Any]) -> dict[str, Any]:
@@ -2481,14 +2452,14 @@ class DojoService:
             "contribution_minor": int(contribution["contribution_minor"]),
         }
 
-    def explain_available_to_budget(
-        self, *, month: str, include_details: bool = False
-    ) -> dict[str, Any]:
+    def explain_available_to_budget(self, *, month: str) -> dict[str, Any]:
         collected = self._collect_available_to_budget_contributions(
-            month=month, include_details=True
+            month=month, include_details=False
         )
-        if include_details:
-            return collected
+        group_rows = self._atb_component_group_rows(as_of=self.clock.today())
+        group_counts: dict[str, int] = defaultdict(int)
+        for row in group_rows:
+            group_counts[row["component_key"]] += 1
         return {
             "available_to_budget_minor": collected["available_to_budget_minor"],
             "budget_month": collected["budget_month"],
@@ -2496,48 +2467,33 @@ class DojoService:
             "temporal_scope": collected["temporal_scope"],
             "components": [
                 self._atb_component_summary(component)
-                | {
-                    "group_count": len(
-                        {
-                            self._atb_group_for_contribution(component["key"], contribution)[0]
-                            for contribution in component["contributions"]
-                        }
-                    )
-                }
+                | {"group_count": group_counts[component["key"]]}
                 for component in collected["components"]
             ],
         }
 
-    def explain_available_to_budget_component(
-        self, *, month: str, component_key: str
-    ) -> dict[str, Any]:
-        explanation = self.explain_available_to_budget(month=month, include_details=True)
-        return self._atb_component_detail_from_explanation(explanation, component_key)
-
-    def _atb_component_detail_from_explanation(
-        self, explanation: dict[str, Any], component_key: str
-    ) -> dict[str, Any]:
-        component = next(
-            (item for item in explanation["components"] if item["key"] == component_key), None
+    def _atb_component_group_rows(self, *, as_of: date) -> list[dict[str, Any]]:
+        return self.db.fetch_all(
+            render_sql(
+                "queries/available_to_budget_component_groups",
+                contributions_query=load_sql("queries/available_to_budget_contributions"),
+            ),
+            (as_of,),
         )
-        if component is None:
-            raise ValueError("Available to budget component not found")
-        groups: dict[str, dict[str, Any]] = {}
-        for contribution in component["contributions"]:
-            key, label = self._atb_group_for_contribution(component_key, contribution)
-            group = groups.setdefault(
-                key,
-                {"key": key, "label": label, "amount_minor": 0, "record_count": 0},
-            )
-            group["amount_minor"] += int(contribution["contribution_minor"])
-            group["record_count"] += 1
-        group_rows = []
-        for group in groups.values():
-            amount_minor = int(group["amount_minor"])
-            group_rows.append(
-                group
-                | {
+
+    def _atb_component_groups(self, *, component_key: str, as_of: date) -> list[dict[str, Any]]:
+        rows = self._atb_component_group_rows(as_of=as_of)
+        groups = []
+        for row in rows:
+            if row["component_key"] != component_key:
+                continue
+            amount_minor = int(row["amount_minor"])
+            groups.append(
+                {
+                    "key": row["group_key"],
+                    "label": row["group_label"],
                     "amount_minor": amount_minor,
+                    "record_count": int(row["record_count"]),
                     "direction": (
                         "increases"
                         if amount_minor > 0
@@ -2547,8 +2503,19 @@ class DojoService:
                     ),
                 }
             )
-        group_rows.sort(
-            key=lambda item: (-abs(item["amount_minor"]), item["label"].casefold(), item["key"])
+        return groups
+
+    def explain_available_to_budget_component(
+        self, *, month: str, component_key: str
+    ) -> dict[str, Any]:
+        explanation = self.explain_available_to_budget(month=month)
+        component = next(
+            (item for item in explanation["components"] if item["key"] == component_key), None
+        )
+        if component is None:
+            raise ValueError("Available to budget component not found")
+        group_rows = self._atb_component_groups(
+            component_key=component_key, as_of=self.clock.today()
         )
         return {
             key: explanation[key]
@@ -2567,29 +2534,42 @@ class DojoService:
         offset: int,
         limit: int,
     ) -> dict[str, Any]:
-        collected = self.explain_available_to_budget(month=month, include_details=True)
-        detail = self._atb_component_detail_from_explanation(collected, component_key)
-        group = next((item for item in detail["groups"] if item["key"] == group_key), None)
+        explanation = self.explain_available_to_budget(month=month)
+        component = next(
+            (item for item in explanation["components"] if item["key"] == component_key), None
+        )
+        if component is None:
+            raise ValueError("Available to budget component not found")
+        groups = self._atb_component_groups(component_key=component_key, as_of=self.clock.today())
+        group = next((item for item in groups if item["key"] == group_key), None)
         if group is None:
             raise ValueError("Available to budget group not found")
-        component = next(item for item in collected["components"] if item["key"] == component_key)
-        records = [
-            self._atb_record_for_api(contribution)
-            for contribution in component["contributions"]
-            if self._atb_group_for_contribution(component_key, contribution)[0] == group_key
-        ]
-        page = records[offset : offset + limit]
+        contributions_query = load_sql("queries/available_to_budget_contributions")
+        stats = self.db.fetch_one(
+            render_sql(
+                "queries/available_to_budget_component_record_stats",
+                contributions_query=contributions_query,
+            ),
+            (self.clock.today(), component_key, group_key),
+        )
+        rows = self.db.fetch_all(
+            render_sql(
+                "queries/available_to_budget_component_records",
+                contributions_query=contributions_query,
+            ),
+            (self.clock.today(), component_key, group_key, limit, offset),
+        )
         return {
-            key: detail[key]
+            key: explanation[key]
             for key in ("available_to_budget_minor", "budget_month", "as_of_date", "temporal_scope")
         } | {
-            "component": detail["component"],
+            "component": self._atb_component_summary(component) | {"group_count": len(groups)},
             "group": group,
-            "items": page,
-            "total": len(records),
+            "items": [self._atb_record_for_api(row) for row in rows],
+            "total": int(stats["total"]) if stats else 0,
             "offset": offset,
             "limit": limit,
-            "has_more": offset + limit < len(records),
+            "has_more": offset + limit < int(stats["total"]) if stats else False,
         }
 
     def get_net_worth(self) -> dict[str, Any]:
