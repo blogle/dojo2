@@ -1,5 +1,24 @@
 # Decisions
 
+## 2026-09-17 — Explain Available to budget without redefining its scope
+
+### Context
+
+The Budget header's Available to budget value combines current budget-account system transactions, positive starting balances, balance adjustments, category allocations, and transfer-boundary effects. The existing calculation returns only a scalar, which prevents users from tracing an unexpected value back to its records. The Budget endpoint accepts a budget month, but Available to budget currently uses current-state records and the application's current clock date for future-transfer filtering.
+
+### Decision
+
+Expose a server-generated Available to budget explanation derived from the same calculation primitive as the header value. Return a summary first, source-appropriate grouped component detail second, and bounded deterministic record windows only at the final audit level. Preserve stable record identifiers and known operation provenance without exposing them in normal copy. Preserve the current-state accounting semantics and disclose the budget month and application as-of date in the explanation instead of silently introducing month-specific or SCD as-of accounting.
+
+### Consequence
+
+- The frontend contains no independent Available to budget formula.
+- The explanation uses progressive zoom: one investigation level at a time, with compact breadcrumb context from component arithmetic to grouped constituents to virtualized source entries. A shared sticky calculation footer keeps the authoritative subtotal visible within each workspace while the content scrolls.
+- Summary and grouped responses never include source-record arrays; record reads are explicitly bounded by offset and limit.
+- Current-state scope is explicit to users, including when the selected budget month is historical.
+- Imported or migrated provenance is shown only when the underlying records carry that information; the UI does not invent migration adjustments.
+- A future true historical Available to budget model must change the canonical calculation and its context contract before the explanation surface can claim historical ATB semantics.
+
 ## 2026-09-03 — Use SCD2 row identities for optimistic concurrency
 
 ### Context

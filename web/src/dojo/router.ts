@@ -24,6 +24,10 @@ const router = createRouter({
           component: () => import("./pages/BudgetsPage.vue"),
         },
         {
+          path: "budgets/available-to-budget",
+          component: () => import("./pages/AvailableToBudgetPage.vue"),
+        },
+        {
           path: "transactions",
           component: () => import("./pages/TransactionsPage.vue"),
         },

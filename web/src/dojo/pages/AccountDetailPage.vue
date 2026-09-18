@@ -1166,6 +1166,7 @@ function invalidateAccountDetailQueries() {
   queryClient.invalidateQueries({ queryKey: ["net-worth"] });
   queryClient.invalidateQueries({ queryKey: ["category-activity"] });
   queryClient.invalidateQueries({ queryKey: ["loan-projection"] });
+  queryClient.invalidateQueries({ queryKey: ["available-to-budget"] });
 }
 
 function openValueModal() {

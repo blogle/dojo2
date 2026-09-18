@@ -2209,6 +2209,369 @@ class DojoService:
             ),
         }
 
+    def _collect_available_to_budget_contributions(
+        self, *, month: str, include_details: bool
+    ) -> dict[str, Any]:
+        """Collect the canonical ATB terms and optional provenance records."""
+        as_of = self.clock.today()
+        component_specs = [
+            ("transactions", "Available to budget transactions"),
+            ("starting-balances", "Positive starting balances"),
+            ("balance-adjustments", "Balance adjustments"),
+            ("transfers", "Transfers across the budget boundary"),
+            ("allocations", "Category allocations"),
+        ]
+        components: dict[str, dict[str, Any]] = {
+            key: {
+                "key": key,
+                "label": label,
+                "amount_minor": 0,
+                "direction": "neutral",
+                "contribution_count": 0,
+                "contributions": [],
+            }
+            for key, label in component_specs
+        }
+
+        def add_contribution(component_key: str, contribution: dict[str, Any]) -> None:
+            component = components[component_key]
+            component["amount_minor"] += int(contribution["contribution_minor"])
+            component["contribution_count"] += 1
+            if include_details:
+                component["contributions"].append(contribution)
+
+        transactions = self.db.fetch_all(
+            load_sql("queries/available_to_budget_transactions"),
+            (
+                ACCOUNT_CLASS_BUDGET,
+                SYSTEM_CATEGORY_ATB,
+                SYSTEM_CATEGORY_STARTING_BALANCE,
+                SYSTEM_CATEGORY_BALANCE_ADJUSTMENT,
+            ),
+        )
+        transaction_ids = [str(row["transaction_id"]) for row in transactions]
+        operation_by_transaction: dict[str, dict[str, Any]] = {}
+        if include_details and transaction_ids:
+            placeholders = ",".join("?" for _ in transaction_ids)
+            operation_rows = self.db.fetch_all(
+                render_sql(
+                    "queries/transaction_operation_accounts_by_transaction_ids",
+                    transaction_placeholders=placeholders,
+                ),
+                tuple(transaction_ids),
+            )
+            operation_by_transaction = {str(row["transaction_id"]): row for row in operation_rows}
+
+        for row in transactions:
+            amount_minor = int(row["amount_minor"])
+            system_category = row["system_category"]
+            if system_category == SYSTEM_CATEGORY_STARTING_BALANCE:
+                if amount_minor <= 0:
+                    continue
+                component_key = "starting-balances"
+            elif system_category == SYSTEM_CATEGORY_BALANCE_ADJUSTMENT:
+                component_key = "balance-adjustments"
+            else:
+                component_key = "transactions"
+            operation = operation_by_transaction.get(str(row["transaction_id"]))
+            add_contribution(
+                component_key,
+                {
+                    "id": f"transaction:{row['transaction_id']}:{row['version']}",
+                    "kind": "transaction",
+                    "record_id": str(row["transaction_id"]),
+                    "version": str(row["version"]),
+                    "date": row["date"].isoformat(),
+                    "source_type": system_category,
+                    "account_id": str(row["account_id"]),
+                    "account_name": row["account_name"],
+                    "category_id": None,
+                    "category_name": None,
+                    "memo": row["memo"] or "",
+                    "contribution_minor": amount_minor,
+                    "operation_id": str(operation["operation_id"]) if operation else None,
+                    "operation_kind": operation["operation_kind"] if operation else None,
+                    "origin": operation["origin"] if operation else None,
+                },
+            )
+
+        transfer_rows = self.db.fetch_all(load_sql("queries/current_transfer_boundary_facts"))
+        transfer_ids = [str(row["transaction_id"]) for row in transfer_rows]
+        if include_details and transfer_ids:
+            placeholders = ",".join("?" for _ in transfer_ids)
+            transfer_operation_rows = self.db.fetch_all(
+                render_sql(
+                    "queries/transaction_operation_accounts_by_transaction_ids",
+                    transaction_placeholders=placeholders,
+                ),
+                tuple(transfer_ids),
+            )
+            operation_by_transaction.update(
+                {str(row["transaction_id"]): row for row in transfer_operation_rows}
+            )
+        transfer_facts = [
+            TransferBoundaryFact(
+                transaction_id=str(row["transaction_id"]),
+                account_class=str(row["account_class"]),
+                system_category=row["system_category"],
+                amount_minor=int(row["amount_minor"]),
+                effective_date=row["effective_date"],
+                status=str(row["status"]),
+            )
+            for row in transfer_rows
+        ]
+        for row, fact in zip(transfer_rows, transfer_facts, strict=True):
+            contribution_minor = compute_transfer_boundary_adjustment([fact], as_of=as_of)
+            if contribution_minor == 0:
+                continue
+            operation = operation_by_transaction.get(str(row["transaction_id"]))
+            add_contribution(
+                "transfers",
+                {
+                    "id": f"transaction:{row['transaction_id']}:{row['version']}",
+                    "kind": "transfer",
+                    "record_id": str(row["transaction_id"]),
+                    "version": str(row["version"]),
+                    "date": row["effective_date"].isoformat(),
+                    "source_type": str(row["account_class"]),
+                    "account_id": str(row["account_id"]),
+                    "account_name": row["account_name"],
+                    "category_id": None,
+                    "category_name": None,
+                    "counterparty_account_id": (
+                        str(operation["counterpart_account_id"]) if operation else None
+                    ),
+                    "counterparty_account_name": (operation["account_name"] if operation else None),
+                    "memo": row["memo"] or "",
+                    "contribution_minor": contribution_minor,
+                    "operation_id": str(operation["operation_id"]) if operation else None,
+                    "operation_kind": operation["operation_kind"] if operation else None,
+                    "origin": operation["origin"] if operation else None,
+                },
+            )
+
+        category_by_bucket_id: dict[str, dict[str, Any]] = {}
+        if include_details:
+            categories = self.list_categories(month=month, show_hidden=True)
+            category_by_bucket_id = {
+                str(category["bucket_id"]): category for category in categories
+            }
+        for row in self.db.fetch_all(load_sql("queries/current_allocations")):
+            from_bucket_id = str(row["from_bucket_id"])
+            to_bucket_id = str(row["to_bucket_id"])
+            atb_bucket_id = str(SYSTEM_ATB_BUCKET_ID)
+            if from_bucket_id != atb_bucket_id and to_bucket_id != atb_bucket_id:
+                continue
+            contribution_minor = int(row["amount_minor"])
+            category = (
+                category_by_bucket_id.get(to_bucket_id)
+                if from_bucket_id == atb_bucket_id
+                else category_by_bucket_id.get(from_bucket_id)
+            )
+            if from_bucket_id == atb_bucket_id:
+                contribution_minor = -contribution_minor
+            add_contribution(
+                "allocations",
+                {
+                    "id": f"allocation:{row['allocation_id']}:{row['row_id']}",
+                    "kind": "allocation",
+                    "record_id": str(row["allocation_id"]),
+                    "version": str(row["row_id"]),
+                    "date": row["date"].isoformat(),
+                    "source_type": "Category allocation",
+                    "account_id": None,
+                    "account_name": None,
+                    "category_id": (str(category["category_id"]) if category is not None else None),
+                    "category_name": category["name"] if category else "Unknown category",
+                    "memo": row["memo"] or "",
+                    "contribution_minor": contribution_minor,
+                    "operation_id": None,
+                    "operation_kind": None,
+                    "origin": None,
+                },
+            )
+
+        total = sum(component["amount_minor"] for component in components.values())
+        for component in components.values():
+            amount_minor = int(component["amount_minor"])
+            component["direction"] = (
+                "increases" if amount_minor > 0 else "decreases" if amount_minor < 0 else "neutral"
+            )
+            component["amount_minor"] = amount_minor
+
+        return {
+            "available_to_budget_minor": int(total),
+            "budget_month": month,
+            "as_of_date": as_of.isoformat(),
+            "temporal_scope": "current-state",
+            "components": list(components.values()),
+        }
+
+    @staticmethod
+    def _atb_component_summary(component: dict[str, Any]) -> dict[str, Any]:
+        amount_minor = int(component["amount_minor"])
+        return {
+            "key": component["key"],
+            "label": component["label"],
+            "amount_minor": amount_minor,
+            "direction": (
+                "increases" if amount_minor > 0 else "decreases" if amount_minor < 0 else "neutral"
+            ),
+            "group_count": 0,
+            "contribution_count": component["contribution_count"],
+        }
+
+    @staticmethod
+    def _atb_record_for_api(contribution: dict[str, Any]) -> dict[str, Any]:
+        source_labels = {
+            SYSTEM_CATEGORY_ATB: "Available to budget transaction",
+            SYSTEM_CATEGORY_STARTING_BALANCE: "Starting balance",
+            SYSTEM_CATEGORY_BALANCE_ADJUSTMENT: "Balance adjustment",
+            "BUDGET": "Account transfer",
+            "INVESTMENT": "Account transfer",
+            "Category allocation": "Category allocation",
+        }
+        provenance_labels = {
+            "ACCOUNT_DETAIL": "Account detail",
+            "INVESTMENT_CONTRIBUTION": "Investment contribution",
+            "INVESTMENT_WITHDRAWAL": "Investment withdrawal",
+            "CREDIT_CARD_PAYMENT": "Credit card payment",
+        }
+        provenance = contribution.get("origin") or contribution.get("operation_kind")
+        return {
+            "id": contribution["id"],
+            "kind": contribution["kind"],
+            "record_id": contribution["record_id"],
+            "version": contribution["version"],
+            "date": contribution["date"],
+            "source_label": source_labels.get(contribution["source_type"], "Other contribution"),
+            "provenance_label": provenance_labels.get(provenance) if provenance else None,
+            "account_name": contribution.get("account_name"),
+            "category_name": contribution.get("category_name"),
+            "memo": contribution.get("memo") or "",
+            "contribution_minor": int(contribution["contribution_minor"]),
+        }
+
+    def explain_available_to_budget(self, *, month: str) -> dict[str, Any]:
+        collected = self._collect_available_to_budget_contributions(
+            month=month, include_details=False
+        )
+        group_rows = self._atb_component_group_rows(as_of=self.clock.today())
+        group_counts: dict[str, int] = defaultdict(int)
+        for row in group_rows:
+            group_counts[row["component_key"]] += 1
+        return {
+            "available_to_budget_minor": collected["available_to_budget_minor"],
+            "budget_month": collected["budget_month"],
+            "as_of_date": collected["as_of_date"],
+            "temporal_scope": collected["temporal_scope"],
+            "components": [
+                self._atb_component_summary(component)
+                | {"group_count": group_counts[component["key"]]}
+                for component in collected["components"]
+            ],
+        }
+
+    def _atb_component_group_rows(self, *, as_of: date) -> list[dict[str, Any]]:
+        return self.db.fetch_all(
+            render_sql(
+                "queries/available_to_budget_component_groups",
+                contributions_query=load_sql("queries/available_to_budget_contributions"),
+            ),
+            (as_of,),
+        )
+
+    def _atb_component_groups(self, *, component_key: str, as_of: date) -> list[dict[str, Any]]:
+        rows = self._atb_component_group_rows(as_of=as_of)
+        groups = []
+        for row in rows:
+            if row["component_key"] != component_key:
+                continue
+            amount_minor = int(row["amount_minor"])
+            groups.append(
+                {
+                    "key": row["group_key"],
+                    "label": row["group_label"],
+                    "amount_minor": amount_minor,
+                    "record_count": int(row["record_count"]),
+                    "direction": (
+                        "increases"
+                        if amount_minor > 0
+                        else "decreases"
+                        if amount_minor < 0
+                        else "neutral"
+                    ),
+                }
+            )
+        return groups
+
+    def explain_available_to_budget_component(
+        self, *, month: str, component_key: str
+    ) -> dict[str, Any]:
+        explanation = self.explain_available_to_budget(month=month)
+        component = next(
+            (item for item in explanation["components"] if item["key"] == component_key), None
+        )
+        if component is None:
+            raise ValueError("Available to budget component not found")
+        group_rows = self._atb_component_groups(
+            component_key=component_key, as_of=self.clock.today()
+        )
+        return {
+            key: explanation[key]
+            for key in ("available_to_budget_minor", "budget_month", "as_of_date", "temporal_scope")
+        } | {
+            "component": self._atb_component_summary(component) | {"group_count": len(group_rows)},
+            "groups": group_rows,
+        }
+
+    def explain_available_to_budget_records(
+        self,
+        *,
+        month: str,
+        component_key: str,
+        group_key: str,
+        offset: int,
+        limit: int,
+    ) -> dict[str, Any]:
+        explanation = self.explain_available_to_budget(month=month)
+        component = next(
+            (item for item in explanation["components"] if item["key"] == component_key), None
+        )
+        if component is None:
+            raise ValueError("Available to budget component not found")
+        groups = self._atb_component_groups(component_key=component_key, as_of=self.clock.today())
+        group = next((item for item in groups if item["key"] == group_key), None)
+        if group is None:
+            raise ValueError("Available to budget group not found")
+        contributions_query = load_sql("queries/available_to_budget_contributions")
+        stats = self.db.fetch_one(
+            render_sql(
+                "queries/available_to_budget_component_record_stats",
+                contributions_query=contributions_query,
+            ),
+            (self.clock.today(), component_key, group_key),
+        )
+        rows = self.db.fetch_all(
+            render_sql(
+                "queries/available_to_budget_component_records",
+                contributions_query=contributions_query,
+            ),
+            (self.clock.today(), component_key, group_key, limit, offset),
+        )
+        return {
+            key: explanation[key]
+            for key in ("available_to_budget_minor", "budget_month", "as_of_date", "temporal_scope")
+        } | {
+            "component": self._atb_component_summary(component) | {"group_count": len(groups)},
+            "group": group,
+            "items": [self._atb_record_for_api(row) for row in rows],
+            "total": int(stats["total"]) if stats else 0,
+            "offset": offset,
+            "limit": limit,
+            "has_more": offset + limit < int(stats["total"]) if stats else False,
+        }
+
     def get_net_worth(self) -> dict[str, Any]:
         accounts = {
             row["account_id"]: row
@@ -4474,42 +4837,11 @@ class DojoService:
         return 0
 
     def compute_available_to_budget(self) -> int:
-        transactions = self.db.fetch_all(
-            load_sql("queries/available_to_budget_transactions"),
-            (
-                ACCOUNT_CLASS_BUDGET,
-                SYSTEM_CATEGORY_ATB,
-                SYSTEM_CATEGORY_STARTING_BALANCE,
-                SYSTEM_CATEGORY_BALANCE_ADJUSTMENT,
-            ),
+        return int(
+            self._collect_available_to_budget_contributions(
+                month=self.default_budget_month(), include_details=False
+            )["available_to_budget_minor"]
         )
-        allocations = self.db.fetch_all(load_sql("queries/current_allocations_amount_only"))
-        transfer_facts = [
-            TransferBoundaryFact(
-                transaction_id=str(row["transaction_id"]),
-                account_class=str(row["account_class"]),
-                system_category=row["system_category"],
-                amount_minor=int(row["amount_minor"]),
-                effective_date=row["effective_date"],
-                status=str(row["status"]),
-            )
-            for row in self.db.fetch_all(load_sql("queries/current_transfer_boundary_facts"))
-        ]
-        total = compute_transfer_boundary_adjustment(transfer_facts, as_of=self.clock.today())
-        for transaction in transactions:
-            if transaction["system_category"] == SYSTEM_CATEGORY_TRANSFER:
-                continue
-            if transaction["system_category"] == SYSTEM_CATEGORY_STARTING_BALANCE:
-                if transaction["amount_minor"] > 0:
-                    total += int(transaction["amount_minor"])
-                continue
-            total += int(transaction["amount_minor"])
-        for allocation in allocations:
-            if allocation["to_bucket_id"] == str(SYSTEM_ATB_BUCKET_ID):
-                total += allocation["amount_minor"]
-            if allocation["from_bucket_id"] == str(SYSTEM_ATB_BUCKET_ID):
-                total -= allocation["amount_minor"]
-        return int(total)
 
     def compute_category_available(self, category_id: str) -> int:
         category = next(

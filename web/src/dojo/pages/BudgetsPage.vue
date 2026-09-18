@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/vue-query";
 
 import type { Category, CategoryGroup } from "../types";
@@ -43,6 +44,8 @@ import FundGroupModal from "../components/budget/FundGroupModal.vue";
 import FundingModal from "../components/budget/FundingModal.vue";
 
 const queryClient = useQueryClient();
+const route = useRoute();
+const router = useRouter();
 
 const QUERY_KEYS = {
   budget: ["budget"] as const,
@@ -55,7 +58,12 @@ const currentMonth = computed(() => {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 });
 
-const selectedMonth = ref(currentMonth.value);
+const selectedMonth = ref(
+  typeof route.query.month === "string" &&
+    /^\d{4}-(0[1-9]|1[0-2])$/.test(route.query.month)
+    ? route.query.month
+    : currentMonth.value,
+);
 
 const isReordering = ref(false);
 const reorderChanges = ref<
@@ -180,6 +188,7 @@ const categories = computed(
 function invalidateBudgetQueries() {
   queryClient.invalidateQueries({ queryKey: QUERY_KEYS.budget });
   queryClient.invalidateQueries({ queryKey: QUERY_KEYS.allocations });
+  queryClient.invalidateQueries({ queryKey: ["available-to-budget"] });
 }
 
 type CategoryMutationRequest =
@@ -274,7 +283,12 @@ const metrics = computed(() => {
   if (!budget.value) {
     return [
       { key: "month", label: "Month", value: "\u2014" },
-      { key: "atb", label: "Available to budget", value: "\u2014" },
+      {
+        key: "atb",
+        label: "Available to budget",
+        value: "\u2014",
+        clickable: true,
+      },
       { key: "activity", label: "Activity", value: "\u2014" },
       { key: "budgeted", label: "Budgeted", value: "\u2014" },
     ];
@@ -290,6 +304,7 @@ const metrics = computed(() => {
       key: "atb",
       label: "Available to budget",
       value: formatCurrency(b.available_to_budget_minor),
+      clickable: true,
       status:
         b.available_to_budget_minor < 0
           ? { label: "Negative", variant: "error" as const }
@@ -545,7 +560,14 @@ function submitFundCategory(payload: {
   fundCategoryMutation.mutate(payload);
 }
 
-function handleMonthSelect() {
+function handleMonthSelect(key: string) {
+  if (key === "atb") {
+    router.push({
+      path: "/budgets/available-to-budget",
+      query: { month: selectedMonth.value || currentMonth.value },
+    });
+    return;
+  }
   if (selectedMonth.value) {
     queryClient.invalidateQueries({ queryKey: QUERY_KEYS.budget });
     queryClient.invalidateQueries({ queryKey: QUERY_KEYS.allocations });

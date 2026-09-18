@@ -112,6 +112,7 @@ function invalidateRelatedQueries() {
   queryClient.invalidateQueries({ queryKey: QUERY_KEYS.netWorth });
   queryClient.invalidateQueries({ queryKey: QUERY_KEYS.categories });
   queryClient.invalidateQueries({ queryKey: QUERY_KEYS.categoryActivity });
+  queryClient.invalidateQueries({ queryKey: ["available-to-budget"] });
 }
 
 const createMutation = useMutation({

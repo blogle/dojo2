@@ -249,6 +249,17 @@ describe("BudgetsPage", () => {
     );
   });
 
+  it("navigates to the Available to budget detail page from the metric", () => {
+    mountPage();
+    cy.get("[data-cy=metric-atb]").click();
+    cy.wrap(null).should(() => {
+      expect(router.currentRoute.value.path).to.equal(
+        "/budgets/available-to-budget",
+      );
+      expect(router.currentRoute.value.query.month).to.equal(currentMonth);
+    });
+  });
+
   it("displays the hierarchical category table", () => {
     mountPage();
     cy.get("[data-cy=hierarchical-category-table-root]").should("be.visible");

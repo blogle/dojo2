@@ -78,6 +78,8 @@ sections:
   - id: page-data
     title: Page Data
     entries:
+      - component: CalculationFooter
+        fixture: data/CalculationFooter.fixtures.ts
       - component: PageHeader
         fixture: data/PageHeader.fixtures.ts
       - component: MetricStrip

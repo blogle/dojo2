@@ -2,6 +2,12 @@
 
 dojo is a local-first personal finance repository with a FastAPI API in `api/`, a Vue 3 frontend in `web/`, and repository-wide checks routed through the root `justfile`.
 
+## Canonical Workspace
+
+- The canonical repository is `dojo2`.
+- `dojo` is deprecated and must never be searched, used, or treated as an alternate checkout.
+- Resolve repository-relative paths from the current workspace root, not from historical repository locations.
+
 ## First Commands
 
 - `just setup`
@@ -75,4 +81,3 @@ Short plan format for non-trivial work:
 1. Inspect the relevant code and identify the smallest correct change.
 2. Implement only that change.
 3. Verify with the narrowest relevant `just` command, then broader commands if warranted.
-

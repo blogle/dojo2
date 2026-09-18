@@ -1,4 +1,7 @@
 import type {
+  AvailableToBudgetBreakdown,
+  AvailableToBudgetComponentDetail,
+  AvailableToBudgetRecordsPage,
   Account,
   Allocation,
   AppStatus,
@@ -114,6 +117,43 @@ export async function fetchBudget(
     show_hidden: String(showHidden),
   });
   return request<BudgetResponse>(`/api/budget?${params.toString()}`);
+}
+
+export async function fetchAvailableToBudgetBreakdown(
+  month: string,
+): Promise<AvailableToBudgetBreakdown> {
+  const params = new URLSearchParams({ month });
+  return request<AvailableToBudgetBreakdown>(
+    `/api/budget/available-to-budget-breakdown?${params.toString()}`,
+  );
+}
+
+export async function fetchAvailableToBudgetComponent(
+  componentKey: string,
+  month: string,
+): Promise<AvailableToBudgetComponentDetail> {
+  const params = new URLSearchParams({ month });
+  return request<AvailableToBudgetComponentDetail>(
+    `/api/budget/available-to-budget-breakdown/${encodeURIComponent(componentKey)}?${params.toString()}`,
+  );
+}
+
+export async function fetchAvailableToBudgetRecords(
+  componentKey: string,
+  month: string,
+  groupKey: string,
+  offset: number,
+  limit: number,
+): Promise<AvailableToBudgetRecordsPage> {
+  const params = new URLSearchParams({
+    month,
+    group_key: groupKey,
+    offset: String(offset),
+    limit: String(limit),
+  });
+  return request<AvailableToBudgetRecordsPage>(
+    `/api/budget/available-to-budget-breakdown/${encodeURIComponent(componentKey)}/records?${params.toString()}`,
+  );
 }
 
 export type TransactionPage = {

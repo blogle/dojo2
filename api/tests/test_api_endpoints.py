@@ -52,6 +52,46 @@ def test_app_bootstrap_and_import_flow(monkeypatch, tmp_path) -> None:
         assert budget.json()["available_to_budget_minor"] == 424000
         assert budget.json()["groups"][0]["totals"]["available_minor"] == 26000
 
+        breakdown = client.get(
+            "/api/budget/available-to-budget-breakdown", params={"month": "2026-02"}
+        )
+        assert breakdown.status_code == 200
+        breakdown_json = breakdown.json()
+        assert breakdown_json["available_to_budget_minor"] == 424000
+        assert breakdown_json["budget_month"] == "2026-02"
+        assert breakdown_json["temporal_scope"] == "current-state"
+        assert (
+            sum(component["amount_minor"] for component in breakdown_json["components"]) == 424000
+        )
+        assert all("contributions" not in component for component in breakdown_json["components"])
+
+        allocations = client.get(
+            "/api/budget/available-to-budget-breakdown/allocations",
+            params={"month": "2026-02"},
+        )
+        assert allocations.status_code == 200
+        allocations_json = allocations.json()
+        assert (
+            sum(group["amount_minor"] for group in allocations_json["groups"])
+            == (allocations_json["component"]["amount_minor"])
+        )
+        grocery = next(group for group in allocations_json["groups"] if group["label"] == "Grocery")
+
+        records = client.get(
+            "/api/budget/available-to-budget-breakdown/allocations/records",
+            params={
+                "month": "2026-02",
+                "group_key": grocery["key"],
+                "limit": 1,
+            },
+        )
+        assert records.status_code == 200
+        records_json = records.json()
+        assert len(records_json["items"]) == 1
+        assert records_json["items"][0]["category_name"] == "Grocery"
+        assert records_json["limit"] == 1
+        assert records_json["total"] == grocery["record_count"]
+
         transactions = client.get("/api/transactions", params={"show_hidden": "true", "limit": 100})
         assert transactions.status_code == 200
         assert len(transactions.json()["items"]) == 12

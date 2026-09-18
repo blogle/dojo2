@@ -1,6 +1,7 @@
 SELECT legs.transaction_id,
        legs.operation_id,
        operations.operation_kind,
+       operations.origin,
        counterpart.transaction_id AS counterpart_transaction_id,
        counterpart_transaction.account_id AS counterpart_account_id,
        accounts.name AS account_name
