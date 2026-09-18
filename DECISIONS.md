@@ -242,7 +242,7 @@ Add GitHub Actions CI now and make it run the same `just` commands developers us
 
 Local and remote verification stay consistent, and changes to workflow commands should happen in one place instead of diverging between CI and development.
 
-## 2026-09-15 — Use merge-driven patch releases
+## 2026-09-15 — Use merge-driven patch releases (superseded)
 
 ### Context
 
@@ -255,6 +255,29 @@ Use Git tags as the release authority and promote a non-empty `CHANGELOG.md` `Un
 ### Consequence
 
 Merges are self-contained release inputs and the current post-`v0.0.1` work will become `v0.0.2` automatically. Release metadata is intentionally a bot-authored follow-up commit, so feature PRs only maintain `Unreleased` notes and do not race with a future version number.
+
+## 2026-09-18 — Use commit-title release directives
+
+### Context
+
+Protected `master` cannot accept bot-authored release commits. A follow-up
+release PR also introduces a second merge for every change and can combine
+metadata from concurrent feature merges.
+
+### Decision
+
+Use the first line of the merged commit title as the release control surface.
+The default is a patch release; `[release:minor]`, `[release:major]`, and
+`[release:none]` opt into a different bump or suppress the release. The
+workflow tags the exact pushed commit and publishes from that tag without
+mutating `master`.
+
+### Consequence
+
+Each qualifying merge produces at most one release and never creates a second
+metadata PR. A skipped merge is included in the next release that is created.
+Conflicting or malformed directives fail closed. GitHub-generated release notes
+and the human-maintained changelog are separate from version selection.
 
 ## 2026-06-10 — Adopt self-contained ExecPlans for complex implementation work
 

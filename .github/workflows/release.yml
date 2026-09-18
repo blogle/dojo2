@@ -32,29 +32,28 @@ jobs:
         with:
           fetch-depth: 0
       - uses: DeterminateSystems/nix-installer-action@main
-      - name: Determine and prepare next patch release
+      - name: Determine next release
         id: release
         shell: bash
         run: |
-          version="$(nix develop --command just release-next-version)"
-          nix develop --command just release-prepare "$version"
-          if git diff --quiet -- CHANGELOG.md api/pyproject.toml api/uv.lock web/package.json; then
+          title="$(git log -1 --pretty=%s)"
+          directive="$(printf '%s\n' "$title" | nix develop --command just release-directive)"
+          echo "Release directive: ${directive}"
+          if [[ "$directive" == "none" ]]; then
             echo "created=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          version="$(nix develop --command just release-next-version "$directive")"
           echo "created=true" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
-      - name: Commit and tag release
+      - name: Tag release commit
         if: steps.release.outputs.created == 'true'
         env:
           VERSION: ${{ steps.release.outputs.version }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add CHANGELOG.md api/pyproject.toml api/uv.lock web/package.json
-          git commit -m "chore(release): v${VERSION} [skip ci]"
-          git tag --annotate "v${VERSION}" --message "dojo v${VERSION}"
-          git push origin HEAD:master "v${VERSION}"
+          tag="v${VERSION}"
+          git tag --annotate "$tag" --message "dojo $tag" "$GITHUB_SHA"
+          git push origin "$tag"
 
   publish-image:
     if: github.event_name == 'push'
@@ -102,11 +101,11 @@ jobs:
       contents: read
       packages: write
     env:
-      RELEASE_VERSION: ${{ inputs.version || needs.prepare-release.outputs.version }}
+      RELEASE_TAG: ${{ format('v{0}', inputs.version || needs.prepare-release.outputs.version) }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: v${{ env.RELEASE_VERSION }}
+          ref: ${{ env.RELEASE_TAG }}
       - uses: DeterminateSystems/nix-installer-action@main
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -124,8 +123,8 @@ jobs:
           docker build --tag dojo-release:latest .
       - name: Publish production image
         run: |
-          docker tag dojo-release:latest "ghcr.io/blogle/dojo2:${RELEASE_VERSION}"
-          docker push "ghcr.io/blogle/dojo2:${RELEASE_VERSION}"
+          docker tag dojo-release:latest "ghcr.io/blogle/dojo2:${RELEASE_TAG}"
+          docker push "ghcr.io/blogle/dojo2:${RELEASE_TAG}"
 
   create-release:
     if: |
@@ -139,10 +138,10 @@ jobs:
     permissions:
       contents: write
     env:
-      RELEASE_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || inputs.version || needs.prepare-release.outputs.version }}
+      RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('v{0}', inputs.version || needs.prepare-release.outputs.version) }}
     steps:
       - uses: actions/checkout@v4
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release create "${RELEASE_VERSION}" --title "dojo ${RELEASE_VERSION}" --generate-notes --verify-tag
+        run: gh release create "${RELEASE_TAG}" --title "dojo ${RELEASE_TAG}" --generate-notes --verify-tag

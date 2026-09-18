@@ -67,24 +67,30 @@ Before finishing a change, run `just check`. For CI-equivalent verification, run
 
 ## Version And Release Process
 
-Git tags named `vMAJOR.MINOR.PATCH` are the release authority. The API and web
-package manifests track the latest released tag, and `CHANGELOG.md` keeps the
-latest release in a dated version section. Add meaningful notes under
-`Unreleased`; do not create a version section in a feature PR.
+Git tags named `vMAJOR.MINOR.PATCH` are the release authority. Release behavior
+is selected by the first line of the commit pushed to `master`:
 
-After a merge to `master`, the release workflow promotes non-empty `Unreleased`
-notes to the next patch version, updates both package manifests, commits that
-metadata with `[skip ci]`, creates the annotated tag, publishes the matching
-`ghcr.io/blogle/dojo2:vX.Y.Z` image, and creates a GitHub Release. An empty
-`Unreleased` section is a no-op. The current post-`v0.0.1` notes will therefore
-become `v0.0.2` when this work reaches `master`.
+- No directive or `[release:patch]`: create the next patch release.
+- `[release:minor]`: create the next minor release.
+- `[release:major]`: create the next major release.
+- `[release:none]`: do not create a release for this commit.
 
-For local preparation or recovery, use `just release-next-version` to inspect
-the calculated version and `just release-prepare <version>` to perform the
-same changelog and manifest promotion without committing or tagging. Resolve
-workflow failures before retrying; do not force-move an existing release tag.
-For an existing tag whose image or GitHub Release needs recovery, run the
-`Release` workflow manually with the version entered without the `v` prefix.
+The release workflow tags the exact `master` commit, publishes the matching
+`ghcr.io/blogle/dojo2:vX.Y.Z` image, and creates a GitHub Release with generated
+notes. It does not push to `master`, modify package manifests, or create a
+follow-up PR. Conflicting or malformed directives fail the workflow rather than
+guessing. Release runs are serialized so each merge sees the previous tag.
+
+Configure squash merges to use the pull request title as the default commit
+title. Put the directive in that title when a release other than the default
+patch is needed. Keep `CHANGELOG.md` human-maintained; do not create a version
+section in a feature PR.
+
+For local inspection, pipe a commit title to `just release-directive`, or use
+`just release-next-version [patch|minor|major]`. Resolve workflow failures
+before retrying; do not force-move an existing release tag. For an existing tag
+whose image or GitHub Release needs recovery, run the `Release` workflow
+manually with the version entered without the `v` prefix.
 
 ## Repository Structure
 

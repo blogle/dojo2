@@ -128,11 +128,11 @@ docs:
 	@printf '==> building docs\n'
 	cd docs && mdbook build
 
-release-next-version:
-	python3 scripts/release.py next-version
+release-directive:
+	python3 scripts/release.py directive
 
-release-prepare version:
-	python3 scripts/release.py promote "{{version}}" "$(date -u +%F)"
+release-next-version bump="patch":
+	python3 scripts/release.py next-version "{{bump}}"
 
 docs-serve:
 	cd docs && mdbook serve
