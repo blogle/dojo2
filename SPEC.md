@@ -225,7 +225,7 @@ Selecting **Continue to backup setup** advances to required backup setup. The ex
 
 Backup setup is required for new empty and Aspire-imported workspaces before normal application use. Start empty requests Drive file access only; Aspire migration requests Sheets read access and Drive file access in one combined grant. The user chooses a folder through Google Picker, and dojo verifies it by direct Drive metadata and zero-byte write/delete probes. Refresh credentials are stored encrypted by the API; workers receive only short-lived access tokens.
 
-If Drive folder access is later revoked or the latest scheduled backup fails, dojo remains available and migrations continue. A persistent application warning prompts the user to repair backup access. A newly configured folder is considered configured before its first scheduled run; a successful off-site backup is still required for recovery evidence.
+If Drive folder access is later revoked or the latest scheduled backup fails, dojo remains available and migrations continue. A persistent application warning prompts the user to repair backup access or retry a failed backup from the existing schedule. A newly configured folder is considered configured before its first scheduled run; a successful off-site backup is still required for recovery evidence.
 
 #### Details
 

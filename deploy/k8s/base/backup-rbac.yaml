@@ -54,3 +54,32 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: dojo-backup-snapshot-classes
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: dojo-backup-trigger
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: dojo-backup-trigger
+rules:
+- apiGroups: ["batch"]
+  resources: ["cronjobs"]
+  verbs: ["get"]
+- apiGroups: ["batch"]
+  resources: ["jobs"]
+  verbs: ["get", "list", "create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: dojo-backup-trigger
+subjects:
+- kind: ServiceAccount
+  name: dojo-backup-trigger
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: dojo-backup-trigger

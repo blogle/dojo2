@@ -52,6 +52,10 @@
           export PYTHONPATH=${apiSource}/app
           exec ${apiPython}/bin/python -m dojo.backup_status "$@"
         '';
+        backupTriggerLauncher = pkgs.writeShellScriptBin "dojo-backup-trigger" ''
+          export PYTHONPATH=${apiSource}/app
+          exec ${apiPython}/bin/uvicorn dojo.backup_trigger_server:app --host 127.0.0.1 --port 8001
+        '';
       in
       {
         devShells.default = pkgs.mkShell {
@@ -105,6 +109,7 @@
             backupUploadLauncher
             snapshotBackupLauncher
             backupStatusLauncher
+            backupTriggerLauncher
             pkgs.restic
             pkgs.rclone
             pkgs.kubectl

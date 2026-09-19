@@ -4,6 +4,7 @@
 
 - Added a subordinate Available to budget explanation page with canonical signed components, anomaly-oriented constituent ordering, progressive zoom into bounded virtualized source entries, shared sticky calculation subtotals, and explicit current-state context.
 - Added commit-title release directives with serialized tag-only release publishing for patch, minor, major, and skipped changes.
+- Added an in-app retry action for failed scheduled backups, with Kubernetes-scoped Job enqueueing and a separate Google Drive repair action.
 
 - Added a subordinate Available to budget explanation page with canonical signed components, anomaly-oriented constituent ordering, progressive zoom into bounded virtualized source entries, shared sticky calculation subtotals, and explicit current-state context.
 

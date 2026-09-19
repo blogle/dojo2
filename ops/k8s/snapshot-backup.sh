@@ -4,6 +4,8 @@ set -euo pipefail
 namespace="${DOJO_NAMESPACE:-default}"
 source_claim="${DOJO_DATA_CLAIM:-dojo-data}"
 snapshot_class="${DOJO_VOLUME_SNAPSHOT_CLASS:-}"
+trigger_kind="${DOJO_BACKUP_TRIGGER_KIND:-SCHEDULED}"
+backup_kind="${trigger_kind,,}"
 
 render_job() {
   : "${DOJO_BACKUP_JOB_NAME:?Set DOJO_BACKUP_JOB_NAME}"
@@ -28,12 +30,12 @@ spec:
         args:
         - |
           set -euo pipefail
-          /bin/dojo-backup-status --url '${DOJO_BACKUP_STATUS_URL:-http://dojo}' --token-file /backup-status/token --run-id '${DOJO_BACKUP_RUN_ID}' --trigger-kind SCHEDULED --status RUNNING --phase PREPARING --source-snapshot '${DOJO_BACKUP_SNAPSHOT}' --image-digest '${DOJO_BACKUP_IMAGE}' || true
+          /bin/dojo-backup-status --url '${DOJO_BACKUP_STATUS_URL:-http://dojo}' --token-file /backup-status/token --run-id '${DOJO_BACKUP_RUN_ID}' --trigger-kind '${trigger_kind}' --status RUNNING --phase PREPARING --source-snapshot '${DOJO_BACKUP_SNAPSHOT}' --image-digest '${DOJO_BACKUP_IMAGE}' || true
           /bin/dojo-backup prepare /data/dojo.duckdb /stage/dojo.duckdb --image-digest '${DOJO_BACKUP_IMAGE}' --source-snapshot '${DOJO_BACKUP_SNAPSHOT}'
-          snapshot_id="\$(/bin/dojo-backup-upload upload --staging-directory /stage --internal-api-url http://dojo --internal-token-file /backup-status/token --restic-password-file /restic/restic-password --repository-path dojo/restic --tag dojo --tag scheduled --tag '${DOJO_BACKUP_SNAPSHOT}' --retain)"
+          snapshot_id="\$(/bin/dojo-backup-upload upload --staging-directory /stage --internal-api-url http://dojo --internal-token-file /backup-status/token --restic-password-file /restic/restic-password --repository-path dojo/restic --tag dojo --tag '${backup_kind}' --tag '${DOJO_BACKUP_SNAPSHOT}' --retain)"
           database_sha256="\$(python -c 'import json; print(json.load(open("/stage/dojo.duckdb.manifest.json"))["database_sha256"])')"
           database_size="\$(python -c 'import json; print(json.load(open("/stage/dojo.duckdb.manifest.json"))["database_size"])')"
-          /bin/dojo-backup-status --url '${DOJO_BACKUP_STATUS_URL:-http://dojo}' --token-file /backup-status/token --run-id '${DOJO_BACKUP_RUN_ID}' --trigger-kind SCHEDULED --status SUCCEEDED --phase COMPLETE --source-snapshot '${DOJO_BACKUP_SNAPSHOT}' --image-digest '${DOJO_BACKUP_IMAGE}' --restic-snapshot-id "\$snapshot_id" --database-sha256 "\$database_sha256" --database-size-bytes "\$database_size" || true
+          /bin/dojo-backup-status --url '${DOJO_BACKUP_STATUS_URL:-http://dojo}' --token-file /backup-status/token --run-id '${DOJO_BACKUP_RUN_ID}' --trigger-kind '${trigger_kind}' --status SUCCEEDED --phase COMPLETE --source-snapshot '${DOJO_BACKUP_SNAPSHOT}' --image-digest '${DOJO_BACKUP_IMAGE}' --restic-snapshot-id "\$snapshot_id" --database-sha256 "\$database_sha256" --database-size-bytes "\$database_size" || true
         env:
         - name: RESTIC_REPOSITORY
           value: rclone:gdrive:dojo/restic
@@ -85,7 +87,7 @@ report_status() {
     --url "${DOJO_BACKUP_STATUS_URL:-http://dojo}"
     --token-file "${DOJO_BACKUP_STATUS_TOKEN_FILE}"
     --run-id "$run_id"
-    --trigger-kind SCHEDULED
+    --trigger-kind "$trigger_kind"
     --status "$1"
     --phase "$2"
   )
@@ -124,7 +126,7 @@ cleanup() {
   result=$?
   set +e
   if [[ "$result" -ne 0 ]]; then
-    report_status FAILED "$phase" "${failure_message:-Scheduled backup failed during ${phase}.}"
+    report_status FAILED "$phase" "${failure_message:-Backup failed during ${phase}.}"
   fi
   kubectl -n "$namespace" delete job "$job" --ignore-not-found --wait=true
   kubectl -n "$namespace" delete pvc "$clone" --ignore-not-found --wait=true
@@ -152,7 +154,7 @@ wait_for_backup_job() {
     sleep 1
   done
 
-  failure_message="Scheduled backup timed out waiting for the backup worker to complete."
+  failure_message="Backup timed out waiting for the backup worker to complete."
   return 1
 }
 
@@ -163,7 +165,7 @@ metadata:
   name: $snapshot
   labels:
     app: dojo
-    dojo.backup/kind: scheduled
+    dojo.backup/kind: $backup_kind
 spec:
   volumeSnapshotClassName: $snapshot_class
   source:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import secrets
+from pathlib import Path
 from typing import Annotated, Any, cast
 from urllib.parse import urlsplit
 from uuid import UUID
@@ -49,6 +50,7 @@ from dojo.backup_credentials import (
     encrypt_refresh_token,
     load_encryption_key,
 )
+from dojo.backup_trigger import BackupTriggerError, request_backup_trigger
 from dojo.commands import CommandConflictError
 from dojo.constants import GOOGLE_SHEETS_READONLY_SCOPE, SYSTEM_BACKUP_CREDENTIAL_ID
 from dojo.drive_backup import (
@@ -219,6 +221,45 @@ def configure_backup(request: Request, payload: BackupFolderPayload) -> dict[str
         folder.folder_name,
         str(SYSTEM_BACKUP_CREDENTIAL_ID),
     )
+
+
+@router.post("/settings/backup/run", status_code=202)
+def run_backup(request: Request) -> dict[str, str]:
+    service = get_service(request)
+    if not service.has_usable_backup_configuration():
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "google_drive_reauthorization_required",
+                "message": "Connect Google Drive and verify a backup folder before retrying.",
+            },
+        )
+    latest_run = service.get_latest_backup_run()
+    if latest_run is not None and latest_run["status"] == "RUNNING":
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "backup_already_running", "message": "A backup is already running."},
+        )
+    if latest_run is None or latest_run["status"] != "FAILED":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "backup_retry_not_available",
+                "message": "A failed backup is required before retrying.",
+            },
+        )
+    settings = get_settings(request)
+    try:
+        job_name = request_backup_trigger(
+            url=settings.backup_trigger_url,
+            token_file=Path(settings.backup_status_token_file),
+        )
+    except BackupTriggerError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "backup_trigger_unavailable", "message": str(exc)},
+        ) from exc
+    return {"status": "QUEUED", "job_name": job_name}
 
 
 def _reauthorization_required() -> HTTPException:

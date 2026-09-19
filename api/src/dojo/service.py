@@ -200,6 +200,14 @@ class DojoService:
             ready = False
             mode = "onboarding"
             backup_state = "required"
+        backup_action = "repair"
+        if (
+            backup_state == "degraded"
+            and latest_backup_run is not None
+            and latest_backup_run["status"] == "FAILED"
+            and has_usable_backup_configuration
+        ):
+            backup_action = "retry"
         return {
             "app": "dojo",
             "ready": ready,
@@ -208,6 +216,7 @@ class DojoService:
             "needs_backup_setup": mode == "backup_setup",
             "backup": {
                 "state": backup_state,
+                "action": backup_action,
                 "message": (
                     latest_backup_run.get("error_message")
                     if backup_state == "degraded" and latest_backup_run
