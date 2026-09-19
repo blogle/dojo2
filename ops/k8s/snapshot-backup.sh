@@ -75,7 +75,7 @@ if [[ "${1:-}" == "--render-job" ]]; then
   render_job
   exit 0
 fi
-run_id="$(python -c 'from uuid import uuid4; print(uuid4())')"
+run_id="${DOJO_BACKUP_RUN_ID:-$(python -c 'from uuid import uuid4; print(uuid4())')}"
 phase="STARTING"
 snapshot=""
 image=""

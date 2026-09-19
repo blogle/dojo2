@@ -17,6 +17,7 @@ const router = useRouter();
 const { state, ready } = useAppState();
 const railExpanded = ref(readNavigationExpanded());
 const retryQueued = ref(false);
+const retryRunId = ref<string | null>(null);
 const retryError = ref("");
 let retryStatusTimer: number | undefined;
 
@@ -90,11 +91,15 @@ function handlePrimaryBackupAction(): void {
 
 async function retryBackups(): Promise<void> {
   retryError.value = "";
+  if (retryQueued.value) return;
+  retryQueued.value = true;
   try {
-    await requestBackupRun();
-    retryQueued.value = true;
+    const response = await requestBackupRun();
+    retryRunId.value = response.run_id;
     scheduleRetryStatusRefresh();
   } catch (error) {
+    retryQueued.value = false;
+    retryRunId.value = null;
     if (
       error instanceof ApiError &&
       error.code === "google_drive_reauthorization_required"
@@ -122,11 +127,14 @@ async function refreshRetryStatus(): Promise<void> {
   if (!retryQueued.value) return;
   try {
     state.appStatus = await fetchAppStatus();
+    const latestRun = state.appStatus.latest_backup_run;
     if (
-      state.appStatus.backup.state === "configured" ||
-      state.appStatus.backup.action === "retry"
+      retryRunId.value !== null &&
+      latestRun?.backup_run_id === retryRunId.value &&
+      (latestRun.status === "SUCCEEDED" || latestRun.status === "FAILED")
     ) {
       retryQueued.value = false;
+      retryRunId.value = null;
       return;
     }
   } catch {

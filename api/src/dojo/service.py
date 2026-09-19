@@ -204,6 +204,13 @@ class DojoService:
         if (
             backup_state == "degraded"
             and latest_backup_run is not None
+            and latest_backup_run["status"] == "RUNNING"
+            and latest_backup_run["trigger_kind"] == "MANUAL"
+        ):
+            backup_action = "queued"
+        elif (
+            backup_state == "degraded"
+            and latest_backup_run is not None
             and latest_backup_run["status"] == "FAILED"
             and has_usable_backup_configuration
         ):
@@ -218,15 +225,20 @@ class DojoService:
                 "state": backup_state,
                 "action": backup_action,
                 "message": (
-                    latest_backup_run.get("error_message")
-                    if backup_state == "degraded" and latest_backup_run
+                    "A backup retry is queued. This warning will clear after it succeeds."
+                    if backup_action == "queued"
                     else (
-                        "No successful off-site backup has been recorded yet."
-                        if backup_state == "degraded"
-                        else None
+                        latest_backup_run.get("error_message")
+                        if backup_state == "degraded" and latest_backup_run
+                        else (
+                            "No successful off-site backup has been recorded yet."
+                            if backup_state == "degraded"
+                            else None
+                        )
                     )
                 ),
             },
+            "latest_backup_run": latest_backup_run,
             "latest_import_batch": latest_batch,
             "latest_import_run": latest_run,
         }
@@ -236,6 +248,16 @@ class DojoService:
 
     def get_latest_backup_run(self) -> dict[str, Any] | None:
         return self.db.fetch_one(load_sql("queries/latest_backup_run"))
+
+    def reserve_backup_retry(self) -> str:
+        run_id = str(uuid4())
+        now = self.clock.now()
+        with self.db.transaction() as connection:
+            latest = connection.execute(load_sql("queries/latest_backup_run")).fetchone()
+            if latest is None or latest[2] != "FAILED":
+                raise ValueError("A failed backup is required before retrying.")
+            connection.execute(load_sql("queries/reserve_backup_run"), (run_id, now, now))
+        return run_id
 
     def get_backup_credential(self) -> dict[str, Any] | None:
         return self.db.fetch_one(

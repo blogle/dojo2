@@ -12,7 +12,7 @@ class BackupTriggerError(RuntimeError):
     """Raised when the Kubernetes backup Job cannot be queued."""
 
 
-def request_backup_trigger(*, url: str, token_file: Path) -> str:
+def request_backup_trigger(*, url: str, token_file: Path, run_id: str) -> str:
     try:
         token = token_file.read_text(encoding="utf-8").strip()
     except OSError as exc:
@@ -23,6 +23,7 @@ def request_backup_trigger(*, url: str, token_file: Path) -> str:
         response = httpx.post(
             url,
             headers={"Authorization": f"Bearer {token}"},
+            json={"run_id": run_id},
             timeout=10,
         )
         response.raise_for_status()
@@ -44,6 +45,7 @@ def trigger_backup(
     cronjob_name: str,
     token_file: Path,
     ca_file: Path,
+    run_id: str,
 ) -> str:
     try:
         token = token_file.read_text(encoding="utf-8").strip()
@@ -76,7 +78,14 @@ def trigger_backup(
         status = active_job.get("status")
         metadata = active_job.get("metadata")
         name = metadata.get("name") if isinstance(metadata, dict) else None
-        if isinstance(status, dict) and status.get("active", 0) and isinstance(name, str):
+        conditions = status.get("conditions", []) if isinstance(status, dict) else []
+        terminal = isinstance(conditions, list) and any(
+            isinstance(condition, dict)
+            and condition.get("status") == "True"
+            and condition.get("type") in {"Complete", "Failed"}
+            for condition in conditions
+        )
+        if not terminal and isinstance(name, str):
             return name
 
     resource_url = (
@@ -107,13 +116,15 @@ def trigger_backup(
     if not isinstance(env, list):
         raise BackupTriggerError("The deployed backup schedule is invalid.")
     env.append({"name": "DOJO_BACKUP_TRIGGER_KIND", "value": "MANUAL"})
+    env.append({"name": "DOJO_BACKUP_RUN_ID", "value": run_id})
     job = {
         "apiVersion": "batch/v1",
         "kind": "Job",
         "metadata": {
-            "generateName": f"{cronjob_name}-manual-",
+            "name": f"{cronjob_name}-manual-{run_id}",
             "labels": {
                 "dojo.backup/trigger": "manual",
+                "dojo.backup/run-id": run_id,
             },
         },
         "spec": job_spec,

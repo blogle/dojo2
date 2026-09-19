@@ -77,9 +77,41 @@ def test_manual_backup_run_queues_a_job(monkeypatch, tmp_path) -> None:
         )
 
         response = client.post("/api/settings/backup/run")
+        assert response.status_code == 202
+        payload = response.json()
+        assert payload["status"] == "QUEUED"
+        assert payload["job_name"] == "dojo-backup-manual-abc"
+        assert payload["run_id"]
+        latest = main_module.app.state.dojo_service.get_latest_backup_run()
+        assert latest is not None
+        assert latest["backup_run_id"] == payload["run_id"]
+        assert latest["status"] == "RUNNING"
+        assert latest["phase"] == "QUEUED"
 
-    assert response.status_code == 202
-    assert response.json() == {"status": "QUEUED", "job_name": "dojo-backup-manual-abc"}
+
+def test_manual_backup_run_rejects_a_second_retry_while_queued(monkeypatch, tmp_path) -> None:
+    with provisioned_client(monkeypatch, tmp_path) as client:
+        configure_backup(client, tmp_path)
+        main_module.app.state.dojo_service.report_backup_run(
+            "00000000-0000-4000-8000-000000000001",
+            {
+                "trigger_kind": "SCHEDULED",
+                "status": "FAILED",
+                "phase": "SNAPSHOTTING",
+                "error_message": "The snapshot did not become ready.",
+            },
+        )
+        monkeypatch.setattr(
+            routes_module,
+            "request_backup_trigger",
+            lambda **_kwargs: "dojo-backup-manual-abc",
+        )
+
+        assert client.post("/api/settings/backup/run").status_code == 202
+        response = client.post("/api/settings/backup/run")
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "backup_retry_not_available"
 
 
 def test_backup_access_rejects_missing_configuration(monkeypatch, tmp_path) -> None:

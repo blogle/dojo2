@@ -25,6 +25,7 @@ describe("AppShell", () => {
       needs_onboarding: false,
       needs_backup_setup: false,
       backup: { state: "degraded", action: "retry", message: "Backup failed." },
+      latest_backup_run: null,
       latest_import_batch: null,
       latest_import_run: null,
     };

@@ -7,11 +7,16 @@ from threading import Lock
 from typing import Annotated
 
 from fastapi import FastAPI, Header, HTTPException
+from pydantic import BaseModel
 
 from dojo.backup_trigger import BackupTriggerError, trigger_backup
 
 app = FastAPI(title="dojo backup trigger")
 trigger_lock = Lock()
+
+
+class TriggerRequest(BaseModel):
+    run_id: str
 
 
 def _authorize(authorization: Annotated[str | None, Header()] = None) -> None:
@@ -30,7 +35,10 @@ def _authorize(authorization: Annotated[str | None, Header()] = None) -> None:
 
 
 @app.post("/trigger", status_code=202)
-def trigger(authorization: Annotated[str | None, Header()] = None) -> dict[str, str]:
+def trigger(
+    payload: TriggerRequest,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, str]:
     _authorize(authorization)
     try:
         with trigger_lock:
@@ -40,6 +48,7 @@ def trigger(authorization: Annotated[str | None, Header()] = None) -> dict[str, 
                 cronjob_name=os.environ.get("BACKUP_KUBERNETES_CRONJOB_NAME", "dojo-backup"),
                 token_file=Path(os.environ["BACKUP_KUBERNETES_TOKEN_FILE"]),
                 ca_file=Path(os.environ["BACKUP_KUBERNETES_CA_FILE"]),
+                run_id=payload.run_id,
             )
     except (BackupTriggerError, KeyError) as exc:
         raise HTTPException(status_code=503, detail="Manual backup retry is unavailable.") from exc

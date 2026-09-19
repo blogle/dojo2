@@ -234,32 +234,35 @@ def run_backup(request: Request) -> dict[str, str]:
                 "message": "Connect Google Drive and verify a backup folder before retrying.",
             },
         )
-    latest_run = service.get_latest_backup_run()
-    if latest_run is not None and latest_run["status"] == "RUNNING":
+    try:
+        run_id = service.reserve_backup_retry()
+    except ValueError as exc:
         raise HTTPException(
             status_code=409,
-            detail={"code": "backup_already_running", "message": "A backup is already running."},
-        )
-    if latest_run is None or latest_run["status"] != "FAILED":
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "backup_retry_not_available",
-                "message": "A failed backup is required before retrying.",
-            },
-        )
+            detail={"code": "backup_retry_not_available", "message": str(exc)},
+        ) from exc
     settings = get_settings(request)
     try:
         job_name = request_backup_trigger(
             url=settings.backup_trigger_url,
             token_file=Path(settings.backup_status_token_file),
+            run_id=run_id,
         )
     except BackupTriggerError as exc:
+        service.report_backup_run(
+            run_id,
+            {
+                "trigger_kind": "MANUAL",
+                "status": "FAILED",
+                "phase": "QUEUED",
+                "error_message": str(exc),
+            },
+        )
         raise HTTPException(
             status_code=503,
             detail={"code": "backup_trigger_unavailable", "message": str(exc)},
         ) from exc
-    return {"status": "QUEUED", "job_name": job_name}
+    return {"status": "QUEUED", "job_name": job_name, "run_id": run_id}
 
 
 def _reauthorization_required() -> HTTPException:

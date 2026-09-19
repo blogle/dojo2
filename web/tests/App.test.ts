@@ -111,6 +111,7 @@ describe("dojo app", () => {
         action: "repair",
         message: "Google Drive authorization must be renewed.",
       },
+      latest_backup_run: null,
       latest_import_batch: null,
       latest_import_run: null,
     };
@@ -153,6 +154,7 @@ describe("dojo app", () => {
         action: "repair",
         message: null,
       },
+      latest_backup_run: null,
       latest_import_batch: null,
       latest_import_run: null,
     };
@@ -188,6 +190,10 @@ describe("dojo app", () => {
         action: "retry",
         message: "Scheduled backup failed during SNAPSHOTTING.",
       },
+      latest_backup_run: {
+        backup_run_id: "old-failed-run",
+        status: "FAILED",
+      },
       latest_import_batch: null,
       latest_import_run: null,
     };
@@ -198,6 +204,7 @@ describe("dojo app", () => {
           json: async () => ({
             status: "QUEUED",
             job_name: "dojo-backup-manual-abc",
+            run_id: "new-run",
           }),
         } as Response;
       }
@@ -227,5 +234,80 @@ describe("dojo app", () => {
       expect.objectContaining({ method: "POST" }),
     );
     expect(wrapper.text()).toContain("A backup retry was queued.");
+  });
+
+  it("keeps retry queued until the reserved run reaches a terminal state", async () => {
+    vi.useFakeTimers();
+    try {
+      const { state } = useAppState();
+      state.appStatus = {
+        app: "dojo",
+        ready: true,
+        mode: "ready",
+        needs_onboarding: false,
+        needs_backup_setup: false,
+        backup: {
+          state: "degraded",
+          action: "retry",
+          message: "Scheduled backup failed during SNAPSHOTTING.",
+        },
+        latest_backup_run: {
+          backup_run_id: "old-failed-run",
+          status: "FAILED",
+        },
+        latest_import_batch: null,
+        latest_import_run: null,
+      };
+      const statuses = [
+        state.appStatus,
+        {
+          ...state.appStatus,
+          latest_backup_run: { backup_run_id: "new-run", status: "RUNNING" },
+        },
+        {
+          ...state.appStatus,
+          backup: { ...state.appStatus.backup, state: "configured" as const },
+          latest_backup_run: { backup_run_id: "new-run", status: "SUCCEEDED" },
+        },
+      ];
+      const fetchMock = vi.fn(async (input: string | URL | Request) => {
+        if (String(input) === "/api/settings/backup/run") {
+          return {
+            ok: true,
+            json: async () => ({
+              status: "QUEUED",
+              job_name: "job",
+              run_id: "new-run",
+            }),
+          } as Response;
+        }
+        return { ok: true, json: async () => statuses.shift() } as Response;
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      const router = createRouter({
+        history: createMemoryHistory(),
+        routes: [
+          { path: "/dev/test", component: { template: "<div>app</div>" } },
+        ],
+      });
+      await router.push("/dev/test");
+      await router.isReady();
+      const wrapper = mount(AppShell, { global: { plugins: [router] } });
+
+      await wrapper
+        .get('[data-cy="persistent-warning-banner-root"] button:last-of-type')
+        .trigger("click");
+      await flushPromises();
+      expect(wrapper.text()).toContain("A backup retry was queued.");
+
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(wrapper.text()).toContain("A backup retry was queued.");
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(wrapper.text()).toContain("A backup retry was queued.");
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(wrapper.text()).not.toContain("A backup retry was queued.");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

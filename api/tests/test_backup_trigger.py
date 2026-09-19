@@ -56,6 +56,7 @@ def test_trigger_backup_clones_cronjob_template(monkeypatch, tmp_path: Path) -> 
         cronjob_name="dojo-backup",
         token_file=token_file,
         ca_file=tmp_path / "missing-ca.crt",
+        run_id="00000000-0000-4000-8000-000000000001",
     )
 
     assert name == "dojo-backup-manual-abc"
@@ -65,11 +66,44 @@ def test_trigger_backup_clones_cronjob_template(monkeypatch, tmp_path: Path) -> 
     job = requests[2]["json"]
     assert isinstance(job, dict)
     assert job["metadata"] == {
-        "generateName": "dojo-backup-manual-",
-        "labels": {"dojo.backup/trigger": "manual"},
+        "name": "dojo-backup-manual-00000000-0000-4000-8000-000000000001",
+        "labels": {
+            "dojo.backup/trigger": "manual",
+            "dojo.backup/run-id": "00000000-0000-4000-8000-000000000001",
+        },
     }
     assert job["spec"]["ttlSecondsAfterFinished"] == 86400
     assert job["spec"]["template"]["spec"]["containers"][0]["env"] == [
-        {"name": "DOJO_BACKUP_TRIGGER_KIND", "value": "MANUAL"}
+        {"name": "DOJO_BACKUP_TRIGGER_KIND", "value": "MANUAL"},
+        {
+            "name": "DOJO_BACKUP_RUN_ID",
+            "value": "00000000-0000-4000-8000-000000000001",
+        },
     ]
     assert requests[0]["headers"] == {"Authorization": "Bearer service-token"}
+
+
+def test_trigger_backup_reuses_manual_job_before_status_propagates(
+    monkeypatch, tmp_path: Path
+) -> None:
+    token_file = tmp_path / "token"
+    token_file.write_text("service-token", encoding="utf-8")
+
+    def get(url, **kwargs):
+        assert url.endswith("/jobs")
+        return FakeResponse(
+            {"items": [{"metadata": {"name": "dojo-backup-manual-existing"}, "status": {}}]}
+        )
+
+    monkeypatch.setattr(backup_trigger.httpx, "get", get)
+
+    name = backup_trigger.trigger_backup(
+        api_url="https://kubernetes.default.svc",
+        namespace="dojo-staging",
+        cronjob_name="dojo-backup",
+        token_file=token_file,
+        ca_file=tmp_path / "missing-ca.crt",
+        run_id="00000000-0000-4000-8000-000000000002",
+    )
+
+    assert name == "dojo-backup-manual-existing"
