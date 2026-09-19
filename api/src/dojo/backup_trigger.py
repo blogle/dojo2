@@ -61,7 +61,7 @@ def trigger_backup(
     try:
         active_jobs_response = httpx.get(
             jobs_url,
-            params={"labelSelector": "dojo.backup/trigger=manual"},
+            params={"labelSelector": f"dojo.backup/trigger=manual,dojo.backup/run-id={run_id}"},
             headers=headers,
             verify=verify,
             timeout=10,
@@ -78,6 +78,9 @@ def trigger_backup(
         status = active_job.get("status")
         metadata = active_job.get("metadata")
         name = metadata.get("name") if isinstance(metadata, dict) else None
+        labels = metadata.get("labels") if isinstance(metadata, dict) else None
+        if not isinstance(labels, dict) or labels.get("dojo.backup/run-id") != run_id:
+            continue
         conditions = status.get("conditions", []) if isinstance(status, dict) else []
         terminal = isinstance(conditions, list) and any(
             isinstance(condition, dict)

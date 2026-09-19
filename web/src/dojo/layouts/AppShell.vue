@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import NavigationRail from "../components/navigation/NavigationRail.vue";
@@ -63,14 +63,32 @@ const showBackupWarning = computed(
 const backupAction = computed(
   () => state.appStatus?.backup?.action ?? "repair",
 );
-const backupDescription = computed(
-  () =>
-    retryError.value ||
-    (retryQueued.value
-      ? "A backup retry was queued. This warning will clear after it succeeds."
-      : (state.appStatus?.backup.message ??
-        "Set up or repair Google Drive backups so your data has an off-site recovery copy.")),
+const retryActive = computed(
+  () => backupAction.value === "queued" || backupAction.value === "in_progress",
 );
+const retryInProgress = computed(() => {
+  const latestRun = state.appStatus?.latest_backup_run;
+  return (
+    retryQueued.value &&
+    retryRunId.value !== null &&
+    latestRun?.backup_run_id === retryRunId.value &&
+    latestRun.status === "RUNNING" &&
+    latestRun.phase !== "QUEUED"
+  );
+});
+const backupDescription = computed(() => {
+  if (retryError.value) return retryError.value;
+  if (retryInProgress.value) {
+    return "A backup retry is in progress. This warning will clear after it succeeds.";
+  }
+  if (retryQueued.value) {
+    return "A backup retry was queued. This warning will clear after it succeeds.";
+  }
+  return (
+    state.appStatus?.backup.message ??
+    "Set up or repair Google Drive backups so your data has an off-site recovery copy."
+  );
+});
 
 function handleRailToggle(expanded: boolean): void {
   railExpanded.value = expanded;
@@ -143,6 +161,32 @@ async function refreshRetryStatus(): Promise<void> {
   scheduleRetryStatusRefresh();
 }
 
+function hydrateRetryState(): void {
+  const latestRun = state.appStatus?.latest_backup_run;
+  if (
+    !retryActive.value ||
+    latestRun?.trigger_kind !== "MANUAL" ||
+    latestRun.status !== "RUNNING" ||
+    typeof latestRun.backup_run_id !== "string"
+  ) {
+    return;
+  }
+  retryQueued.value = true;
+  retryRunId.value = latestRun.backup_run_id;
+  scheduleRetryStatusRefresh();
+}
+
+watch(
+  () => [
+    state.appStatus?.backup?.action,
+    state.appStatus?.latest_backup_run?.backup_run_id,
+    state.appStatus?.latest_backup_run?.status,
+    state.appStatus?.latest_backup_run?.phase,
+  ],
+  hydrateRetryState,
+  { immediate: true },
+);
+
 onBeforeUnmount(() => {
   if (retryStatusTimer !== undefined) {
     window.clearTimeout(retryStatusTimer);
@@ -171,14 +215,16 @@ onBeforeUnmount(() => {
         title="Backups need attention"
         :description="backupDescription"
         :primary-action="
-          retryQueued
+          retryQueued || retryActive
             ? undefined
             : backupAction === 'retry'
               ? 'Retry backup'
               : 'Repair backups'
         "
         :secondary-action="
-          retryQueued || backupAction !== 'retry' ? undefined : 'Repair backups'
+          retryQueued || retryActive || backupAction !== 'retry'
+            ? undefined
+            : 'Repair backups'
         "
         @primary="handlePrimaryBackupAction"
         @secondary="repairBackups"

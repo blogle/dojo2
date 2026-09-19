@@ -87,6 +87,18 @@ def test_manual_backup_run_queues_a_job(monkeypatch, tmp_path) -> None:
         assert latest["backup_run_id"] == payload["run_id"]
         assert latest["status"] == "RUNNING"
         assert latest["phase"] == "QUEUED"
+        assert main_module.app.state.dojo_service.get_app_status()["backup"]["action"] == "queued"
+        main_module.app.state.dojo_service.report_backup_run(
+            payload["run_id"],
+            {
+                "trigger_kind": "MANUAL",
+                "status": "RUNNING",
+                "phase": "SNAPSHOTTING",
+            },
+        )
+        assert (
+            main_module.app.state.dojo_service.get_app_status()["backup"]["action"] == "in_progress"
+        )
 
 
 def test_manual_backup_run_rejects_a_second_retry_while_queued(monkeypatch, tmp_path) -> None:

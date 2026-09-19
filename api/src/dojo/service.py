@@ -207,7 +207,7 @@ class DojoService:
             and latest_backup_run["status"] == "RUNNING"
             and latest_backup_run["trigger_kind"] == "MANUAL"
         ):
-            backup_action = "queued"
+            backup_action = "queued" if latest_backup_run["phase"] == "QUEUED" else "in_progress"
         elif (
             backup_state == "degraded"
             and latest_backup_run is not None
@@ -228,12 +228,16 @@ class DojoService:
                     "A backup retry is queued. This warning will clear after it succeeds."
                     if backup_action == "queued"
                     else (
-                        latest_backup_run.get("error_message")
-                        if backup_state == "degraded" and latest_backup_run
+                        "A backup retry is in progress. This warning will clear after it succeeds."
+                        if backup_action == "in_progress"
                         else (
-                            "No successful off-site backup has been recorded yet."
-                            if backup_state == "degraded"
-                            else None
+                            latest_backup_run.get("error_message")
+                            if backup_state == "degraded" and latest_backup_run
+                            else (
+                                "No successful off-site backup has been recorded yet."
+                                if backup_state == "degraded"
+                                else None
+                            )
                         )
                     )
                 ),

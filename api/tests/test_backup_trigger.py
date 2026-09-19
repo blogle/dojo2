@@ -88,11 +88,25 @@ def test_trigger_backup_reuses_manual_job_before_status_propagates(
 ) -> None:
     token_file = tmp_path / "token"
     token_file.write_text("service-token", encoding="utf-8")
+    run_id = "00000000-0000-4000-8000-000000000002"
 
     def get(url, **kwargs):
         assert url.endswith("/jobs")
+        assert kwargs["params"]["labelSelector"] == (
+            "dojo.backup/trigger=manual,dojo.backup/run-id=" + run_id
+        )
         return FakeResponse(
-            {"items": [{"metadata": {"name": "dojo-backup-manual-existing"}, "status": {}}]}
+            {
+                "items": [
+                    {
+                        "metadata": {
+                            "name": "dojo-backup-manual-existing",
+                            "labels": {"dojo.backup/run-id": run_id},
+                        },
+                        "status": {},
+                    }
+                ]
+            }
         )
 
     monkeypatch.setattr(backup_trigger.httpx, "get", get)
@@ -103,7 +117,63 @@ def test_trigger_backup_reuses_manual_job_before_status_propagates(
         cronjob_name="dojo-backup",
         token_file=token_file,
         ca_file=tmp_path / "missing-ca.crt",
-        run_id="00000000-0000-4000-8000-000000000002",
+        run_id=run_id,
     )
 
     assert name == "dojo-backup-manual-existing"
+
+
+def test_trigger_backup_does_not_reuse_a_different_manual_job(monkeypatch, tmp_path: Path) -> None:
+    token_file = tmp_path / "token"
+    token_file.write_text("service-token", encoding="utf-8")
+    run_id = "00000000-0000-4000-8000-000000000003"
+    requests: list[dict[str, object]] = []
+
+    def get(url, **kwargs):
+        requests.append({"method": "GET", "url": url, **kwargs})
+        if url.endswith("/jobs"):
+            return FakeResponse(
+                {
+                    "items": [
+                        {
+                            "metadata": {
+                                "name": "dojo-backup-manual-other",
+                                "labels": {"dojo.backup/run-id": "other-run"},
+                            },
+                            "status": {},
+                        }
+                    ]
+                }
+            )
+        return FakeResponse(
+            {
+                "spec": {
+                    "jobTemplate": {
+                        "spec": {
+                            "template": {
+                                "spec": {"containers": [{"name": "orchestrator", "env": []}]}
+                            }
+                        }
+                    }
+                }
+            }
+        )
+
+    def post(url, **kwargs):
+        requests.append({"method": "POST", "url": url, **kwargs})
+        return FakeResponse({"metadata": {"name": f"dojo-backup-manual-{run_id}"}})
+
+    monkeypatch.setattr(backup_trigger.httpx, "get", get)
+    monkeypatch.setattr(backup_trigger.httpx, "post", post)
+
+    name = backup_trigger.trigger_backup(
+        api_url="https://kubernetes.default.svc",
+        namespace="dojo-staging",
+        cronjob_name="dojo-backup",
+        token_file=token_file,
+        ca_file=tmp_path / "missing-ca.crt",
+        run_id=run_id,
+    )
+
+    assert name == f"dojo-backup-manual-{run_id}"
+    assert requests[-1]["method"] == "POST"

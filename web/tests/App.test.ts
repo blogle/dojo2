@@ -303,9 +303,75 @@ describe("dojo app", () => {
       await vi.advanceTimersByTimeAsync(2000);
       expect(wrapper.text()).toContain("A backup retry was queued.");
       await vi.advanceTimersByTimeAsync(2000);
-      expect(wrapper.text()).toContain("A backup retry was queued.");
+      expect(wrapper.text()).toContain("A backup retry is in progress.");
       await vi.advanceTimersByTimeAsync(2000);
       expect(wrapper.text()).not.toContain("A backup retry was queued.");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("hydrates and polls a queued retry after initialization", async () => {
+    vi.useFakeTimers();
+    try {
+      const { state } = useAppState();
+      state.appStatus = {
+        app: "dojo",
+        ready: true,
+        mode: "ready",
+        needs_onboarding: false,
+        needs_backup_setup: false,
+        backup: {
+          state: "degraded",
+          action: "queued",
+          message: "A backup retry is queued.",
+        },
+        latest_backup_run: {
+          backup_run_id: "hydrated-run",
+          trigger_kind: "MANUAL",
+          status: "RUNNING",
+          phase: "QUEUED",
+        },
+        latest_import_batch: null,
+        latest_import_run: null,
+      };
+      const fetchMock = vi.fn(async () => {
+        return {
+          ok: true,
+          json: async () => ({
+            ...state.appStatus,
+            backup: {
+              ...state.appStatus!.backup,
+              state: "configured",
+              action: "repair",
+              message: null,
+            },
+            latest_backup_run: {
+              ...state.appStatus!.latest_backup_run,
+              status: "SUCCEEDED",
+            },
+          }),
+        } as Response;
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      const router = createRouter({
+        history: createMemoryHistory(),
+        routes: [
+          { path: "/dev/test", component: { template: "<div>app</div>" } },
+        ],
+      });
+      await router.push("/dev/test");
+      await router.isReady();
+      const wrapper = mount(AppShell, { global: { plugins: [router] } });
+
+      expect(wrapper.text()).toContain("A backup retry was queued.");
+      expect(wrapper.text()).not.toContain("Repair backups");
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/app/status",
+        expect.any(Object),
+      );
+      expect(wrapper.text()).not.toContain("Backups need attention");
     } finally {
       vi.useRealTimers();
     }
