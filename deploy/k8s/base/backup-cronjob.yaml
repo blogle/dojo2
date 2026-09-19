@@ -17,6 +17,7 @@ spec:
           containers:
           - name: orchestrator
             image: ghcr.io/blogle/dojo2
+            imagePullPolicy: Always
             command: [/bin/dojo-snapshot-backup]
             env:
             - name: DOJO_BACKUP_STATUS_URL

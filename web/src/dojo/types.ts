@@ -6,6 +6,7 @@ export type AppStatus = {
   needs_backup_setup: boolean;
   backup: {
     state: "required" | "configured" | "degraded";
+    action: "repair" | "retry";
     message: string | null;
   };
   latest_import_batch: Record<string, unknown> | null;

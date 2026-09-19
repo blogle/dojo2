@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 import dojo.api.internal_backup as internal_backup_module
 import dojo.api.main as main_module
+import dojo.api.routes as routes_module
 from dojo.api.settings import get_settings
 from dojo.backup_credentials import encrypt_refresh_token
 from dojo.constants import SYSTEM_BACKUP_CREDENTIAL_ID
@@ -55,6 +56,30 @@ def test_backup_access_requires_internal_bearer_token(monkeypatch, tmp_path) -> 
         )
 
     assert response.status_code == 403
+
+
+def test_manual_backup_run_queues_a_job(monkeypatch, tmp_path) -> None:
+    with provisioned_client(monkeypatch, tmp_path) as client:
+        configure_backup(client, tmp_path)
+        main_module.app.state.dojo_service.report_backup_run(
+            "00000000-0000-4000-8000-000000000001",
+            {
+                "trigger_kind": "SCHEDULED",
+                "status": "FAILED",
+                "phase": "SNAPSHOTTING",
+                "error_message": "The snapshot did not become ready.",
+            },
+        )
+        monkeypatch.setattr(
+            routes_module,
+            "request_backup_trigger",
+            lambda **_kwargs: "dojo-backup-manual-abc",
+        )
+
+        response = client.post("/api/settings/backup/run")
+
+    assert response.status_code == 202
+    assert response.json() == {"status": "QUEUED", "job_name": "dojo-backup-manual-abc"}
 
 
 def test_backup_access_rejects_missing_configuration(monkeypatch, tmp_path) -> None:
@@ -176,6 +201,7 @@ def test_existing_import_without_credential_remains_ready_and_degraded(imported_
     assert status["ready"] is True
     assert status["mode"] == "ready"
     assert status["backup"]["state"] == "degraded"
+    assert status["backup"]["action"] == "repair"
 
 
 def test_configured_backup_without_run_is_ready_and_configured(service) -> None:
@@ -194,10 +220,20 @@ def test_configured_backup_without_run_is_ready_and_configured(service) -> None:
     assert status["ready"] is True
     assert status["mode"] == "ready"
     assert status["backup"]["state"] == "configured"
+    assert status["backup"]["action"] == "repair"
     assert status["backup"]["message"] is None
 
 
 def test_configured_backup_with_failed_run_remains_ready_and_degraded(service) -> None:
+    key = b"0123456789abcdef0123456789abcdef"
+    service.store_backup_credential(
+        encrypt_refresh_token(
+            "opaque-refresh-value",
+            credential_id=SYSTEM_BACKUP_CREDENTIAL_ID,
+            key=key,
+        ),
+        "https://www.googleapis.com/auth/drive.file",
+    )
     service.start_empty_onboarding()
     service.configure_backup_folder("folder-id", "Backup folder", str(SYSTEM_BACKUP_CREDENTIAL_ID))
     service.report_backup_run(
@@ -205,8 +241,8 @@ def test_configured_backup_with_failed_run_remains_ready_and_degraded(service) -
         {
             "trigger_kind": "SCHEDULED",
             "status": "FAILED",
-            "phase": "UPLOADING",
-            "error_message": "Google Drive authorization must be renewed.",
+            "phase": "SNAPSHOTTING",
+            "error_message": "The snapshot did not become ready.",
         },
     )
 
@@ -215,6 +251,7 @@ def test_configured_backup_with_failed_run_remains_ready_and_degraded(service) -
     assert status["ready"] is True
     assert status["mode"] == "ready"
     assert status["backup"]["state"] == "degraded"
+    assert status["backup"]["action"] == "retry"
 
 
 def test_legacy_configured_folder_is_not_usable_after_backup_credential_repair(service) -> None:

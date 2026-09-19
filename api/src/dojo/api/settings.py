@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     google_picker_api_key: str = Field(default="", alias="GOOGLE_PICKER_API_KEY")
     google_picker_app_id: int = Field(default=0, alias="GOOGLE_PICKER_APP_ID")
     backup_status_token_file: str = Field(default="", alias="BACKUP_STATUS_TOKEN_FILE")
+    backup_trigger_url: str = Field(
+        default="http://127.0.0.1:8001/trigger", alias="BACKUP_TRIGGER_URL"
+    )
     session_secret: str = Field(default="dev-only-change-me", alias="SESSION_SECRET")
     log_level: str = Field(default="debug", alias="LOG_LEVEL")
     cors_allowed_origins: str = Field(
