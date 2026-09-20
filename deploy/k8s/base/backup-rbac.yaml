@@ -11,6 +11,8 @@ rules:
 - apiGroups: [""]
   resources: ["persistentvolumeclaims"]
   verbs: ["get", "list", "create", "delete"]
+# Transitional read for pre-provenance backup images still deployed in production.
+# Remove after every environment runs a build that derives its worker image from DOJO_BUILD_SHA.
 - apiGroups: ["apps"]
   resources: ["deployments"]
   verbs: ["get"]

@@ -40,13 +40,21 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Install project dependencies
         run: nix develop --command just setup
-      - name: Build container
+      - name: Build or reuse immutable container
         run: |
-          nix develop --command just build-web
-          nix build .#container
-          docker load < "$(readlink -f result)"
-          docker build --tag dojo-release:latest .
+          build_sha="$GITHUB_SHA"
+          source_image="ghcr.io/blogle/dojo2:git-${build_sha}"
+          if docker manifest inspect "$source_image" >/dev/null 2>&1; then
+            printf 'Reusing existing immutable image %s.\n' "$source_image"
+            docker pull "$source_image"
+          else
+            nix develop --command just build-web
+            DOJO_BUILD_SHA="$build_sha" nix build .#container --impure
+            docker load < "$(readlink -f result)"
+            docker build --build-arg DOJO_BUILD_SHA="$build_sha" --tag "$source_image" .
+            docker push "$source_image"
+          fi
       - name: Publish pull request image
         run: |
-          docker tag dojo-release:latest "ghcr.io/blogle/dojo2:pr-${{ github.event.pull_request.number }}"
+          docker tag "ghcr.io/blogle/dojo2:git-${GITHUB_SHA}" "ghcr.io/blogle/dojo2:pr-${{ github.event.pull_request.number }}"
           docker push "ghcr.io/blogle/dojo2:pr-${{ github.event.pull_request.number }}"

@@ -45,7 +45,7 @@ test-web:
 
 test-unit:
 	@printf '==> running backend unit tests\n'
-	cd api && uv run python -m pytest tests/test_money.py tests/test_settings.py tests/test_importer.py tests/test_loan_projection.py tests/test_operations.py tests/test_backup.py tests/test_backup_access.py tests/test_backup_trigger.py tests/test_backup_credentials.py tests/test_drive_backup.py tests/test_drive_uploader.py tests/test_google.py
+	cd api && uv run python -m pytest tests/test_money.py tests/test_settings.py tests/test_importer.py tests/test_loan_projection.py tests/test_operations.py tests/test_backup.py tests/test_backup_access.py tests/test_backup_trigger.py tests/test_snapshot_backup.py tests/test_release.py tests/test_backup_credentials.py tests/test_drive_backup.py tests/test_drive_uploader.py tests/test_google.py
 
 test-property:
 	@printf '==> running backend property tests\n'
@@ -218,4 +218,8 @@ check: format-check lint typecheck architecture-check migration-check k8s-render
 ci: check test-e2e container
 
 container:
-	env -u LD_LIBRARY_PATH nix build .#container
+	env -u LD_LIBRARY_PATH DOJO_BUILD_SHA="$(git rev-parse HEAD)" nix build .#container --impure
+
+container-validate-provenance build_sha:
+	env -u LD_LIBRARY_PATH DOJO_BUILD_SHA="{{build_sha}}" nix build .#container --impure
+	ops/container/validate-build-metadata.sh "$(readlink -f result)" "{{build_sha}}"
