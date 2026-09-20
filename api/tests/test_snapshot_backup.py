@@ -6,6 +6,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "ops/k8s/snapshot-backup.sh"
+RBAC = REPO_ROOT / "deploy/k8s/base/backup-rbac.yaml"
 BUILD_SHA = "a" * 40
 
 
@@ -91,3 +92,11 @@ def test_backup_script_has_no_runtime_image_discovery_path() -> None:
     assert "get deployment dojo" not in source
     assert "containerStatuses" not in source
     assert "imageID" not in source
+
+
+def test_backup_role_keeps_transitional_deployment_read() -> None:
+    source = RBAC.read_text(encoding="utf-8")
+
+    assert 'apiGroups: ["apps"]' in source
+    assert 'resources: ["deployments"]' in source
+    assert 'verbs: ["get"]' in source
