@@ -26,6 +26,7 @@ spec:
       containers:
       - name: backup
         image: ${DOJO_BACKUP_IMAGE}
+        imagePullPolicy: Always
         command: [/bin/bash, -euc]
         args:
         - |
@@ -78,6 +79,8 @@ fi
 run_id="${DOJO_BACKUP_RUN_ID:-$(python -c 'from uuid import uuid4; print(uuid4())')}"
 phase="STARTING"
 snapshot=""
+clone=""
+job=""
 image=""
 failure_message=""
 
@@ -97,6 +100,18 @@ report_status() {
   /bin/dojo-backup-status "${args[@]}" >/dev/null 2>&1 || true
 }
 
+cleanup() {
+  result=$?
+  set +e
+  if [[ "$result" -ne 0 ]]; then
+    report_status FAILED "$phase" "${failure_message:-Backup failed during ${phase}.}"
+  fi
+  [[ -n "$job" ]] && kubectl -n "$namespace" delete job "$job" --ignore-not-found --wait=true
+  [[ -n "$clone" ]] && kubectl -n "$namespace" delete pvc "$clone" --ignore-not-found --wait=true
+  exit "$result"
+}
+trap cleanup EXIT
+
 report_status RUNNING STARTING ""
 if [[ -z "$snapshot_class" ]]; then
   mapfile -t snapshot_classes < <(
@@ -113,7 +128,11 @@ fi
 storage_class="$(kubectl -n "$namespace" get pvc "$source_claim" -o jsonpath='{.spec.storageClassName}')"
 image="$(kubectl -n "$namespace" get deployment dojo -o jsonpath='{.spec.template.spec.containers[?(@.name=="dojo")].image}')"
 if [[ "$image" != *@sha256:* ]]; then
-  printf 'Scheduled backups require an immutable deployment image digest, got %s\n' "$image" >&2
+  image="$(kubectl -n "$namespace" get pods -l app=dojo -o jsonpath='{.items[0].status.containerStatuses[?(@.name=="dojo")].imageID}')"
+fi
+if [[ "$image" != *@sha256:* ]]; then
+  failure_message="Scheduled backups require an immutable deployment image digest, got ${image:-no running Dojo image}."
+  printf '%s\n' "$failure_message" >&2
   exit 1
 fi
 
@@ -121,18 +140,6 @@ stamp="$(date -u +%Y%m%d%H%M%S)"
 snapshot="dojo-data-$stamp"
 clone="dojo-backup-$stamp"
 job="dojo-backup-$stamp"
-
-cleanup() {
-  result=$?
-  set +e
-  if [[ "$result" -ne 0 ]]; then
-    report_status FAILED "$phase" "${failure_message:-Backup failed during ${phase}.}"
-  fi
-  kubectl -n "$namespace" delete job "$job" --ignore-not-found --wait=true
-  kubectl -n "$namespace" delete pvc "$clone" --ignore-not-found --wait=true
-  exit "$result"
-}
-trap cleanup EXIT
 
 wait_for_backup_job() {
   for _ in $(seq 1 1200); do
