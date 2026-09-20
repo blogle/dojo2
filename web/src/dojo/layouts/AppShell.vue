@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import NavigationRail from "../components/navigation/NavigationRail.vue";
 import type { NavigationRailItem } from "../components/navigation/NavigationRail.vue";
 import PersistentWarningBanner from "../components/feedback/PersistentWarningBanner.vue";
+import { ApiError, fetchAppStatus, requestBackupRun } from "../api/client";
 import {
   readNavigationExpanded,
   writeNavigationExpanded,
@@ -15,6 +16,10 @@ const route = useRoute();
 const router = useRouter();
 const { state, ready } = useAppState();
 const railExpanded = ref(readNavigationExpanded());
+const retryQueued = ref(false);
+const retryRunId = ref<string | null>(null);
+const retryError = ref("");
+let retryStatusTimer: number | undefined;
 
 const primaryItems = computed<NavigationRailItem[]>(() => [
   {
@@ -55,6 +60,36 @@ const showBackupWarning = computed(
   () => ready.value && state.appStatus?.backup?.state === "degraded",
 );
 
+const backupAction = computed(
+  () => state.appStatus?.backup?.action ?? "repair",
+);
+const retryActive = computed(
+  () => backupAction.value === "queued" || backupAction.value === "in_progress",
+);
+const retryInProgress = computed(() => {
+  const latestRun = state.appStatus?.latest_backup_run;
+  return (
+    retryQueued.value &&
+    retryRunId.value !== null &&
+    latestRun?.backup_run_id === retryRunId.value &&
+    latestRun.status === "RUNNING" &&
+    latestRun.phase !== "QUEUED"
+  );
+});
+const backupDescription = computed(() => {
+  if (retryError.value) return retryError.value;
+  if (retryInProgress.value) {
+    return "A backup retry is in progress. This warning will clear after it succeeds.";
+  }
+  if (retryQueued.value) {
+    return "A backup retry was queued. This warning will clear after it succeeds.";
+  }
+  return (
+    state.appStatus?.backup.message ??
+    "Set up or repair Google Drive backups so your data has an off-site recovery copy."
+  );
+});
+
 function handleRailToggle(expanded: boolean): void {
   railExpanded.value = expanded;
   writeNavigationExpanded(expanded);
@@ -63,6 +98,100 @@ function handleRailToggle(expanded: boolean): void {
 function repairBackups(): void {
   router.push({ path: "/onboarding", query: { backup: "repair" } });
 }
+
+function handlePrimaryBackupAction(): void {
+  if (backupAction.value === "retry") {
+    void retryBackups();
+    return;
+  }
+  repairBackups();
+}
+
+async function retryBackups(): Promise<void> {
+  retryError.value = "";
+  if (retryQueued.value) return;
+  retryQueued.value = true;
+  try {
+    const response = await requestBackupRun();
+    retryRunId.value = response.run_id;
+    scheduleRetryStatusRefresh();
+  } catch (error) {
+    retryQueued.value = false;
+    retryRunId.value = null;
+    if (
+      error instanceof ApiError &&
+      error.code === "google_drive_reauthorization_required"
+    ) {
+      repairBackups();
+      return;
+    }
+    retryError.value =
+      error instanceof Error
+        ? error.message
+        : "Backup retry could not be queued.";
+  }
+}
+
+function scheduleRetryStatusRefresh(): void {
+  if (retryStatusTimer !== undefined) {
+    window.clearTimeout(retryStatusTimer);
+  }
+  retryStatusTimer = window.setTimeout(() => {
+    void refreshRetryStatus();
+  }, 2000);
+}
+
+async function refreshRetryStatus(): Promise<void> {
+  if (!retryQueued.value) return;
+  try {
+    state.appStatus = await fetchAppStatus();
+    const latestRun = state.appStatus.latest_backup_run;
+    if (
+      retryRunId.value !== null &&
+      latestRun?.backup_run_id === retryRunId.value &&
+      (latestRun.status === "SUCCEEDED" || latestRun.status === "FAILED")
+    ) {
+      retryQueued.value = false;
+      retryRunId.value = null;
+      return;
+    }
+  } catch {
+    // Keep the queued state while the backup worker is unavailable.
+  }
+  scheduleRetryStatusRefresh();
+}
+
+function hydrateRetryState(): void {
+  const latestRun = state.appStatus?.latest_backup_run;
+  if (
+    !retryActive.value ||
+    latestRun?.trigger_kind !== "MANUAL" ||
+    latestRun.status !== "RUNNING" ||
+    typeof latestRun.backup_run_id !== "string"
+  ) {
+    return;
+  }
+  retryQueued.value = true;
+  retryRunId.value = latestRun.backup_run_id;
+  scheduleRetryStatusRefresh();
+}
+
+watch(
+  () => [
+    state.appStatus?.backup?.action,
+    state.appStatus?.latest_backup_run?.backup_run_id,
+    state.appStatus?.latest_backup_run?.status,
+    state.appStatus?.latest_backup_run?.phase,
+  ],
+  hydrateRetryState,
+  { immediate: true },
+);
+
+onBeforeUnmount(() => {
+  if (retryStatusTimer !== undefined) {
+    window.clearTimeout(retryStatusTimer);
+  }
+});
 </script>
 
 <template>
@@ -84,12 +213,21 @@ function repairBackups(): void {
         v-if="showBackupWarning"
         severity="warning"
         title="Backups need attention"
-        :description="
-          state.appStatus?.backup.message ??
-          'Set up or repair Google Drive backups so your data has an off-site recovery copy.'
+        :description="backupDescription"
+        :primary-action="
+          retryQueued || retryActive
+            ? undefined
+            : backupAction === 'retry'
+              ? 'Retry backup'
+              : 'Repair backups'
         "
-        primary-action="Repair backups"
-        @primary="repairBackups"
+        :secondary-action="
+          retryQueued || retryActive || backupAction !== 'retry'
+            ? undefined
+            : 'Repair backups'
+        "
+        @primary="handlePrimaryBackupAction"
+        @secondary="repairBackups"
       />
       <div class="app-shell__page">
         <router-view />

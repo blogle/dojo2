@@ -100,6 +100,19 @@ export async function configureBackupFolder(
   });
 }
 
+export async function requestBackupRun(): Promise<{
+  status: "QUEUED";
+  job_name: string;
+  run_id: string;
+}> {
+  return request<{ status: "QUEUED"; job_name: string; run_id: string }>(
+    "/api/settings/backup/run",
+    {
+      method: "POST",
+    },
+  );
+}
+
 export async function fetchGoogleDrivePickerSession(): Promise<GoogleDrivePickerSession> {
   return request<GoogleDrivePickerSession>("/api/google/drive/picker-session");
 }
