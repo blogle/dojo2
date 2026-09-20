@@ -6,6 +6,17 @@ source_claim="${DOJO_DATA_CLAIM:-dojo-data}"
 snapshot_class="${DOJO_VOLUME_SNAPSHOT_CLASS:-}"
 trigger_kind="${DOJO_BACKUP_TRIGGER_KIND:-SCHEDULED}"
 backup_kind="${trigger_kind,,}"
+image_repository="ghcr.io/blogle/dojo2"
+
+backup_image_for_build() {
+  local build_sha="${DOJO_BUILD_SHA:-}"
+  if [[ ! "$build_sha" =~ ^[0-9a-f]{40}$ ]]; then
+    failure_message="DOJO_BUILD_SHA must be the full 40-character lowercase Git SHA; got ${build_sha:-unset}."
+    printf '%s\n' "$failure_message" >&2
+    return 1
+  fi
+  image="$image_repository:git-$build_sha"
+}
 
 render_job() {
   : "${DOJO_BACKUP_JOB_NAME:?Set DOJO_BACKUP_JOB_NAME}"
@@ -73,6 +84,8 @@ EOF
 }
 
 if [[ "${1:-}" == "--render-job" ]]; then
+  backup_image_for_build
+  DOJO_BACKUP_IMAGE="$image"
   render_job
   exit 0
 fi
@@ -83,6 +96,7 @@ clone=""
 job=""
 image=""
 failure_message=""
+status_command="${DOJO_BACKUP_STATUS_COMMAND:-/bin/dojo-backup-status}"
 
 report_status() {
   [[ -f "${DOJO_BACKUP_STATUS_TOKEN_FILE:-}" ]] || return 0
@@ -97,7 +111,7 @@ report_status() {
   [[ -n "$snapshot" ]] && args+=(--source-snapshot "$snapshot")
   [[ -n "$image" ]] && args+=(--image-digest "$image")
   [[ -n "${3:-}" ]] && args+=(--error-message "$3")
-  /bin/dojo-backup-status "${args[@]}" >/dev/null 2>&1 || true
+  "$status_command" "${args[@]}" >/dev/null 2>&1 || true
 }
 
 cleanup() {
@@ -113,6 +127,7 @@ cleanup() {
 trap cleanup EXIT
 
 report_status RUNNING STARTING ""
+backup_image_for_build
 if [[ -z "$snapshot_class" ]]; then
   mapfile -t snapshot_classes < <(
     kubectl get volumesnapshotclass \
@@ -126,15 +141,6 @@ if [[ -z "$snapshot_class" ]]; then
 fi
 
 storage_class="$(kubectl -n "$namespace" get pvc "$source_claim" -o jsonpath='{.spec.storageClassName}')"
-image="$(kubectl -n "$namespace" get deployment dojo -o jsonpath='{.spec.template.spec.containers[?(@.name=="dojo")].image}')"
-if [[ "$image" != *@sha256:* ]]; then
-  image="$(kubectl -n "$namespace" get pods -l app=dojo -o jsonpath='{.items[0].status.containerStatuses[?(@.name=="dojo")].imageID}')"
-fi
-if [[ "$image" != *@sha256:* ]]; then
-  failure_message="Scheduled backups require an immutable deployment image digest, got ${image:-no running Dojo image}."
-  printf '%s\n' "$failure_message" >&2
-  exit 1
-fi
 
 stamp="$(date -u +%Y%m%d%H%M%S)"
 snapshot="dojo-data-$stamp"

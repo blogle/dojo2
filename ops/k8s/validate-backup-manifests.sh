@@ -3,10 +3,10 @@ set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"
 
+DOJO_BUILD_SHA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
 DOJO_BACKUP_JOB_NAME=dojo-backup-test \
 DOJO_BACKUP_RUN_ID=00000000-0000-4000-8000-000000000001 \
 DOJO_BACKUP_SNAPSHOT=dojo-data-test \
-DOJO_BACKUP_IMAGE=registry.example/dojo@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
 DOJO_BACKUP_CLONE=dojo-backup-test \
   DOJO_BACKUP_STATUS_URL=http://dojo \
   "$repo_root/ops/k8s/snapshot-backup.sh" --render-job \

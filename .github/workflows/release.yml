@@ -77,9 +77,13 @@ jobs:
       - name: Build container
         run: |
           nix develop --command just build-web
-          nix build .#container
+          DOJO_BUILD_SHA="$GITHUB_SHA" nix build .#container --impure
           docker load < "$(readlink -f result)"
-          docker build --tag dojo-release:latest .
+          docker build --build-arg DOJO_BUILD_SHA="$GITHUB_SHA" --tag dojo-release:latest .
+      - name: Publish immutable build image
+        run: |
+          docker tag dojo-release:latest "ghcr.io/blogle/dojo2:git-${GITHUB_SHA}"
+          docker push "ghcr.io/blogle/dojo2:git-${GITHUB_SHA}"
       - name: Publish staging image
         if: github.ref == 'refs/tags/staging' || github.ref == 'refs/heads/master'
         run: |
@@ -119,12 +123,16 @@ jobs:
         run: nix develop --command just setup
       - name: Build container
         run: |
+          build_sha="$(git rev-parse HEAD)"
+          echo "DOJO_BUILD_SHA=$build_sha" >> "$GITHUB_ENV"
           nix develop --command just build-web
-          nix build .#container
+          DOJO_BUILD_SHA="$build_sha" nix build .#container --impure
           docker load < "$(readlink -f result)"
-          docker build --tag dojo-release:latest .
+          docker build --build-arg DOJO_BUILD_SHA="$build_sha" --tag dojo-release:latest .
       - name: Publish production image
         run: |
+          docker tag dojo-release:latest "ghcr.io/blogle/dojo2:git-${DOJO_BUILD_SHA}"
+          docker push "ghcr.io/blogle/dojo2:git-${DOJO_BUILD_SHA}"
           docker tag dojo-release:latest "ghcr.io/blogle/dojo2:${RELEASE_TAG}"
           docker push "ghcr.io/blogle/dojo2:${RELEASE_TAG}"
 
