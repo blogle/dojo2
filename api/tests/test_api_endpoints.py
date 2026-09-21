@@ -13,6 +13,11 @@ from dojo.api.settings import get_settings
 from dojo.drive_backup import GoogleAccessToken, VerifiedDriveFolder
 from dojo.fixture_data import DEFAULT_FIXTURE
 from dojo.migrations import provision_database
+from dojo.sql import render_sql
+from tests.support.scd_invariants import (
+    assert_no_overlapping_versions,
+    assert_single_current_version,
+)
 
 
 def provisioned_main_module(monkeypatch, tmp_path, filename: str):
@@ -907,6 +912,146 @@ def test_transaction_update_rejects_stale_version(monkeypatch, tmp_path) -> None
         ).json()["items"]
         updated = next(item for item in current if item["transaction_id"] == tx["transaction_id"])
         assert updated["memo"] == "first edit"
+
+
+def test_transaction_update_preserves_scd_history_and_derived_state(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("SESSION_SECRET", "test-secret")
+    monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
+    monkeypatch.setenv(
+        "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
+    )
+    provisioned_main_module(monkeypatch, tmp_path, "api-test.duckdb")
+
+    with TestClient(main_module.app) as client:
+        imported = client.post(
+            "/api/import/google-sheet", json={"sheet_url_or_id": "fixture://default"}
+        )
+        assert imported.status_code == 200
+
+        transactions = client.get("/api/transactions", params={"show_hidden": "true", "limit": 100})
+        assert transactions.status_code == 200
+        transaction = next(
+            item for item in transactions.json()["items"] if item["memo"] == "Groceries"
+        )
+        assert transaction["date"] == "2026-01-06"
+        assert transaction["amount_minor"] == -5000
+        assert transaction["status"] == "CLEARED"
+
+        transaction_id = transaction["transaction_id"]
+        original_version = transaction["version"]
+        original_entry_order = transaction["entry_order"]
+        service = main_module.app.state.dojo_service
+        account_before = next(
+            account
+            for account in service.list_accounts(show_hidden=True)
+            if str(account["account_id"]) == str(transaction["account_id"])
+        )
+        category_before = next(
+            category
+            for category in service.list_categories(month="2026-01", show_hidden=True)
+            if str(category["category_id"]) == str(transaction["category_id"])
+        )
+
+        edit_payload = {
+            "date": transaction["date"],
+            "account_id": transaction["account_id"],
+            "amount_minor": -5500,
+            "category_id": transaction["category_id"],
+            "system_category": transaction["system_category"],
+            "status": transaction["status"],
+            "memo": "Groceries adjusted",
+            "expected_version": original_version,
+        }
+        edited = client.put(f"/api/transactions/{transaction_id}", json=edit_payload)
+        assert edited.status_code == 200
+        edited_body = edited.json()
+        new_version = edited_body["version"]
+        assert edited_body["transaction_id"] == transaction_id
+        assert new_version != original_version
+
+        history = service.db.fetch_all(
+            render_sql(
+                "templates/select_columns_where",
+                columns="*",
+                table="transactions",
+                predicate="transaction_id = ?",
+            ),
+            (transaction_id,),
+        )
+        assert len(history) == 2
+        original = next(row for row in history if str(row["row_id"]) == str(original_version))
+        replacement = next(row for row in history if str(row["row_id"]) == str(new_version))
+        assert all(str(row["transaction_id"]) == str(transaction_id) for row in history)
+        assert original["valid_to"] != replacement["valid_to"]
+        assert replacement["valid_to"] > replacement["valid_from"]
+        assert original["entry_order"] == original_entry_order
+        assert replacement["entry_order"] == original_entry_order
+        assert original["amount_minor"] == -5000
+        assert original["memo"] == "Groceries"
+        assert replacement["amount_minor"] == -5500
+        assert replacement["memo"] == "Groceries adjusted"
+        current = assert_single_current_version(
+            service.db, "transactions", "transaction_id", transaction_id
+        )
+        assert str(current["row_id"]) == str(new_version)
+        assert_no_overlapping_versions(service.db, "transactions", "transaction_id", transaction_id)
+
+        refetched = client.get("/api/transactions", params={"show_hidden": "true", "limit": 100})
+        assert refetched.status_code == 200
+        updated = next(
+            item for item in refetched.json()["items"] if item["transaction_id"] == transaction_id
+        )
+        assert updated["transaction_id"] == transaction_id
+        assert updated["version"] == new_version
+        assert updated["entry_order"] == original_entry_order
+        assert updated["amount_minor"] == -5500
+        assert updated["memo"] == "Groceries adjusted"
+
+        account_after = next(
+            account
+            for account in service.list_accounts(show_hidden=True)
+            if str(account["account_id"]) == str(transaction["account_id"])
+        )
+        category_after = next(
+            category
+            for category in service.list_categories(month="2026-01", show_hidden=True)
+            if str(category["category_id"]) == str(transaction["category_id"])
+        )
+        assert account_after["actual_balance_minor"] == account_before["actual_balance_minor"] - 500
+        assert (
+            category_after["month_activity_minor"] == category_before["month_activity_minor"] - 500
+        )
+        assert category_after["available_minor"] == category_before["available_minor"] - 500
+
+        stale = client.put(
+            f"/api/transactions/{transaction_id}",
+            json=edit_payload | {"memo": "stale edit"},
+        )
+        assert stale.status_code == 409
+        assert stale.json()["detail"]["code"] == "transaction_version_conflict"
+        history_after_stale = service.db.fetch_all(
+            render_sql(
+                "templates/select_columns_where",
+                columns="row_id",
+                table="transactions",
+                predicate="transaction_id = ?",
+            ),
+            (transaction_id,),
+        )
+        assert len(history_after_stale) == 2
+        current_after_stale = assert_single_current_version(
+            service.db, "transactions", "transaction_id", transaction_id
+        )
+        assert str(current_after_stale["row_id"]) == str(new_version)
+        final = next(
+            item
+            for item in client.get(
+                "/api/transactions", params={"show_hidden": "true", "limit": 100}
+            ).json()["items"]
+            if item["transaction_id"] == transaction_id
+        )
+        assert final["amount_minor"] == -5500
+        assert final["memo"] == "Groceries adjusted"
 
 
 def test_reviewed_import_requires_complete_decisions(monkeypatch, tmp_path) -> None:
