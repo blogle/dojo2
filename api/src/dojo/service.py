@@ -4268,12 +4268,16 @@ class DojoService:
                 entity_class=entity_class,
                 evidence=evidence,
                 committed_at=committed_at,
-                baseline_digest=payload.get("baseline_digest"),
+                baseline_digest=self._baseline_reference_digest(complete_baseline_refs),
                 baseline_refs=complete_baseline_refs,
                 reconciliation_id=reconciliation_id,
                 created_by_user_id=payload.get("created_by_user_id"),
                 connection=connection,
             )
+
+    @staticmethod
+    def _baseline_reference_digest(refs: tuple[dict[str, Any], ...]) -> str:
+        return sha256(json_dumps([dict(ref) for ref in refs]).encode()).hexdigest()
 
     def void_reconciliation_commit(
         self, entity_id: str, reconciliation_id: str, payload: dict[str, Any] | None = None
@@ -4318,7 +4322,11 @@ class DojoService:
         self._require_account(account_id)
         baseline = self._selected_reconciliation_baseline(account_id)
         if baseline is None:
-            return {"account_id": account_id, "state": "NOT_RECONCILED", "items": []}
+            return {
+                "account_id": account_id,
+                "state": "NOT_RECONCILED",
+                "items": self._resolve_reconciliation_working_set(account_id),
+            }
         return {
             "account_id": account_id,
             "state": self.get_reconciliation_status(account_id),
@@ -4340,12 +4348,16 @@ class DojoService:
         self,
         account_id: str,
         *,
-        reconciliation_id: str,
-        committed_at: datetime,
+        reconciliation_id: str | None = None,
+        committed_at: datetime | None = None,
     ) -> list[dict[str, Any]]:
-        baseline_rows = self.db.fetch_all(
-            load_sql("queries/reconciliation_baseline_versions_by_commit"),
-            (reconciliation_id,),
+        baseline_rows = (
+            self.db.fetch_all(
+                load_sql("queries/reconciliation_baseline_versions_by_commit"),
+                (reconciliation_id,),
+            )
+            if reconciliation_id is not None
+            else []
         )
         baseline_refs = [
             {
@@ -4368,8 +4380,12 @@ class DojoService:
             )
         ]
         historical_versions = self.db.fetch_all(
-            load_sql("queries/transaction_history_by_account"),
-            (reconciliation_id, account_id),
+            load_sql(
+                "queries/transaction_history_by_account"
+                if reconciliation_id is not None
+                else "queries/transaction_history_for_account"
+            ),
+            (reconciliation_id, account_id) if reconciliation_id is not None else (account_id,),
         )
         return resolve_transaction_working_set(
             baseline_refs,

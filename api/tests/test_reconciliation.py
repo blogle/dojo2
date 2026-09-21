@@ -308,6 +308,26 @@ def test_reconciliation_ending_value_includes_opening_history(service) -> None:
     ) == {"count": 2}
 
 
+def test_first_working_set_exposes_current_history_as_new(service) -> None:
+    account_id = _budget_account(service)
+    transaction_id = service.create_transaction(
+        {
+            "date": date(2026, 2, 1),
+            "account_id": account_id,
+            "amount_minor": 100,
+            "system_category": "TX_AVAILABLE_TO_BUDGET",
+            "status": "CLEARED",
+        }
+    )["transaction_id"]
+
+    result = service.reconciliation_working_set(account_id)
+
+    assert result["state"] == "NOT_RECONCILED"
+    assert [(item["transaction_id"], item["classification"]) for item in result["items"]] == [
+        (transaction_id, "NEW")
+    ]
+
+
 def test_investment_reconciliation_uses_statement_value(service) -> None:
     investment_id = service.create_account({"name": "Brokerage", "account_class": "INVESTMENT"})[
         "account_id"
@@ -430,6 +450,56 @@ def test_working_set_classifies_logical_changes_and_ignores_metadata(service) ->
     assert len(items) == 2
 
 
+def test_pending_carry_forward_does_not_duplicate_across_baselines(service) -> None:
+    account_id = _budget_account(service)
+    transaction_id = service.create_transaction(
+        {
+            "date": date(2026, 2, 2),
+            "account_id": account_id,
+            "amount_minor": -25,
+            "system_category": "TX_AVAILABLE_TO_BUDGET",
+            "status": "PENDING",
+        }
+    )["transaction_id"]
+
+    first = _commit_budget_baseline(service, account_id)
+    first_ref = service.db.fetch_one(
+        "SELECT * FROM reconciliation_transaction_refs WHERE reconciliation_id = ?",
+        (first["reconciliation_id"],),
+    )
+    service.clock.advance(minutes=1)
+    second = _commit_budget_baseline(service, account_id)
+    second_ref = service.db.fetch_one(
+        "SELECT * FROM reconciliation_transaction_refs WHERE reconciliation_id = ?",
+        (second["reconciliation_id"],),
+    )
+    assert first_ref is not None and second_ref is not None
+    assert str(first_ref["transaction_id"]) == transaction_id
+    assert str(second_ref["transaction_id"]) == transaction_id
+    assert first_ref["valid_from"] == second_ref["valid_from"]
+
+    service.clock.advance(minutes=1)
+    third = _commit_budget_baseline(service, account_id)
+    items = service.reconciliation_working_set(account_id)["items"]
+    assert len(items) == 1
+    assert items[0]["transaction_id"] == transaction_id
+    assert items[0]["classification"] == "CARRIED_PENDING"
+    assert service.db.fetch_one(
+        "SELECT COUNT(*) AS count FROM reconciliation_transaction_refs "
+        "WHERE reconciliation_id = ? AND transaction_id = ?",
+        (third["reconciliation_id"], transaction_id),
+    ) == {"count": 1}
+
+    _update_transaction(service, transaction_id, status="CLEARED")
+    items = service.reconciliation_working_set(account_id)["items"]
+    assert len(items) == 1
+    assert items[0]["classification"] == "PENDING_CLEARED"
+
+    service.clock.advance(minutes=1)
+    _commit_budget_baseline(service, account_id)
+    assert service.reconciliation_working_set(account_id)["items"] == []
+
+
 def test_working_set_backdated_create_removed_and_restored(service) -> None:
     account_id = _budget_account(service)
     original_id = service.create_transaction(
@@ -548,6 +618,33 @@ def test_post_baseline_create_remove_restore_is_restored_not_new(service) -> Non
     items = service.reconciliation_working_set(account_id)["items"]
     assert len(items) == 1
     assert items[0]["transaction_id"] == transaction_id
+    assert items[0]["classification"] == "RESTORED"
+
+
+def test_restore_classification_uses_lineage_not_commit_timestamp() -> None:
+    removed = _synthetic_transaction(
+        "restored",
+        valid_from=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        posted_date=date(2026, 1, 1),
+        amount_minor=100,
+        status="CLEARED",
+        valid_to=datetime(2026, 1, 2, tzinfo=timezone.utc),
+    )
+    restored = removed | {
+        "row_id": "restored-row-2",
+        "valid_from": datetime(2026, 1, 3, tzinfo=timezone.utc),
+        "valid_to": MAX_TS,
+    }
+
+    items = resolve_transaction_working_set(
+        baseline_refs=[],
+        baseline_versions=[],
+        current_versions=[restored],
+        historical_versions=[removed],
+        baseline_committed_at=datetime(2030, 1, 1, tzinfo=timezone.utc),
+    )
+
+    assert len(items) == 1
     assert items[0]["classification"] == "RESTORED"
 
 
@@ -681,7 +778,7 @@ def test_successive_complete_baseline_keeps_unchanged_old_transaction(service) -
     assert first_ref is not None
 
     service.clock.advance(minutes=1)
-    service.create_transaction(
+    new_id = service.create_transaction(
         {
             "date": date(2026, 2, 1),
             "account_id": account_id,
@@ -689,16 +786,23 @@ def test_successive_complete_baseline_keeps_unchanged_old_transaction(service) -
             "system_category": "TX_AVAILABLE_TO_BUDGET",
             "status": "CLEARED",
         }
-    )
+    )["transaction_id"]
     second = _commit_budget_baseline(service, account_id)
     refs = service.db.fetch_all(
         "SELECT * FROM reconciliation_transaction_refs WHERE reconciliation_id = ?",
         (second["reconciliation_id"],),
     )
     assert len(refs) == 2
-    assert {str(ref["transaction_id"]) for ref in refs} == {
-        old_id,
-        str(next(ref["transaction_id"] for ref in refs if str(ref["transaction_id"]) != old_id)),
+    assert {str(ref["transaction_id"]) for ref in refs} == {old_id, new_id}
+    current = service.db.fetch_all(
+        "SELECT transaction_id, valid_from, account_id FROM current_transactions "
+        "WHERE account_id = ?",
+        (account_id,),
+    )
+    assert {
+        str(row["transaction_id"]): (row["valid_from"], str(row["account_id"])) for row in refs
+    } == {
+        str(row["transaction_id"]): (row["valid_from"], str(row["account_id"])) for row in current
     }
     old_ref = next(ref for ref in refs if str(ref["transaction_id"]) == old_id)
     assert old_ref["valid_from"] == first_ref["valid_from"]
@@ -872,7 +976,11 @@ def test_working_set_properties_over_generated_logical_histories(
             return
         changed_at = advance()
         historical_rows.append(current | {"valid_to": changed_at})
-        current_by_id[transaction_id] = current | {"valid_from": changed_at, **changes}
+        current_by_id[transaction_id] = current | {
+            "row_id": f"row-{transaction_id}-{changed_at.isoformat()}",
+            "valid_from": changed_at,
+            **changes,
+        }
 
     for operation in operations:
         if operation in {"create", "backdated_create"}:
@@ -910,6 +1018,7 @@ def test_working_set_properties_over_generated_logical_histories(
             if "historical-restore" not in current_by_id:
                 restored_at = advance()
                 current_by_id["historical-restore"] = restored_history | {
+                    "row_id": f"row-historical-restore-{restored_at.isoformat()}",
                     "valid_from": restored_at,
                     "valid_to": "9999-12-31T23:59:59+00:00",
                 }

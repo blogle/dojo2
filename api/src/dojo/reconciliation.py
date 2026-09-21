@@ -586,7 +586,15 @@ def _has_removed_lineage(
     *,
     baseline_committed_at: datetime | None,
 ) -> bool:
-    """Identify a prior deletion without treating account moves as restores."""
+    """Identify a prior deletion without treating account moves as restores.
+
+    The selected baseline's commit timestamp is not a canonical transaction
+    lineage boundary. Baseline capture and commit timestamps are separate
+    facts, and a caller may provide a commit time later than the captured
+    state. Restoration is therefore determined only by the SCD gap.
+    """
+
+    del baseline_committed_at
 
     versions_by_key = {_version_key(row): row for row in historical_versions}
     versions_by_key[_version_key(current)] = current
@@ -594,8 +602,6 @@ def _has_removed_lineage(
     versions.sort(key=lambda row: _as_datetime(row.get("valid_from")))
     for previous, following in zip(versions, versions[1:], strict=False):
         following_valid_from = _as_datetime(following.get("valid_from"))
-        if baseline_committed_at is not None and following_valid_from <= baseline_committed_at:
-            continue
         previous_valid_to = _as_datetime(previous.get("valid_to"))
         if previous_valid_to < following_valid_from:
             return True
