@@ -32,6 +32,29 @@ class LocalRecord:
     source_record_id: str | None = None
 
 
+SOURCE_COMPARABLE_TRANSACTION_FIELDS = ("account_id", "date", "amount_minor", "status")
+
+
+@dataclass(frozen=True, slots=True)
+class TransactionWorkingSetItem:
+    """One logical transaction comparison against an explicitly selected baseline."""
+
+    transaction_id: str
+    classification: str
+    baseline: Mapping[str, Any] | None
+    current: Mapping[str, Any] | None
+    changed_fields: tuple[str, ...] = ()
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "transaction_id": self.transaction_id,
+            "classification": self.classification,
+            "baseline": dict(self.baseline) if self.baseline is not None else None,
+            "current": dict(self.current) if self.current is not None else None,
+            "changed_fields": list(self.changed_fields),
+        }
+
+
 @dataclass(frozen=True)
 class SourceRecord:
     source_record_id: str
@@ -269,16 +292,19 @@ class ReconciliationRepository:
                 None,
             ),
         )
-        for ref in baseline_refs:
-            connection.execute(
-                load_sql("queries/insert_reconciliation_transaction_ref"),
-                (
-                    commit_id,
-                    ref["transaction_id"],
-                    ref["valid_from"],
-                    ref.get("account_id", entity_id),
-                    ref.get("canonical_row_digest", ""),
-                ),
+        if baseline_refs:
+            connection.executemany(
+                load_sql("queries/insert_reconciliation_transaction_refs"),
+                [
+                    (
+                        commit_id,
+                        ref["transaction_id"],
+                        ref["valid_from"],
+                        ref.get("account_id", entity_id),
+                        ref.get("canonical_row_digest", ""),
+                    )
+                    for ref in baseline_refs
+                ],
             )
         return {
             "reconciliation_id": commit_id,
@@ -446,6 +472,149 @@ def canonical_transaction(record: LocalRecord) -> str:
 
 def transaction_digest(record: LocalRecord) -> str:
     return sha256(canonical_transaction(record).encode("utf-8")).hexdigest()
+
+
+def resolve_transaction_working_set(
+    baseline_refs: Sequence[Mapping[str, Any]],
+    baseline_versions: Sequence[Mapping[str, Any]],
+    current_versions: Sequence[Mapping[str, Any]],
+    historical_versions: Sequence[Mapping[str, Any]] = (),
+    *,
+    baseline_committed_at: datetime | None = None,
+) -> list[dict[str, Any]]:
+    """Resolve one logical working-set item per transaction lineage.
+
+    Baseline membership and exact versions are deliberately separate inputs. The
+    caller is responsible for selecting the baseline; this function only compares
+    that baseline with current canonical state and uses history to label restores.
+    """
+
+    baseline_by_id = {str(ref["transaction_id"]): dict(ref) for ref in baseline_refs}
+    baseline_version_by_id = {str(row["transaction_id"]): dict(row) for row in baseline_versions}
+    current_by_id = {str(row["transaction_id"]): dict(row) for row in current_versions}
+    history_by_id: dict[str, list[dict[str, Any]]] = {}
+    for row in historical_versions:
+        history_by_id.setdefault(str(row["transaction_id"]), []).append(dict(row))
+
+    items: list[TransactionWorkingSetItem] = []
+    for transaction_id in sorted(set(baseline_by_id) | set(current_by_id)):
+        baseline = baseline_version_by_id.get(transaction_id)
+        current = current_by_id.get(transaction_id)
+        in_baseline = transaction_id in baseline_by_id
+
+        if not in_baseline:
+            if current is None:
+                continue
+            classification = (
+                "RESTORED"
+                if _has_removed_lineage(
+                    current,
+                    history_by_id.get(transaction_id, ()),
+                    baseline_committed_at=baseline_committed_at,
+                )
+                else "NEW"
+            )
+            items.append(
+                TransactionWorkingSetItem(
+                    transaction_id=transaction_id,
+                    classification=classification,
+                    baseline=None,
+                    current=current,
+                )
+            )
+            continue
+
+        if current is None:
+            items.append(
+                TransactionWorkingSetItem(
+                    transaction_id=transaction_id,
+                    classification="REMOVED",
+                    baseline=baseline or baseline_by_id[transaction_id],
+                    current=None,
+                )
+            )
+            continue
+
+        if baseline is None:
+            raise ValueError(f"Baseline version not found for transaction {transaction_id}")
+
+        changed_fields = tuple(
+            field
+            for field in SOURCE_COMPARABLE_TRANSACTION_FIELDS
+            if baseline.get(field) != current.get(field)
+        )
+        if changed_fields:
+            classification = (
+                "PENDING_CLEARED"
+                if baseline.get("status") == "PENDING" and current.get("status") == "CLEARED"
+                else "EDITED"
+            )
+            items.append(
+                TransactionWorkingSetItem(
+                    transaction_id=transaction_id,
+                    classification=classification,
+                    baseline=baseline,
+                    current=current,
+                    changed_fields=changed_fields,
+                )
+            )
+        elif baseline.get("status") == "PENDING":
+            items.append(
+                TransactionWorkingSetItem(
+                    transaction_id=transaction_id,
+                    classification="CARRIED_PENDING",
+                    baseline=baseline,
+                    current=current,
+                )
+            )
+
+    return [item.as_dict() for item in sorted(items, key=_working_set_sort_key, reverse=True)]
+
+
+def _working_set_sort_key(item: TransactionWorkingSetItem) -> tuple[Any, ...]:
+    row = item.current or item.baseline or {}
+    return (
+        row.get("date") or date.min,
+        row.get("entry_order") or 0,
+        item.transaction_id,
+    )
+
+
+def _has_removed_lineage(
+    current: Mapping[str, Any],
+    historical_versions: Sequence[Mapping[str, Any]],
+    *,
+    baseline_committed_at: datetime | None,
+) -> bool:
+    """Identify a prior deletion without treating account moves as restores."""
+
+    versions_by_key = {_version_key(row): row for row in historical_versions}
+    versions_by_key[_version_key(current)] = current
+    versions = list(versions_by_key.values())
+    versions.sort(key=lambda row: _as_datetime(row.get("valid_from")))
+    for previous, following in zip(versions, versions[1:], strict=False):
+        following_valid_from = _as_datetime(following.get("valid_from"))
+        if baseline_committed_at is not None and following_valid_from <= baseline_committed_at:
+            continue
+        previous_valid_to = _as_datetime(previous.get("valid_to"))
+        if previous_valid_to < following_valid_from:
+            return True
+    return False
+
+
+def _version_key(row: Mapping[str, Any]) -> str:
+    row_id = row.get("row_id")
+    if row_id is not None:
+        return str(row_id)
+    return "|".join(str(row.get(field)) for field in ("transaction_id", "valid_from", "account_id"))
+
+
+def _as_datetime(value: Any) -> datetime:
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        return datetime.fromisoformat(value)
+    raise ValueError("Transaction version timestamps must be datetimes")
 
 
 def source_digest(record: SourceRecord) -> str:
