@@ -34,8 +34,10 @@ def test_current_migration_set_provisions_fresh_database(tmp_path) -> None:
             "financial_command_receipts",
             "transaction_operations",
             "transaction_operation_legs",
+            "reconciliation_evidence",
+            "reconciliation_evidence_records",
             "reconciliation_commits",
-            "reconciliation_source_records",
+            "reconciliation_history",
             "reconciliation_transaction_refs",
             "backup_configurations",
             "backup_runs",
@@ -66,6 +68,75 @@ def test_current_migration_set_provisions_fresh_database(tmp_path) -> None:
             "valid_to",
         } <= operation_leg_columns.keys()
         assert database.fetch_all("SELECT * FROM current_transaction_operation_legs") == []
+    finally:
+        database.close()
+
+
+def test_legacy_reconciliation_schema_is_migrated_deterministically(tmp_path) -> None:
+    duckdb_path = tmp_path / "legacy-reconciliation.duckdb"
+    connection = duckdb.connect(str(duckdb_path))
+    reconciliation_id = "00000000-0000-0000-0000-000000000001"
+    evidence_id = "00000000-0000-0000-0000-000000000002"
+    account_id = "00000000-0000-0000-0000-000000000003"
+    try:
+        connection.execute(load_sql("tests/create_legacy_reconciliation_tables"))
+        connection.execute(
+            """
+            INSERT INTO reconciliation_commits VALUES
+            (?, ?, 'BUDGET', 'BANK_STATEMENT', DATE '2026-08-01', DATE '2026-08-31',
+             DATE '2026-08-31', TIMESTAMPTZ '2026-09-01 10:00:00+00', 'CURRENT', ?,
+             'legacy-evidence-digest', 'legacy-baseline-digest', 1000,
+             TIMESTAMPTZ '2026-09-01 09:00:00+00', NULL),
+            ('00000000-0000-0000-0000-000000000004', ?, 'BUDGET', 'BANK_STATEMENT',
+             DATE '2026-08-01', DATE '2026-08-31', DATE '2026-08-31', NULL, 'DRAFT', ?,
+             'draft-evidence-digest', 'draft-baseline-digest', 1000,
+             TIMESTAMPTZ '2026-09-01 09:30:00+00', NULL)
+            """,
+            (
+                reconciliation_id,
+                account_id,
+                evidence_id,
+                account_id,
+                "00000000-0000-0000-0000-000000000005",
+            ),
+        )
+        connection.execute(
+            """
+            INSERT INTO reconciliation_source_records VALUES
+            (?, 'legacy-record', NULL, 0, ?, DATE '2026-08-31', NULL, 1000,
+             'CLEARED', 'Opening', 'record-digest', NULL)
+            """,
+            (evidence_id, account_id),
+        )
+    finally:
+        connection.close()
+
+    provision_database(str(duckdb_path))
+    provision_database(str(duckdb_path))
+    database = Database(str(duckdb_path))
+    try:
+        assert database.fetch_one("SELECT COUNT(*) AS count FROM reconciliation_commits") == {
+            "count": 1
+        }
+        assert database.fetch_one("SELECT COUNT(*) AS count FROM reconciliation_evidence") == {
+            "count": 1
+        }
+        assert database.fetch_one(
+            "SELECT COUNT(*) AS count FROM reconciliation_evidence_records"
+        ) == {"count": 1}
+        assert database.fetch_one(
+            "SELECT COUNT(*) AS count FROM reconciliation_history WHERE event_type = 'COMMITTED'"
+        ) == {"count": 1}
+        migrated_times = database.fetch_one(
+            "SELECT source_as_of, committed_at FROM reconciliation_evidence "
+            "JOIN reconciliation_commits USING (evidence_id)"
+        )
+        assert migrated_times is not None
+        assert str(migrated_times["source_as_of"]).startswith("2026-08-31")
+        assert str(migrated_times["committed_at"]).startswith("2026-09-01")
+        assert database.fetch_one(
+            "SELECT COUNT(*) AS count FROM reconciliation_commits_legacy WHERE state = 'DRAFT'"
+        ) == {"count": 1}
     finally:
         database.close()
 

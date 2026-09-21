@@ -477,4 +477,3 @@ class ReconciliationDraftPayload(BaseModel):
 
 class ReconciliationApplyPayload(BaseModel):
     client_operation_id: UUID
-    balance_adjustment_minor: int | None = None

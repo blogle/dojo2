@@ -373,38 +373,57 @@ CREATE TABLE IF NOT EXISTS transaction_operation_legs (
     CHECK (leg_role IN ('SOURCE', 'DESTINATION'))
 );
 
-CREATE TABLE IF NOT EXISTS reconciliation_commits (
-    reconciliation_id UUID PRIMARY KEY,
-    account_id UUID NOT NULL,
-    account_class TEXT NOT NULL,
-    source_kind TEXT NOT NULL,
-    period_start DATE NOT NULL,
-    period_end DATE NOT NULL,
-    effective_date DATE NOT NULL,
-    verified_at TIMESTAMPTZ,
-    state TEXT NOT NULL,
-    source_evidence_id UUID NOT NULL,
-    source_evidence_digest TEXT NOT NULL,
-    baseline_digest TEXT NOT NULL,
-    source_ending_value_minor BIGINT NOT NULL,
+CREATE TABLE IF NOT EXISTS reconciliation_evidence (
+    evidence_id UUID PRIMARY KEY,
+    entity_id UUID NOT NULL,
+    entity_class TEXT NOT NULL,
+    evidence_kind TEXT NOT NULL,
+    source_adapter TEXT NOT NULL,
+    source_as_of TIMESTAMPTZ NOT NULL,
+    normalized_payload JSON NOT NULL,
+    normalized_digest TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL,
-    created_by_user_id UUID
+    created_by_user_id UUID,
+    CHECK (entity_class IN ('BUDGET', 'INVESTMENT', 'LOAN', 'TRACKING', 'TANGIBLE_ASSET'))
 );
 
-CREATE TABLE IF NOT EXISTS reconciliation_source_records (
-    source_evidence_id UUID NOT NULL,
-    source_record_id TEXT NOT NULL,
-    transaction_id UUID,
+CREATE TABLE IF NOT EXISTS reconciliation_evidence_records (
+    evidence_id UUID NOT NULL,
     ordinal BIGINT NOT NULL,
-    account_id UUID NOT NULL,
-    posted_date DATE NOT NULL,
+    source_record_id TEXT,
+    transaction_id UUID,
+    posted_date DATE,
     cleared_date DATE,
-    signed_amount_minor BIGINT NOT NULL,
-    source_status TEXT NOT NULL,
-    description TEXT NOT NULL,
-    normalized_digest TEXT NOT NULL,
+    signed_amount_minor BIGINT,
+    settlement_state TEXT,
+    description TEXT NOT NULL DEFAULT '',
+    normalized_payload JSON NOT NULL,
     raw_payload JSON,
-    PRIMARY KEY (source_evidence_id, ordinal)
+    PRIMARY KEY (evidence_id, ordinal)
+);
+
+CREATE TABLE IF NOT EXISTS reconciliation_commits (
+    reconciliation_id UUID PRIMARY KEY,
+    entity_id UUID NOT NULL,
+    entity_class TEXT NOT NULL,
+    evidence_id UUID NOT NULL UNIQUE,
+    baseline_digest TEXT NOT NULL,
+    committed_at TIMESTAMPTZ NOT NULL,
+    created_by_user_id UUID,
+    CHECK (entity_class IN ('BUDGET', 'INVESTMENT', 'LOAN', 'TRACKING', 'TANGIBLE_ASSET'))
+);
+
+CREATE TABLE IF NOT EXISTS reconciliation_history (
+    history_id UUID PRIMARY KEY,
+    entity_id UUID NOT NULL,
+    entity_class TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    reconciliation_id UUID NOT NULL,
+    recorded_at TIMESTAMPTZ NOT NULL,
+    reason TEXT,
+    metadata JSON,
+    CHECK (event_type IN ('COMMITTED', 'VOID')),
+    CHECK (entity_class IN ('BUDGET', 'INVESTMENT', 'LOAN', 'TRACKING', 'TANGIBLE_ASSET'))
 );
 
 CREATE TABLE IF NOT EXISTS reconciliation_transaction_refs (
