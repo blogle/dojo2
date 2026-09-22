@@ -61,6 +61,52 @@ def test_bump_version(
     assert release.bump_version(version, bump) == expected
 
 
+def test_sync_changelog_backfills_published_releases_without_dangling_tag() -> None:
+    old_history = "## v0.0.4 - 2026-09-17\n\n- Old history.\n"
+    existing = "# Changelog\n\n## Unreleased\n\n- Stale v0.0.6-v0.0.10 material.\n\n" + old_history
+    releases = [
+        {
+            "tag": "v0.0.6",
+            "date": "2026-09-18",
+            "body": "* Explain Available to budget progressively.",
+        },
+        {"tag": "v0.0.7", "date": "2026-09-20", "body": ["Make failed backups retryable."]},
+    ]
+
+    synced = release.sync_changelog(existing, releases)
+
+    assert "## v0.0.6 - 2026-09-18" in synced
+    assert "## v0.0.7 - 2026-09-20" in synced
+    assert "v0.0.5" not in synced
+    assert synced.index("## v0.0.7") < synced.index("## v0.0.6")
+    assert synced.index("## Unreleased") < synced.index("## v0.0.7")
+    assert "Stale v0.0.6-v0.0.10 material" in synced
+    assert synced.endswith(old_history)
+    assert release.sync_changelog(synced, releases) == synced
+
+
+def test_sync_changelog_detects_missing_published_release() -> None:
+    with pytest.raises(ValueError, match="missing published releases"):
+        release.validate_changelog(
+            "# Changelog\n\n## Unreleased\n",
+            [{"tag": "v0.0.6", "date": "2026-09-18", "body": "* note"}],
+        )
+
+
+def test_release_workflow_syncs_changelog_on_automation_branch_and_reuses_pr() -> None:
+    workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
+
+    assert "gh api repos/${GITHUB_REPOSITORY}/releases" in workflow
+    assert "automation/changelog" in workflow
+    assert 'git fetch origin "refs/heads/$branch:refs/remotes/origin/$branch"' in workflow
+    assert 'git push --force-with-lease origin "$branch"' in workflow
+    assert "select(.draft == false and .prerelease == false and .published_at != null)" in workflow
+    assert 'body: (.body // "")' in workflow
+    assert 'git push --force-with-lease origin "master"' not in workflow
+    assert "gh pr list" in workflow
+    assert "[release:none]" in workflow
+
+
 def test_release_workflow_builds_once_and_promotes_the_immutable_image() -> None:
     workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
 

@@ -272,12 +272,18 @@ The default is a patch release; `[release:minor]`, `[release:major]`, and
 workflow tags the exact pushed commit and publishes from that tag without
 mutating `master`.
 
+After a successful GitHub Release, published GitHub Releases are the changelog
+authority. The workflow regenerates missing release sections and force-updates
+only `automation/changelog`, then creates or reuses one pull request titled
+with `[release:none]`. The bot never pushes `master` or moves a release tag.
+
 ### Consequence
 
 Each qualifying merge produces at most one release and never creates a second
 metadata PR. A skipped merge is included in the next release that is created.
 Conflicting or malformed directives fail closed. GitHub-generated release notes
-and the human-maintained changelog are separate from version selection.
+remain separate from version selection, while the checked-in changelog is
+synchronized through the automation pull request.
 
 ## 2026-06-10 — Adopt self-contained ExecPlans for complex implementation work
 
