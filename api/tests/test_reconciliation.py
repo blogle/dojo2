@@ -9,14 +9,17 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from dojo.constants import MAX_TS
+from dojo.operations import current_transaction_operation_legs
 from dojo.reconciliation import (
     LocalRecord,
     SourceRecord,
     compare_records,
+    resolve_effective_reconciliation,
     resolve_transaction_working_set,
     transaction_digest,
 )
 from dojo.scd import batch_insert_versions
+from dojo.service import ReconciledHistoryChangeConfirmationRequired
 
 
 def test_compare_records_classifies_explicit_identity_and_unmatched_rows() -> None:
@@ -328,6 +331,348 @@ def test_first_working_set_exposes_current_history_as_new(service) -> None:
     ]
 
 
+def test_undo_latest_reconciliation_restores_effective_baseline_without_mutation(service) -> None:
+    account_id = _budget_account(service)
+    first_transaction_id = service.create_transaction(
+        {
+            "date": date(2026, 2, 1),
+            "account_id": account_id,
+            "amount_minor": 100,
+            "system_category": "TX_AVAILABLE_TO_BUDGET",
+            "status": "CLEARED",
+        }
+    )["transaction_id"]
+    first = _commit_budget_baseline(service, account_id)
+    service.clock.advance(minutes=1)
+    second_transaction_id = service.create_transaction(
+        {
+            "date": date(2026, 2, 2),
+            "account_id": account_id,
+            "amount_minor": 25,
+            "system_category": "TX_AVAILABLE_TO_BUDGET",
+            "status": "CLEARED",
+        }
+    )["transaction_id"]
+    second = _commit_budget_baseline(service, account_id)
+    before_commit = service.reconciliation_repository.read_commit(second["reconciliation_id"])
+    before_transactions = service.db.fetch_all(
+        "SELECT transaction_id, row_id, amount_minor FROM current_transactions "
+        "WHERE account_id = ? ORDER BY transaction_id",
+        (account_id,),
+    )
+
+    result = service.undo_last_reconciliation(
+        account_id, {"client_operation_id": str(uuid4()), "reason": "Wrong source"}
+    )
+
+    assert result["effective_reconciliation"]["reconciliation_id"] == first["reconciliation_id"]
+    assert result["undo_record"]["event_type"] == "VOID"
+    assert result["undo_record"]["reconciliation_id"] == second["reconciliation_id"]
+    assert result["undo"]["available"] is False
+    assert (
+        service.reconciliation_repository.read_commit(second["reconciliation_id"]) == before_commit
+    )
+    assert (
+        service.db.fetch_all(
+            "SELECT transaction_id, row_id, amount_minor FROM current_transactions "
+            "WHERE account_id = ? ORDER BY transaction_id",
+            (account_id,),
+        )
+        == before_transactions
+    )
+    assert (
+        service.reconciliation_working_set(account_id)["effective_reconciliation_id"]
+        == first["reconciliation_id"]
+    )
+    assert (
+        service.reconciliation_working_set(account_id)["items"][0]["transaction_id"]
+        == second_transaction_id
+    )
+    assert first_transaction_id not in {
+        item["transaction_id"] for item in service.reconciliation_working_set(account_id)["items"]
+    }
+    with pytest.raises(ValueError, match="latest successful reconciliation"):
+        service.void_reconciliation_commit(account_id, first["reconciliation_id"])
+
+
+def test_undo_first_reconciliation_returns_never_reconciled_and_cannot_chain(service) -> None:
+    account_id = _budget_account(service)
+    commit = _commit_budget_baseline(service, account_id)
+
+    result = service.undo_last_reconciliation(account_id)
+
+    assert result["never_reconciled"] is True
+    assert result["effective_reconciliation"] is None
+    assert result["undo"]["available"] is False
+    with pytest.raises(ValueError, match="reconciliation_undo_unavailable"):
+        service.undo_last_reconciliation(account_id)
+    assert (
+        service.reconciliation_repository.read_commit(commit["reconciliation_id"])[
+            "reconciliation_id"
+        ]
+        == commit["reconciliation_id"]
+    )
+
+
+@settings(max_examples=40, derandomize=True, deadline=None)
+@given(voided=st.lists(st.booleans(), min_size=0, max_size=8))
+def test_effective_baseline_property_respects_voids_and_latest_only_undo(
+    voided: list[bool],
+) -> None:
+    commits = [{"reconciliation_id": f"c{index}"} for index in range(len(voided))]
+    history = [
+        {"event_type": "VOID", "reconciliation_id": commit["reconciliation_id"]}
+        for commit, is_voided in zip(commits, voided, strict=True)
+        if is_voided
+    ]
+
+    resolved = resolve_effective_reconciliation(commits, history)
+    expected_effective = next(
+        (commit for commit, is_voided in zip(commits, voided, strict=True) if not is_voided),
+        None,
+    )
+    expected_undoable = commits[0] if commits and not voided[0] else None
+
+    assert resolved["effective_reconciliation"] == expected_effective
+    assert resolved["undoable_reconciliation"] == expected_undoable
+
+
+def test_attention_composes_changes_pending_and_reconciled_history(service) -> None:
+    account_id = _budget_account(service)
+    cleared_id = service.create_transaction(
+        {
+            "date": date(2026, 2, 1),
+            "account_id": account_id,
+            "amount_minor": 100,
+            "system_category": "TX_AVAILABLE_TO_BUDGET",
+            "status": "CLEARED",
+        }
+    )["transaction_id"]
+    pending_id = service.create_transaction(
+        {
+            "date": date(2026, 2, 2),
+            "account_id": account_id,
+            "amount_minor": -25,
+            "system_category": "TX_AVAILABLE_TO_BUDGET",
+            "status": "PENDING",
+        }
+    )["transaction_id"]
+    _commit_budget_baseline(service, account_id)
+    new_id = service.create_transaction(
+        {
+            "date": date(2026, 2, 3),
+            "account_id": account_id,
+            "amount_minor": 50,
+            "system_category": "TX_AVAILABLE_TO_BUDGET",
+            "status": "CLEARED",
+        }
+    )["transaction_id"]
+    _update_transaction(service, cleared_id, amount_minor=125)
+    _update_transaction(service, pending_id, amount_minor=-30)
+
+    response = service.reconciliation_working_set(account_id)
+
+    assert response["attention"] == {
+        "last_reconciled": "2026-02-15",
+        "changes_since": 3,
+        "carried_pending": 1,
+        "reconciled_history_changed": 1,
+        "never_reconciled": False,
+        "changes_since_count": 3,
+        "carried_pending_count": 1,
+        "reconciled_history_changed_count": 1,
+    }
+    assert {item["transaction_id"] for item in response["items"]} == {
+        cleared_id,
+        pending_id,
+        new_id,
+    }
+
+
+@pytest.mark.parametrize("mutation", ["amount", "date", "account", "cleared_to_pending"])
+def test_first_protected_divergence_requires_acknowledgment(service, mutation: str) -> None:
+    account_id = _budget_account(service)
+    moved_account_id = _budget_account(service, "Moved") if mutation == "account" else account_id
+    transaction_id = service.create_transaction(
+        {
+            "date": date(2026, 2, 1),
+            "account_id": account_id,
+            "amount_minor": 100,
+            "system_category": "TX_AVAILABLE_TO_BUDGET",
+            "status": "CLEARED",
+        }
+    )["transaction_id"]
+    _commit_budget_baseline(service, account_id)
+    current = _current_transaction(service, transaction_id)
+    payload = {
+        "expected_version": str(current["row_id"]),
+        "date": current["date"],
+        "account_id": str(current["account_id"]),
+        "amount_minor": 125,
+        "category_id": current["category_id"],
+        "system_category": current["system_category"],
+        "status": current["status"],
+        "memo": current["memo"],
+    }
+    payload.update(
+        {
+            "amount_minor": 125 if mutation == "amount" else current["amount_minor"],
+            "date": date(2026, 2, 2) if mutation == "date" else current["date"],
+            "account_id": moved_account_id if mutation == "account" else str(current["account_id"]),
+            "status": "PENDING" if mutation == "cleared_to_pending" else current["status"],
+        }
+    )
+    before = _current_transaction(service, transaction_id)
+    with pytest.raises(ReconciledHistoryChangeConfirmationRequired) as error:
+        service.update_transaction(transaction_id, payload)
+    assert error.value.as_detail()["code"] == "reconciled_history_change_requires_confirmation"
+    assert _current_transaction(service, transaction_id) == before
+
+    payload["acknowledge_reconciled_history_change"] = True
+    updated = service.update_transaction(transaction_id, payload)
+    assert updated["transaction_id"] == transaction_id
+    if mutation == "amount":
+        payload.update(
+            {
+                "expected_version": updated["version"],
+                "amount_minor": 150,
+                "acknowledge_reconciled_history_change": False,
+            }
+        )
+        service.update_transaction(transaction_id, payload)
+
+
+def test_first_protected_removal_requires_acknowledgment(service) -> None:
+    account_id = _budget_account(service)
+    transaction_id = service.create_transaction(
+        {
+            "date": date(2026, 2, 1),
+            "account_id": account_id,
+            "amount_minor": 100,
+            "system_category": "TX_AVAILABLE_TO_BUDGET",
+            "status": "CLEARED",
+        }
+    )["transaction_id"]
+    _commit_budget_baseline(service, account_id)
+    current = _current_transaction(service, transaction_id)
+    expected_version = str(current["row_id"])
+
+    with pytest.raises(ReconciledHistoryChangeConfirmationRequired) as error:
+        service.delete_transaction(transaction_id, expected_version)
+
+    assert error.value.as_detail()["code"] == "reconciled_history_change_requires_confirmation"
+    assert _current_transaction(service, transaction_id) == current
+    service.delete_transaction(
+        transaction_id,
+        expected_version,
+        acknowledge_reconciled_history_change=True,
+    )
+    assert (
+        service.db.fetch_one(
+            "SELECT * FROM current_transactions WHERE transaction_id = ?", (transaction_id,)
+        )
+        is None
+    )
+
+
+def test_batch_protection_evaluates_known_existing_operation_legs(service) -> None:
+    account_a = _budget_account(service, "Checking")
+    account_b = service.create_account(
+        {"name": "Card", "account_class": "BUDGET", "budget_account_type": "CREDIT_CARD"}
+    )["account_id"]
+    operation = service.create_credit_card_payment(
+        account_b,
+        {
+            "client_operation_id": str(uuid4()),
+            "source_account_id": account_a,
+            "source_posted_date": date(2026, 2, 1),
+            "source_status": "CLEARED",
+            "destination_account_id": account_b,
+            "destination_posted_date": date(2026, 2, 1),
+            "destination_status": "CLEARED",
+            "amount_minor": 100,
+            "memo": "Existing payment",
+        },
+    )
+    operation_legs = current_transaction_operation_legs(
+        service.db.connection, operation_id=operation["operation_id"]
+    )
+    assert {row["leg_role"] for row in operation_legs} == {"SOURCE", "DESTINATION"}
+    transaction_by_role = {row["leg_role"]: str(row["transaction_id"]) for row in operation_legs}
+    transaction_a = transaction_by_role["SOURCE"]
+    transaction_b = transaction_by_role["DESTINATION"]
+    _commit_budget_baseline(service, account_a)
+    _commit_budget_baseline(service, account_b)
+    current_a = _current_transaction(service, transaction_a)
+    current_b = _current_transaction(service, transaction_b)
+    provenance_before = current_transaction_operation_legs(service.db.connection)
+
+    affected = service.evaluate_reconciled_history_changes(
+        [
+            {
+                "transaction_id": transaction_a,
+                "current": current_a,
+                "proposed": current_a | {"amount_minor": 101},
+            },
+            {
+                "transaction_id": transaction_b,
+                "current": current_b,
+                "proposed": current_b | {"status": "PENDING"},
+            },
+        ]
+    )
+
+    assert {item["transaction_id"] for item in affected} == {transaction_a, transaction_b}
+    assert {item["account_id"] for item in affected} == {account_a, account_b}
+    assert {item["reconciliation_id"] for item in affected} == {
+        service.reconciliation_working_set(account_a)["effective_reconciliation_id"],
+        service.reconciliation_working_set(account_b)["effective_reconciliation_id"],
+    }
+    assert current_transaction_operation_legs(service.db.connection) == provenance_before
+
+
+def test_historical_protection_excludes_metadata_pending_lifecycle_and_new_rows(service) -> None:
+    account_id = _budget_account(service)
+    cleared_id = service.create_transaction(
+        {
+            "date": date(2026, 2, 1),
+            "account_id": account_id,
+            "amount_minor": 100,
+            "system_category": "TX_AVAILABLE_TO_BUDGET",
+            "status": "CLEARED",
+        }
+    )["transaction_id"]
+    pending_id = service.create_transaction(
+        {
+            "date": date(2026, 2, 2),
+            "account_id": account_id,
+            "amount_minor": 10,
+            "system_category": "TX_AVAILABLE_TO_BUDGET",
+            "status": "PENDING",
+        }
+    )["transaction_id"]
+    _commit_budget_baseline(service, account_id)
+    _update_transaction(
+        service, cleared_id, memo="metadata", acknowledge_reconciled_history_change=False
+    )
+    _update_transaction(
+        service, pending_id, status="CLEARED", acknowledge_reconciled_history_change=False
+    )
+    new_id = service.create_transaction(
+        {
+            "date": date(2026, 2, 3),
+            "account_id": account_id,
+            "amount_minor": 5,
+            "system_category": "TX_AVAILABLE_TO_BUDGET",
+            "status": "CLEARED",
+        }
+    )["transaction_id"]
+
+    assert new_id in {
+        item["transaction_id"] for item in service.reconciliation_working_set(account_id)["items"]
+    }
+
+
 def test_investment_reconciliation_uses_statement_value(service) -> None:
     investment_id = service.create_account({"name": "Brokerage", "account_class": "INVESTMENT"})[
         "account_id"
@@ -385,7 +730,13 @@ def _current_transaction(service, transaction_id: str) -> dict[str, object]:
     return row
 
 
-def _update_transaction(service, transaction_id: str, **changes: object) -> None:
+def _update_transaction(
+    service,
+    transaction_id: str,
+    *,
+    acknowledge_reconciled_history_change: bool = True,
+    **changes: object,
+) -> None:
     current = _current_transaction(service, transaction_id)
     payload = {
         "expected_version": str(current["row_id"]),
@@ -398,6 +749,7 @@ def _update_transaction(service, transaction_id: str, **changes: object) -> None
         "memo": current["memo"],
     }
     payload.update(changes)
+    payload["acknowledge_reconciled_history_change"] = acknowledge_reconciled_history_change
     service.update_transaction(transaction_id, payload)
 
 
@@ -528,7 +880,11 @@ def test_working_set_backdated_create_removed_and_restored(service) -> None:
     assert backdated[0]["classification"] == "NEW"
 
     original = _current_transaction(service, original_id)
-    service.delete_transaction(original_id, str(original["row_id"]))
+    service.delete_transaction(
+        original_id,
+        str(original["row_id"]),
+        acknowledge_reconciled_history_change=True,
+    )
     removed = service.reconciliation_working_set(account_id)["items"]
     removed_by_id = {item["transaction_id"]: item for item in removed}
     assert removed_by_id[original_id]["classification"] == "REMOVED"
@@ -578,7 +934,11 @@ def test_delete_and_restore_at_same_clock_time_is_restored(service) -> None:
     )["transaction_id"]
     _commit_budget_baseline(service, account_id)
     current = _current_transaction(service, transaction_id)
-    service.delete_transaction(transaction_id, str(current["row_id"]))
+    service.delete_transaction(
+        transaction_id,
+        str(current["row_id"]),
+        acknowledge_reconciled_history_change=True,
+    )
     service.clock.advance(microseconds=1)
     _commit_budget_baseline(service, account_id)
     service.clock.advance(microseconds=-1)
@@ -612,7 +972,11 @@ def test_post_baseline_create_remove_restore_is_restored_not_new(service) -> Non
         }
     )["transaction_id"]
     current = _current_transaction(service, transaction_id)
-    service.delete_transaction(transaction_id, str(current["row_id"]))
+    service.delete_transaction(
+        transaction_id,
+        str(current["row_id"]),
+        acknowledge_reconciled_history_change=True,
+    )
     service.restore_transaction(transaction_id)
 
     items = service.reconciliation_working_set(account_id)["items"]
@@ -926,6 +1290,7 @@ def _synthetic_transaction(
                 "restore",
                 "repeated_edit",
                 "reconcile",
+                "undo_latest_reconciliation",
             ]
         ),
         min_size=1,
@@ -935,8 +1300,8 @@ def _synthetic_transaction(
 def test_working_set_properties_over_generated_logical_histories(
     operations: list[str],
 ) -> None:
-    baseline_committed_at = datetime(2026, 2, 1, tzinfo=timezone.utc)
-    current_time = baseline_committed_at
+    baseline_committed_at: datetime | None = None
+    current_time = datetime(2026, 2, 1, tzinfo=timezone.utc)
     baseline_pending = _synthetic_transaction(
         "baseline-pending",
         valid_from=datetime(2026, 1, 1, tzinfo=timezone.utc),
@@ -963,7 +1328,10 @@ def test_working_set_properties_over_generated_logical_histories(
     current_by_id = {row["transaction_id"]: dict(row) for row in baseline_rows}
     historical_rows: list[dict[str, object]] = [restored_history]
     next_id = 0
-    commit_snapshots: list[tuple[list[dict[str, object]], list[dict[str, object]]]] = []
+    commits: list[dict[str, object]] = []
+    history: list[dict[str, object]] = []
+    commit_snapshots: list[tuple[str, list[dict[str, object]], list[dict[str, object]]]] = []
+    expect_new_reconciliation_to_be_undoable = False
 
     def advance() -> datetime:
         nonlocal current_time
@@ -1027,14 +1395,58 @@ def test_working_set_properties_over_generated_logical_histories(
             edit("baseline-cleared", amount_minor=301)
         elif operation == "reconcile":
             baseline_rows = [dict(row) for row in current_by_id.values()]
-            baseline_committed_at = advance()
+            committed_at = advance()
+            reconciliation_id = f"reconciliation-{len(commits) + 1}"
+            if expect_new_reconciliation_to_be_undoable:
+                assert resolve_effective_reconciliation(
+                    [{"reconciliation_id": reconciliation_id}, *commits], history
+                )["undoable_reconciliation"] == {"reconciliation_id": reconciliation_id}
+                expect_new_reconciliation_to_be_undoable = False
+            commits.insert(
+                0,
+                {
+                    "reconciliation_id": reconciliation_id,
+                    "committed_at": committed_at,
+                },
+            )
+            baseline_committed_at = committed_at
             commit_snapshots.append(
                 (
+                    reconciliation_id,
                     [dict(row) for row in baseline_rows],
                     [dict(row) for row in current_by_id.values()],
                 )
             )
+        elif operation == "undo_latest_reconciliation":
+            before_current = {
+                transaction_id: dict(row) for transaction_id, row in current_by_id.items()
+            }
+            resolved_before = resolve_effective_reconciliation(commits, history)
+            undoable = resolved_before["undoable_reconciliation"]
+            if undoable is not None:
+                undone_id = str(undoable["reconciliation_id"])
+                history.insert(
+                    0,
+                    {"event_type": "VOID", "reconciliation_id": undone_id},
+                )
+                resolved_after = resolve_effective_reconciliation(commits, history)
+                assert current_by_id == before_current
+                assert resolved_after["undoable_reconciliation"] is None
+                assert resolved_after["effective_reconciliation"] != undoable
+                expect_new_reconciliation_to_be_undoable = True
 
+    resolved = resolve_effective_reconciliation(commits, history)
+    effective = resolved["effective_reconciliation"]
+    baseline_rows = (
+        next(
+            snapshot
+            for reconciliation_id, snapshot, _current in commit_snapshots
+            if reconciliation_id == effective["reconciliation_id"]
+        )
+        if effective is not None
+        else []
+    )
+    baseline_committed_at = effective["committed_at"] if effective is not None else None
     baseline_refs = [
         {
             "transaction_id": row["transaction_id"],
@@ -1076,7 +1488,7 @@ def test_working_set_properties_over_generated_logical_histories(
             else:
                 assert set(item["changed_fields"]) == set(changed_fields)
 
-    for snapshot_baseline, snapshot_current in commit_snapshots:
+    for _reconciliation_id, snapshot_baseline, snapshot_current in commit_snapshots:
         assert {row["transaction_id"] for row in snapshot_baseline} == {
             row["transaction_id"] for row in snapshot_current
         }

@@ -178,36 +178,67 @@ class ReconciliationRepository:
         recorded_at: datetime,
         reason: str | None = None,
         metadata: Mapping[str, Any] | None = None,
+        connection: duckdb.DuckDBPyConnection | None = None,
     ) -> dict[str, Any]:
         self._validate_entity_class(entity_class)
         recorded_at = _require_aware_datetime(recorded_at, "recorded_at")
-        with self.database.transaction() as connection:
-            commit_cursor = connection.execute(
-                load_sql("queries/reconciliation_commit_by_id"), (reconciliation_id,)
+        if connection is not None:
+            return self._void_commit(
+                connection,
+                reconciliation_id=reconciliation_id,
+                entity_id=entity_id,
+                entity_class=entity_class,
+                recorded_at=recorded_at,
+                reason=reason,
+                metadata=metadata,
             )
-            commit_row = _cursor_row(commit_cursor)
-            if commit_row is None:
-                raise ValueError("Reconciliation commit not found")
-            if str(commit_row["entity_id"]) != str(entity_id):
-                raise ValueError("Reconciliation commit entity does not match the void record")
-            if str(commit_row["entity_class"]) != entity_class:
-                raise ValueError(
-                    "Reconciliation commit entity class does not match the void record"
-                )
-            history_id = str(uuid4())
-            connection.execute(
-                load_sql("queries/insert_reconciliation_history"),
-                (
-                    history_id,
-                    entity_id,
-                    entity_class,
-                    "VOID",
-                    reconciliation_id,
-                    recorded_at,
-                    reason,
-                    json_dumps(metadata) if metadata is not None else None,
-                ),
+        with self.database.transaction() as transaction:
+            result = self._void_commit(
+                transaction,
+                reconciliation_id=reconciliation_id,
+                entity_id=entity_id,
+                entity_class=entity_class,
+                recorded_at=recorded_at,
+                reason=reason,
+                metadata=metadata,
             )
+        return result
+
+    def _void_commit(
+        self,
+        connection: duckdb.DuckDBPyConnection,
+        *,
+        reconciliation_id: str,
+        entity_id: str,
+        entity_class: str,
+        recorded_at: datetime,
+        reason: str | None,
+        metadata: Mapping[str, Any] | None,
+    ) -> dict[str, Any]:
+        commit_cursor = connection.execute(
+            load_sql("queries/reconciliation_commit_by_id"), (reconciliation_id,)
+        )
+        commit_row = _cursor_row(commit_cursor)
+        if commit_row is None:
+            raise ValueError("Reconciliation commit not found")
+        if str(commit_row["entity_id"]) != str(entity_id):
+            raise ValueError("Reconciliation commit entity does not match the void record")
+        if str(commit_row["entity_class"]) != entity_class:
+            raise ValueError("Reconciliation commit entity class does not match the void record")
+        history_id = str(uuid4())
+        connection.execute(
+            load_sql("queries/insert_reconciliation_history"),
+            (
+                history_id,
+                entity_id,
+                entity_class,
+                "VOID",
+                reconciliation_id,
+                recorded_at,
+                reason,
+                json_dumps(metadata) if metadata is not None else None,
+            ),
+        )
         return {
             "history_id": history_id,
             "entity_id": str(entity_id),
@@ -394,6 +425,28 @@ class ReconciliationRepository:
                 record_payload = json.loads(record_payload)
             normalized_records.append(record | {"normalized_payload": record_payload})
         return row | {"normalized_payload": payload, "records": normalized_records}
+
+
+def resolve_effective_reconciliation(
+    commits: Sequence[Mapping[str, Any]], history: Sequence[Mapping[str, Any]]
+) -> dict[str, Any]:
+    """Resolve effective and latest-only undo state from immutable history."""
+
+    voided = {str(row["reconciliation_id"]) for row in history if row.get("event_type") == "VOID"}
+    effective = next(
+        (commit for commit in commits if str(commit["reconciliation_id"]) not in voided),
+        None,
+    )
+    latest = commits[0] if commits else None
+    undoable = (
+        latest if latest is not None and str(latest["reconciliation_id"]) not in voided else None
+    )
+    return {
+        "voided_reconciliation_ids": voided,
+        "effective_reconciliation": effective,
+        "last_reconciliation": latest,
+        "undoable_reconciliation": undoable,
+    }
 
 
 def _cursor_row(cursor: duckdb.DuckDBPyConnection) -> dict[str, Any] | None:
