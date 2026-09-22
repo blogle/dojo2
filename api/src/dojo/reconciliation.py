@@ -3,10 +3,19 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
-from datetime import date
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field, replace
+from datetime import date, datetime, timezone
 from hashlib import sha256
 from typing import Any
+from uuid import uuid4
+
+import duckdb
+
+from dojo.database import Database, json_dumps
+from dojo.sql import load_sql
+
+SUPPORTED_ENTITY_CLASSES = frozenset({"BUDGET", "INVESTMENT", "LOAN", "TRACKING", "TANGIBLE_ASSET"})
 
 
 @dataclass(frozen=True)
@@ -23,6 +32,29 @@ class LocalRecord:
     source_record_id: str | None = None
 
 
+SOURCE_COMPARABLE_TRANSACTION_FIELDS = ("account_id", "date", "amount_minor", "status")
+
+
+@dataclass(frozen=True, slots=True)
+class TransactionWorkingSetItem:
+    """One logical transaction comparison against an explicitly selected baseline."""
+
+    transaction_id: str
+    classification: str
+    baseline: Mapping[str, Any] | None
+    current: Mapping[str, Any] | None
+    changed_fields: tuple[str, ...] = ()
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "transaction_id": self.transaction_id,
+            "classification": self.classification,
+            "baseline": dict(self.baseline) if self.baseline is not None else None,
+            "current": dict(self.current) if self.current is not None else None,
+            "changed_fields": list(self.changed_fields),
+        }
+
+
 @dataclass(frozen=True)
 class SourceRecord:
     source_record_id: str
@@ -32,6 +64,448 @@ class SourceRecord:
     description: str = ""
     cleared_date: date | None = None
     transaction_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class NormalizedEvidence:
+    """Provider-neutral evidence that can be reconstructed without its adapter."""
+
+    entity_id: str
+    entity_class: str
+    evidence_kind: str
+    source_adapter: str
+    source_as_of: datetime
+    normalized_payload: Mapping[str, Any]
+    records: tuple[Mapping[str, Any], ...] = ()
+    evidence_id: str = field(default_factory=lambda: str(uuid4()))
+
+
+class ReconciliationRepository:
+    """Shared persistence boundary for immutable reconciliation history."""
+
+    def __init__(self, database: Database) -> None:
+        self.database = database
+
+    def create_commit(
+        self,
+        *,
+        entity_id: str,
+        entity_class: str,
+        evidence: NormalizedEvidence | Mapping[str, Any],
+        committed_at: datetime,
+        baseline_digest: str | None = None,
+        baseline_refs: Sequence[Mapping[str, Any]] = (),
+        reconciliation_id: str | None = None,
+        created_by_user_id: str | None = None,
+        connection: duckdb.DuckDBPyConnection | None = None,
+    ) -> dict[str, Any]:
+        normalized_entity_id = str(entity_id)
+        self._validate_entity_class(entity_class)
+        committed_at = _require_aware_datetime(committed_at, "committed_at")
+        normalized_evidence = self._normalize_evidence(
+            evidence,
+            entity_id=normalized_entity_id,
+            entity_class=entity_class,
+        )
+        refs = tuple(dict(ref) for ref in baseline_refs)
+        self._validate_baseline_refs(refs, normalized_entity_id)
+        commit_id = reconciliation_id or str(uuid4())
+        digest = baseline_digest or _baseline_reference_digest(refs)
+
+        if connection is not None:
+            return self._create_commit(
+                connection,
+                normalized_entity_id,
+                entity_class,
+                normalized_evidence,
+                committed_at,
+                digest,
+                refs,
+                commit_id,
+                created_by_user_id,
+            )
+        with self.database.transaction() as transaction:
+            return self._create_commit(
+                transaction,
+                normalized_entity_id,
+                entity_class,
+                normalized_evidence,
+                committed_at,
+                digest,
+                refs,
+                commit_id,
+                created_by_user_id,
+            )
+
+    def read_evidence(self, evidence_id: str) -> dict[str, Any]:
+        row = self.database.fetch_one(
+            load_sql("queries/reconciliation_evidence_by_id"), (evidence_id,)
+        )
+        if row is None:
+            raise ValueError("Reconciliation evidence not found")
+        return self._evidence_result(
+            row,
+            self.database.fetch_all(
+                load_sql("queries/reconciliation_evidence_records_by_id"), (evidence_id,)
+            ),
+        )
+
+    def read_commit(self, reconciliation_id: str) -> dict[str, Any]:
+        row = self.database.fetch_one(
+            load_sql("queries/reconciliation_commit_by_id"), (reconciliation_id,)
+        )
+        if row is None:
+            raise ValueError("Reconciliation commit not found")
+        evidence = self.read_evidence(str(row["evidence_id"]))
+        return row | {"source_as_of": evidence["source_as_of"], "evidence": evidence}
+
+    def list_commits(self, entity_id: str) -> list[dict[str, Any]]:
+        return self.database.fetch_all(
+            load_sql("queries/reconciliation_commits_by_entity"), (entity_id,)
+        )
+
+    def list_history(self, entity_id: str) -> list[dict[str, Any]]:
+        return self.database.fetch_all(
+            load_sql("queries/reconciliation_history_by_entity"), (entity_id,)
+        )
+
+    def void_commit(
+        self,
+        *,
+        reconciliation_id: str,
+        entity_id: str,
+        entity_class: str,
+        recorded_at: datetime,
+        reason: str | None = None,
+        metadata: Mapping[str, Any] | None = None,
+        connection: duckdb.DuckDBPyConnection | None = None,
+    ) -> dict[str, Any]:
+        self._validate_entity_class(entity_class)
+        recorded_at = _require_aware_datetime(recorded_at, "recorded_at")
+        if connection is not None:
+            return self._void_commit(
+                connection,
+                reconciliation_id=reconciliation_id,
+                entity_id=entity_id,
+                entity_class=entity_class,
+                recorded_at=recorded_at,
+                reason=reason,
+                metadata=metadata,
+            )
+        with self.database.transaction() as transaction:
+            result = self._void_commit(
+                transaction,
+                reconciliation_id=reconciliation_id,
+                entity_id=entity_id,
+                entity_class=entity_class,
+                recorded_at=recorded_at,
+                reason=reason,
+                metadata=metadata,
+            )
+        return result
+
+    def _void_commit(
+        self,
+        connection: duckdb.DuckDBPyConnection,
+        *,
+        reconciliation_id: str,
+        entity_id: str,
+        entity_class: str,
+        recorded_at: datetime,
+        reason: str | None,
+        metadata: Mapping[str, Any] | None,
+    ) -> dict[str, Any]:
+        commit_cursor = connection.execute(
+            load_sql("queries/reconciliation_commit_by_id"), (reconciliation_id,)
+        )
+        commit_row = _cursor_row(commit_cursor)
+        if commit_row is None:
+            raise ValueError("Reconciliation commit not found")
+        if str(commit_row["entity_id"]) != str(entity_id):
+            raise ValueError("Reconciliation commit entity does not match the void record")
+        if str(commit_row["entity_class"]) != entity_class:
+            raise ValueError("Reconciliation commit entity class does not match the void record")
+        history_id = str(uuid4())
+        connection.execute(
+            load_sql("queries/insert_reconciliation_history"),
+            (
+                history_id,
+                entity_id,
+                entity_class,
+                "VOID",
+                reconciliation_id,
+                recorded_at,
+                reason,
+                json_dumps(metadata) if metadata is not None else None,
+            ),
+        )
+        return {
+            "history_id": history_id,
+            "entity_id": str(entity_id),
+            "entity_class": entity_class,
+            "event_type": "VOID",
+            "reconciliation_id": reconciliation_id,
+            "recorded_at": recorded_at,
+            "reason": reason,
+        }
+
+    def _create_commit(
+        self,
+        connection: duckdb.DuckDBPyConnection,
+        entity_id: str,
+        entity_class: str,
+        evidence: NormalizedEvidence,
+        committed_at: datetime,
+        baseline_digest: str,
+        baseline_refs: tuple[dict[str, Any], ...],
+        commit_id: str,
+        created_by_user_id: str | None,
+    ) -> dict[str, Any]:
+        existing_evidence = _cursor_row(
+            connection.execute(
+                load_sql("queries/reconciliation_evidence_by_id"), (evidence.evidence_id,)
+            )
+        )
+        if existing_evidence is None:
+            connection.execute(
+                load_sql("queries/insert_reconciliation_evidence"),
+                (
+                    evidence.evidence_id,
+                    entity_id,
+                    entity_class,
+                    evidence.evidence_kind,
+                    evidence.source_adapter,
+                    evidence.source_as_of,
+                    json_dumps(dict(evidence.normalized_payload)),
+                    _evidence_digest(evidence),
+                    committed_at,
+                    created_by_user_id,
+                ),
+            )
+            for ordinal, record in enumerate(evidence.records):
+                connection.execute(
+                    load_sql("queries/insert_reconciliation_evidence_record"),
+                    _record_parameters(evidence.evidence_id, ordinal, record),
+                )
+        elif (
+            str(existing_evidence["entity_id"]) != entity_id
+            or str(existing_evidence["entity_class"]) != entity_class
+            or str(existing_evidence["evidence_kind"]) != evidence.evidence_kind
+            or str(existing_evidence["source_adapter"]) != evidence.source_adapter
+            or existing_evidence["source_as_of"] != evidence.source_as_of
+            or str(existing_evidence["normalized_digest"]) != _evidence_digest(evidence)
+        ):
+            raise ValueError("Evidence linkage or immutable metadata does not match the commit")
+
+        connection.execute(
+            load_sql("queries/insert_reconciliation_commit"),
+            (
+                commit_id,
+                entity_id,
+                entity_class,
+                evidence.evidence_id,
+                baseline_digest,
+                committed_at,
+                created_by_user_id,
+            ),
+        )
+        history_id = str(uuid4())
+        connection.execute(
+            load_sql("queries/insert_reconciliation_history"),
+            (
+                history_id,
+                entity_id,
+                entity_class,
+                "COMMITTED",
+                commit_id,
+                committed_at,
+                None,
+                None,
+            ),
+        )
+        if baseline_refs:
+            connection.executemany(
+                load_sql("queries/insert_reconciliation_transaction_refs"),
+                [
+                    (
+                        commit_id,
+                        ref["transaction_id"],
+                        ref["valid_from"],
+                        ref.get("account_id", entity_id),
+                        ref.get("canonical_row_digest", ""),
+                    )
+                    for ref in baseline_refs
+                ],
+            )
+        return {
+            "reconciliation_id": commit_id,
+            "entity_id": entity_id,
+            "entity_class": entity_class,
+            "evidence_id": evidence.evidence_id,
+            "baseline_digest": baseline_digest,
+            "committed_at": committed_at,
+            "source_as_of": evidence.source_as_of,
+            "history_id": history_id,
+            "evidence": {
+                "evidence_id": evidence.evidence_id,
+                "entity_id": entity_id,
+                "entity_class": entity_class,
+                "evidence_kind": evidence.evidence_kind,
+                "source_adapter": evidence.source_adapter,
+                "source_as_of": evidence.source_as_of,
+                "normalized_payload": dict(evidence.normalized_payload),
+                "normalized_digest": _evidence_digest(evidence),
+                "records": [dict(record) for record in evidence.records],
+            },
+        }
+
+    @staticmethod
+    def _validate_entity_class(entity_class: str) -> None:
+        if entity_class not in SUPPORTED_ENTITY_CLASSES:
+            raise ValueError(f"Unsupported reconciliation entity class: {entity_class}")
+
+    def _normalize_evidence(
+        self,
+        evidence: NormalizedEvidence | Mapping[str, Any],
+        *,
+        entity_id: str,
+        entity_class: str,
+    ) -> NormalizedEvidence:
+        if isinstance(evidence, NormalizedEvidence):
+            normalized = evidence
+        else:
+            evidence_entity_id = str(evidence.get("entity_id", entity_id))
+            evidence_entity_class = str(evidence.get("entity_class", entity_class))
+            payload = evidence.get("normalized_payload", evidence.get("payload", {}))
+            records = evidence.get("records", ())
+            if (
+                not isinstance(payload, Mapping)
+                or not isinstance(records, Sequence)
+                or isinstance(records, (str, bytes, bytearray))
+                or not all(isinstance(record, Mapping) for record in records)
+            ):
+                raise ValueError("Normalized evidence payload and records must be structured")
+            normalized = NormalizedEvidence(
+                entity_id=evidence_entity_id,
+                entity_class=evidence_entity_class,
+                evidence_kind=str(evidence["evidence_kind"]),
+                source_adapter=str(evidence["source_adapter"]),
+                source_as_of=_require_aware_datetime(evidence["source_as_of"], "source_as_of"),
+                normalized_payload=payload,
+                records=tuple(records),
+                evidence_id=str(evidence.get("evidence_id") or uuid4()),
+            )
+        if normalized.entity_id != entity_id or normalized.entity_class != entity_class:
+            raise ValueError("Evidence entity linkage does not match the reconciliation commit")
+        self._validate_entity_class(normalized.entity_class)
+        return replace(
+            normalized,
+            source_as_of=_require_aware_datetime(normalized.source_as_of, "source_as_of"),
+        )
+
+    @staticmethod
+    def _validate_baseline_refs(refs: tuple[dict[str, Any], ...], entity_id: str) -> None:
+        for ref in refs:
+            if not {"transaction_id", "valid_from"} <= ref.keys():
+                raise ValueError("Baseline references require transaction_id and valid_from")
+            if ref.get("account_id", entity_id) != entity_id:
+                raise ValueError(
+                    "Baseline reference account does not match the reconciliation entity"
+                )
+
+    @staticmethod
+    def _evidence_result(row: dict[str, Any], records: list[dict[str, Any]]) -> dict[str, Any]:
+        payload = row["normalized_payload"]
+        if isinstance(payload, str):
+            payload = json.loads(payload)
+        normalized_records = []
+        for record in records:
+            record_payload = record["normalized_payload"]
+            if isinstance(record_payload, str):
+                record_payload = json.loads(record_payload)
+            normalized_records.append(record | {"normalized_payload": record_payload})
+        return row | {"normalized_payload": payload, "records": normalized_records}
+
+
+def resolve_effective_reconciliation(
+    commits: Sequence[Mapping[str, Any]], history: Sequence[Mapping[str, Any]]
+) -> dict[str, Any]:
+    """Resolve effective and latest-only undo state from immutable history."""
+
+    voided = {str(row["reconciliation_id"]) for row in history if row.get("event_type") == "VOID"}
+    effective = next(
+        (commit for commit in commits if str(commit["reconciliation_id"]) not in voided),
+        None,
+    )
+    latest = commits[0] if commits else None
+    undoable = (
+        latest if latest is not None and str(latest["reconciliation_id"]) not in voided else None
+    )
+    return {
+        "voided_reconciliation_ids": voided,
+        "effective_reconciliation": effective,
+        "last_reconciliation": latest,
+        "undoable_reconciliation": undoable,
+    }
+
+
+def _cursor_row(cursor: duckdb.DuckDBPyConnection) -> dict[str, Any] | None:
+    row = cursor.fetchone()
+    if row is None or cursor.description is None:
+        return None
+    return dict(zip([column[0] for column in cursor.description], row, strict=True))
+
+
+def _require_aware_datetime(value: Any, field_name: str) -> datetime:
+    if isinstance(value, str):
+        value = datetime.fromisoformat(value)
+    if not isinstance(value, datetime) or value.tzinfo is None:
+        raise ValueError(f"{field_name} must be timezone-aware")
+    return value.astimezone(timezone.utc)
+
+
+def _record_parameters(
+    evidence_id: str, ordinal: int, record: Mapping[str, Any]
+) -> tuple[Any, ...]:
+    payload = record.get("normalized_payload", dict(record))
+    if not isinstance(payload, Mapping):
+        raise ValueError("Normalized evidence records must be structured")
+    return (
+        evidence_id,
+        ordinal,
+        str(record["source_record_id"]) if record.get("source_record_id") is not None else None,
+        str(record["transaction_id"]) if record.get("transaction_id") is not None else None,
+        _date_value(record.get("posted_date")),
+        _date_value(record.get("cleared_date")),
+        record.get("signed_amount_minor"),
+        record.get("settlement_state", record.get("source_status")),
+        str(record.get("description", "")),
+        json_dumps(dict(payload)),
+        json_dumps(record.get("raw_payload")) if record.get("raw_payload") is not None else None,
+    )
+
+
+def _date_value(value: Any) -> date | None:
+    if isinstance(value, str):
+        return date.fromisoformat(value)
+    if value is None or isinstance(value, date):
+        return value
+    raise ValueError("Normalized evidence dates must be ISO dates")
+
+
+def _evidence_digest(evidence: NormalizedEvidence) -> str:
+    return sha256(
+        json_dumps(
+            {
+                "payload": dict(evidence.normalized_payload),
+                "records": [dict(record) for record in evidence.records],
+            }
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def _baseline_reference_digest(refs: Sequence[Mapping[str, Any]]) -> str:
+    return sha256(json_dumps([dict(ref) for ref in refs]).encode("utf-8")).hexdigest()
 
 
 def canonical_transaction(record: LocalRecord) -> str:
@@ -51,6 +525,155 @@ def canonical_transaction(record: LocalRecord) -> str:
 
 def transaction_digest(record: LocalRecord) -> str:
     return sha256(canonical_transaction(record).encode("utf-8")).hexdigest()
+
+
+def resolve_transaction_working_set(
+    baseline_refs: Sequence[Mapping[str, Any]],
+    baseline_versions: Sequence[Mapping[str, Any]],
+    current_versions: Sequence[Mapping[str, Any]],
+    historical_versions: Sequence[Mapping[str, Any]] = (),
+    *,
+    baseline_committed_at: datetime | None = None,
+) -> list[dict[str, Any]]:
+    """Resolve one logical working-set item per transaction lineage.
+
+    Baseline membership and exact versions are deliberately separate inputs. The
+    caller is responsible for selecting the baseline; this function only compares
+    that baseline with current canonical state and uses history to label restores.
+    """
+
+    baseline_by_id = {str(ref["transaction_id"]): dict(ref) for ref in baseline_refs}
+    baseline_version_by_id = {str(row["transaction_id"]): dict(row) for row in baseline_versions}
+    current_by_id = {str(row["transaction_id"]): dict(row) for row in current_versions}
+    history_by_id: dict[str, list[dict[str, Any]]] = {}
+    for row in historical_versions:
+        history_by_id.setdefault(str(row["transaction_id"]), []).append(dict(row))
+
+    items: list[TransactionWorkingSetItem] = []
+    for transaction_id in sorted(set(baseline_by_id) | set(current_by_id)):
+        baseline = baseline_version_by_id.get(transaction_id)
+        current = current_by_id.get(transaction_id)
+        in_baseline = transaction_id in baseline_by_id
+
+        if not in_baseline:
+            if current is None:
+                continue
+            classification = (
+                "RESTORED"
+                if _has_removed_lineage(
+                    current,
+                    history_by_id.get(transaction_id, ()),
+                    baseline_committed_at=baseline_committed_at,
+                )
+                else "NEW"
+            )
+            items.append(
+                TransactionWorkingSetItem(
+                    transaction_id=transaction_id,
+                    classification=classification,
+                    baseline=None,
+                    current=current,
+                )
+            )
+            continue
+
+        if current is None:
+            items.append(
+                TransactionWorkingSetItem(
+                    transaction_id=transaction_id,
+                    classification="REMOVED",
+                    baseline=baseline or baseline_by_id[transaction_id],
+                    current=None,
+                )
+            )
+            continue
+
+        if baseline is None:
+            raise ValueError(f"Baseline version not found for transaction {transaction_id}")
+
+        changed_fields = tuple(
+            field
+            for field in SOURCE_COMPARABLE_TRANSACTION_FIELDS
+            if baseline.get(field) != current.get(field)
+        )
+        if changed_fields:
+            classification = (
+                "PENDING_CLEARED"
+                if baseline.get("status") == "PENDING" and current.get("status") == "CLEARED"
+                else "EDITED"
+            )
+            items.append(
+                TransactionWorkingSetItem(
+                    transaction_id=transaction_id,
+                    classification=classification,
+                    baseline=baseline,
+                    current=current,
+                    changed_fields=changed_fields,
+                )
+            )
+        elif baseline.get("status") == "PENDING":
+            items.append(
+                TransactionWorkingSetItem(
+                    transaction_id=transaction_id,
+                    classification="CARRIED_PENDING",
+                    baseline=baseline,
+                    current=current,
+                )
+            )
+
+    return [item.as_dict() for item in sorted(items, key=_working_set_sort_key, reverse=True)]
+
+
+def _working_set_sort_key(item: TransactionWorkingSetItem) -> tuple[Any, ...]:
+    row = item.current or item.baseline or {}
+    return (
+        row.get("date") or date.min,
+        row.get("entry_order") or 0,
+        item.transaction_id,
+    )
+
+
+def _has_removed_lineage(
+    current: Mapping[str, Any],
+    historical_versions: Sequence[Mapping[str, Any]],
+    *,
+    baseline_committed_at: datetime | None,
+) -> bool:
+    """Identify a prior deletion without treating account moves as restores.
+
+    The selected baseline's commit timestamp is not a canonical transaction
+    lineage boundary. Baseline capture and commit timestamps are separate
+    facts, and a caller may provide a commit time later than the captured
+    state. Restoration is therefore determined only by the SCD gap.
+    """
+
+    del baseline_committed_at
+
+    versions_by_key = {_version_key(row): row for row in historical_versions}
+    versions_by_key[_version_key(current)] = current
+    versions = list(versions_by_key.values())
+    versions.sort(key=lambda row: _as_datetime(row.get("valid_from")))
+    for previous, following in zip(versions, versions[1:], strict=False):
+        following_valid_from = _as_datetime(following.get("valid_from"))
+        previous_valid_to = _as_datetime(previous.get("valid_to"))
+        if previous_valid_to < following_valid_from:
+            return True
+    return False
+
+
+def _version_key(row: Mapping[str, Any]) -> str:
+    row_id = row.get("row_id")
+    if row_id is not None:
+        return str(row_id)
+    return "|".join(str(row.get(field)) for field in ("transaction_id", "valid_from", "account_id"))
+
+
+def _as_datetime(value: Any) -> datetime:
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        return datetime.fromisoformat(value)
+    raise ValueError("Transaction version timestamps must be datetimes")
 
 
 def source_digest(record: SourceRecord) -> str:

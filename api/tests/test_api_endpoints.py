@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import base64
 import json
+from datetime import date
 from importlib import reload
 from urllib.parse import parse_qs, urlparse
+from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
@@ -27,6 +29,24 @@ def provisioned_main_module(monkeypatch, tmp_path, filename: str):
     get_settings.cache_clear()
     reload(main_module)
     return main_module
+
+
+def commit_api_budget_baseline(service, account_id: str) -> dict[str, object]:
+    now = service.clock.now()
+    return service.create_reconciliation_commit(
+        account_id,
+        {
+            "committed_at": now,
+            "evidence": {
+                "entity_id": account_id,
+                "entity_class": "BUDGET",
+                "evidence_kind": "LIVE_BALANCE",
+                "source_adapter": "manual",
+                "source_as_of": now,
+                "normalized_payload": {"cleared_minor": 100, "pending_minor": 0},
+            },
+        },
+    )
 
 
 def test_app_bootstrap_and_import_flow(monkeypatch, tmp_path) -> None:
@@ -1052,6 +1072,209 @@ def test_transaction_update_preserves_scd_history_and_derived_state(monkeypatch,
         )
         assert final["amount_minor"] == -5500
         assert final["memo"] == "Groceries adjusted"
+
+
+def test_transaction_update_protected_history_contract(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("SESSION_SECRET", "test-secret")
+    monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
+    monkeypatch.setenv(
+        "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
+    )
+    provisioned_main_module(monkeypatch, tmp_path, "reconciliation-api-test.duckdb")
+
+    with TestClient(main_module.app) as client:
+        account = client.post(
+            "/api/accounts",
+            json={
+                "name": "Checking",
+                "account_class": "BUDGET",
+                "budget_account_type": "DEPOSIT",
+                "display_liability_positive": False,
+            },
+        ).json()
+        transaction = client.post(
+            "/api/transactions",
+            json={
+                "date": "2026-02-01",
+                "account_id": account["account_id"],
+                "amount_minor": 100,
+                "system_category": "TX_AVAILABLE_TO_BUDGET",
+                "status": "CLEARED",
+            },
+        ).json()
+        service = main_module.app.state.dojo_service
+        baseline = commit_api_budget_baseline(service, account["account_id"])
+        current = client.get(
+            "/api/transactions", params={"show_hidden": "true", "limit": 10}
+        ).json()["items"]
+        current = next(
+            item for item in current if item["transaction_id"] == transaction["transaction_id"]
+        )
+        payload = {
+            "date": current["date"],
+            "account_id": current["account_id"],
+            "amount_minor": 125,
+            "category_id": current["category_id"],
+            "system_category": current["system_category"],
+            "status": current["status"],
+            "memo": current["memo"],
+            "expected_version": current["version"],
+        }
+
+        rejected = client.put(f"/api/transactions/{transaction['transaction_id']}", json=payload)
+
+        assert rejected.status_code == 409
+        detail = rejected.json()["detail"]
+        assert detail["code"] == "reconciled_history_change_requires_confirmation"
+        assert detail["affected_transaction_ids"] == [transaction["transaction_id"]]
+        assert detail["affected_account_ids"] == [account["account_id"]]
+        assert detail["reconciliation_ids"] == [baseline["reconciliation_id"]]
+        assert detail["affected"][0]["changed_fields"] == ["amount_minor"]
+        unchanged = client.get(
+            "/api/transactions", params={"show_hidden": "true", "limit": 10}
+        ).json()["items"]
+        assert (
+            next(
+                item
+                for item in unchanged
+                if item["transaction_id"] == transaction["transaction_id"]
+            )["amount_minor"]
+            == 100
+        )
+
+        acknowledged = client.put(
+            f"/api/transactions/{transaction['transaction_id']}",
+            json=payload | {"acknowledge_reconciled_history_change": True},
+        )
+        assert acknowledged.status_code == 200
+
+
+def test_transaction_delete_protected_history_contract(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("SESSION_SECRET", "test-secret")
+    monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
+    monkeypatch.setenv(
+        "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
+    )
+    provisioned_main_module(monkeypatch, tmp_path, "reconciliation-delete-api-test.duckdb")
+
+    with TestClient(main_module.app) as client:
+        account = client.post(
+            "/api/accounts",
+            json={
+                "name": "Checking",
+                "account_class": "BUDGET",
+                "budget_account_type": "DEPOSIT",
+                "display_liability_positive": False,
+            },
+        ).json()
+        transaction = client.post(
+            "/api/transactions",
+            json={
+                "date": "2026-02-01",
+                "account_id": account["account_id"],
+                "amount_minor": 100,
+                "system_category": "TX_AVAILABLE_TO_BUDGET",
+                "status": "CLEARED",
+            },
+        ).json()
+        service = main_module.app.state.dojo_service
+        baseline = commit_api_budget_baseline(service, account["account_id"])
+        current = client.get(
+            "/api/transactions", params={"show_hidden": "true", "limit": 10}
+        ).json()["items"]
+        current = next(
+            item for item in current if item["transaction_id"] == transaction["transaction_id"]
+        )
+
+        rejected = client.delete(
+            f"/api/transactions/{transaction['transaction_id']}",
+            params={"expected_version": current["version"]},
+        )
+
+        assert rejected.status_code == 409
+        detail = rejected.json()["detail"]
+        assert detail["code"] == "reconciled_history_change_requires_confirmation"
+        assert detail["affected_transaction_ids"] == [transaction["transaction_id"]]
+        assert detail["affected_account_ids"] == [account["account_id"]]
+        assert detail["reconciliation_ids"] == [baseline["reconciliation_id"]]
+        assert detail["affected"][0]["operation"] == "REMOVED"
+        assert any(
+            item["transaction_id"] == transaction["transaction_id"]
+            for item in client.get(
+                "/api/transactions", params={"show_hidden": "true", "limit": 10}
+            ).json()["items"]
+        )
+
+        acknowledged = client.delete(
+            f"/api/transactions/{transaction['transaction_id']}",
+            params={
+                "expected_version": current["version"],
+                "acknowledge_reconciled_history_change": "true",
+            },
+        )
+        assert acknowledged.status_code == 200
+        assert acknowledged.json() == {"ok": True}
+
+
+def test_reconciliation_undo_endpoint_is_latest_only(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("SESSION_SECRET", "test-secret")
+    monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
+    monkeypatch.setenv(
+        "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
+    )
+    provisioned_main_module(monkeypatch, tmp_path, "reconciliation-undo-api-test.duckdb")
+
+    with TestClient(main_module.app) as client:
+        account = client.post(
+            "/api/accounts",
+            json={
+                "name": "Checking",
+                "account_class": "BUDGET",
+                "budget_account_type": "DEPOSIT",
+                "display_liability_positive": False,
+            },
+        ).json()
+        client.post(
+            "/api/transactions",
+            json={
+                "date": date(2026, 2, 1).isoformat(),
+                "account_id": account["account_id"],
+                "amount_minor": 100,
+                "system_category": "TX_AVAILABLE_TO_BUDGET",
+                "status": "CLEARED",
+            },
+        )
+        service = main_module.app.state.dojo_service
+        first = commit_api_budget_baseline(service, account["account_id"])
+        client.post(
+            "/api/transactions",
+            json={
+                "date": date(2026, 2, 2).isoformat(),
+                "account_id": account["account_id"],
+                "amount_minor": 25,
+                "system_category": "TX_AVAILABLE_TO_BUDGET",
+                "status": "CLEARED",
+            },
+        )
+        commit_api_budget_baseline(service, account["account_id"])
+
+        undone = client.post(
+            f"/api/accounts/{account['account_id']}/reconciliations/undo",
+            json={"client_operation_id": str(uuid4()), "reason": "Latest-only API test"},
+        )
+        assert undone.status_code == 200
+        assert undone.json()["effective_reconciliation_id"] == first["reconciliation_id"]
+        assert undone.json()["undo"]["available"] is False
+
+        unavailable = client.post(
+            f"/api/accounts/{account['account_id']}/reconciliations/undo",
+            json={"client_operation_id": str(uuid4())},
+        )
+        assert unavailable.status_code == 409
+        assert unavailable.json()["detail"] == {
+            "code": "reconciliation_undo_unavailable",
+            "message": "No reconciliation is currently eligible for undo.",
+        }
 
 
 def test_reviewed_import_requires_complete_decisions(monkeypatch, tmp_path) -> None:

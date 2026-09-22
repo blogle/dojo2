@@ -1,0 +1,2 @@
+ALTER TABLE reconciliation_commits RENAME TO reconciliation_commits_legacy;
+ALTER TABLE reconciliation_source_records RENAME TO reconciliation_source_records_legacy;

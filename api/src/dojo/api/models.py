@@ -155,6 +155,7 @@ class TransactionPayload(BaseModel):
 
 class TransactionUpdatePayload(TransactionPayload):
     expected_version: UUID
+    acknowledge_reconciled_history_change: bool = False
 
 
 class TransferPayload(BaseModel):
@@ -477,4 +478,8 @@ class ReconciliationDraftPayload(BaseModel):
 
 class ReconciliationApplyPayload(BaseModel):
     client_operation_id: UUID
-    balance_adjustment_minor: int | None = None
+
+
+class ReconciliationUndoPayload(BaseModel):
+    client_operation_id: UUID
+    reason: str | None = None

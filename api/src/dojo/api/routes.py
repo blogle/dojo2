@@ -37,6 +37,7 @@ from dojo.api.models import (
     MoveAllocationRequest,
     ReconciliationApplyPayload,
     ReconciliationDraftPayload,
+    ReconciliationUndoPayload,
     TangibleAssetValuationPayload,
     TrackingAccountSnapshotPayload,
     TrackingCutoverPayload,
@@ -74,6 +75,8 @@ from dojo.google import (
 from dojo.importer import consumed_named_range_aliases, extract_sheet_id
 from dojo.service import (
     DojoService,
+    ReconciledHistoryChangeConfirmationRequired,
+    ReconciliationUndoUnavailableError,
     TransactionNotFoundError,
     TransactionVersionConflictError,
 )
@@ -669,6 +672,8 @@ def update_transaction(
                 "message": "This transaction changed after it was loaded.",
             },
         ) from exc
+    except ReconciledHistoryChangeConfirmationRequired as exc:
+        raise HTTPException(status_code=409, detail=exc.as_detail()) from exc
     except TransactionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
@@ -681,9 +686,14 @@ def delete_transaction(
     transaction_id: str,
     *,
     expected_version: Annotated[UUID, Query()],
+    acknowledge_reconciled_history_change: bool = False,
 ) -> dict[str, Any]:
     try:
-        get_service(request).delete_transaction(transaction_id, str(expected_version))
+        get_service(request).delete_transaction(
+            transaction_id,
+            str(expected_version),
+            acknowledge_reconciled_history_change=acknowledge_reconciled_history_change,
+        )
     except TransactionVersionConflictError as exc:
         raise HTTPException(
             status_code=409,
@@ -692,6 +702,8 @@ def delete_transaction(
                 "message": "This transaction changed after it was loaded.",
             },
         ) from exc
+    except ReconciledHistoryChangeConfirmationRequired as exc:
+        raise HTTPException(status_code=409, detail=exc.as_detail()) from exc
     except TransactionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
@@ -829,7 +841,29 @@ def apply_reconciliation(
 
 @router.get("/accounts/{account_id}/reconciliations")
 def list_reconciliations(request: Request, account_id: str) -> dict[str, Any]:
-    return {"items": get_service(request).list_reconciliations(account_id)}
+    service = get_service(request)
+    return {
+        "items": service.list_reconciliations(account_id),
+        "history": service.reconciliation_history(account_id),
+    }
+
+
+@router.post("/accounts/{account_id}/reconciliations/undo")
+def undo_last_reconciliation(
+    request: Request, account_id: str, payload: ReconciliationUndoPayload
+) -> dict[str, Any]:
+    try:
+        return get_service(request).undo_last_reconciliation(account_id, payload.model_dump())
+    except ReconciliationUndoUnavailableError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": exc.code,
+                "message": "No reconciliation is currently eligible for undo.",
+            },
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/accounts/{account_id}/reconciliation-working-set")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from datetime import date, datetime, timedelta
 from hashlib import sha256
@@ -60,9 +61,13 @@ from dojo.loan_projection import LoanProjectionTerms, PaymentFrequency, project_
 from dojo.operations import create_transaction_operation, link_transaction_operation
 from dojo.reconciliation import (
     LocalRecord,
+    NormalizedEvidence,
+    ReconciliationRepository,
     SourceRecord,
     baseline_digest,
     compare_records,
+    resolve_effective_reconciliation,
+    resolve_transaction_working_set,
     source_digest,
     transaction_digest,
 )
@@ -91,6 +96,42 @@ class TransactionVersionConflictError(ValueError):
     pass
 
 
+class ReconciledHistoryChangeConfirmationRequired(ValueError):
+    """A first protected divergence needs an explicit caller acknowledgment."""
+
+    code = "reconciled_history_change_requires_confirmation"
+
+    def __init__(self, affected: Sequence[Mapping[str, Any]]) -> None:
+        self.affected = [dict(item) for item in affected]
+        super().__init__(self.code)
+
+    def as_detail(self) -> dict[str, Any]:
+        affected = [
+            item
+            | {
+                "committed_at": item["committed_at"].isoformat()
+                if isinstance(item.get("committed_at"), datetime)
+                else item.get("committed_at")
+            }
+            for item in self.affected
+        ]
+        return {
+            "code": self.code,
+            "message": "This change affects reconciled history and requires confirmation.",
+            "affected": affected,
+            "affected_transaction_ids": [item["transaction_id"] for item in affected],
+            "affected_account_ids": sorted({item["account_id"] for item in affected}),
+            "reconciliation_ids": sorted({item["reconciliation_id"] for item in affected}),
+        }
+
+
+class ReconciliationUndoUnavailableError(ValueError):
+    code = "reconciliation_undo_unavailable"
+
+    def __init__(self) -> None:
+        super().__init__(self.code)
+
+
 _TREND_DAYS = {"7d": 7, "1m": 31, "3m": 93, "6m": 186, "1y": 366, "all": 36500}
 _TREND_BUCKET = {"7d": "day", "1m": "day", "3m": "day", "6m": "week", "1y": "week", "all": "month"}
 
@@ -110,6 +151,8 @@ class DojoService:
         else:
             self.db = database
         self.clock = clock or SystemClock()
+        self.reconciliation_repository = ReconciliationRepository(self.db)
+        self._reconciliation_attempts: dict[str, dict[str, Any]] = {}
         self._assert_schema_ready()
         self._ensure_system_rows()
 
@@ -3065,13 +3108,36 @@ class DojoService:
                     strict=True,
                 )
             )
+            if str(current["row_id"]) != str(payload["expected_version"]):
+                raise TransactionVersionConflictError("Transaction version conflict")
+            mutation_at = max(
+                now,
+                current["valid_from"] + timedelta(microseconds=1),
+            )
+            proposed = current | {
+                "date": payload["date"],
+                "account_id": payload["account_id"],
+                "amount_minor": payload["amount_minor"],
+                "status": payload["status"],
+            }
+            self._require_reconciled_history_acknowledgment(
+                connection,
+                [
+                    {
+                        "transaction_id": transaction_id,
+                        "current": current,
+                        "proposed": proposed,
+                    }
+                ],
+                acknowledged=bool(payload.get("acknowledge_reconciled_history_change", False)),
+            )
             if not close_current_version_if_expected(
                 connection,
                 "transactions",
                 "transaction_id",
                 transaction_id,
                 str(payload["expected_version"]),
-                now=now,
+                now=mutation_at,
             ):
                 raise TransactionVersionConflictError("Transaction version conflict")
             version = insert_version(
@@ -3091,7 +3157,7 @@ class DojoService:
                     "record_order": current.get("record_order"),
                     "created_at": current["created_at"],
                     "created_by_user_id": None,
-                    "valid_from": now,
+                    "valid_from": mutation_at,
                     "valid_to": MAX_TS,
                 },
             )
@@ -3101,26 +3167,51 @@ class DojoService:
                 category_id=payload.get("category_id"),
                 transaction_date=payload["date"],
                 explicit_loan_account_id=payload.get("loan_account_id"),
-                now=now,
+                now=mutation_at,
             )
         return {"transaction_id": transaction_id, "version": version}
 
-    def delete_transaction(self, transaction_id: str, expected_version: str) -> None:
+    def delete_transaction(
+        self,
+        transaction_id: str,
+        expected_version: str,
+        *,
+        acknowledge_reconciled_history_change: bool = False,
+    ) -> None:
         now = self.clock.now()
         with self.db.transaction() as connection:
-            current = connection.execute(
+            cursor = connection.execute(
                 load_sql("queries/current_transaction_by_id"),
                 (transaction_id,),
-            ).fetchone()
-            if current is None:
+            )
+            current_row = cursor.fetchone()
+            if current_row is None or cursor.description is None:
                 raise TransactionNotFoundError("Transaction not found")
+            current = dict(
+                zip(
+                    [column[0] for column in cursor.description],
+                    current_row,
+                    strict=True,
+                )
+            )
+            if str(current["row_id"]) != str(expected_version):
+                raise TransactionVersionConflictError("Transaction version conflict")
+            deletion_at = max(
+                now,
+                current["valid_from"] + timedelta(microseconds=1),
+            )
+            self._require_reconciled_history_acknowledgment(
+                connection,
+                [{"transaction_id": transaction_id, "current": current, "proposed": None}],
+                acknowledged=acknowledge_reconciled_history_change,
+            )
             if not close_current_version_if_expected(
                 connection,
                 "transactions",
                 "transaction_id",
                 transaction_id,
                 expected_version,
-                now=now,
+                now=deletion_at,
             ):
                 raise TransactionVersionConflictError("Transaction version conflict")
 
@@ -3150,6 +3241,10 @@ class DojoService:
                 raise ValueError("Transaction not found or not deleted")
 
             latest_closed = rows[0]
+            restore_at = max(
+                now,
+                latest_closed["valid_to"] + timedelta(microseconds=1),
+            )
             version = insert_version(
                 connection,
                 "transactions",
@@ -3164,7 +3259,7 @@ class DojoService:
                     "memo": latest_closed["memo"],
                     "entry_order": latest_closed["entry_order"],
                     "record_order": latest_closed.get("record_order"),
-                    "valid_from": now,
+                    "valid_from": restore_at,
                     "valid_to": MAX_TS,
                     "created_at": latest_closed["created_at"],
                     "created_by_user_id": latest_closed["created_by_user_id"],
@@ -4037,7 +4132,7 @@ class DojoService:
     ) -> dict[str, Any]:
         account = self._require_account(account_id)
         if account["account_class"] not in {ACCOUNT_CLASS_BUDGET, ACCOUNT_CLASS_INVESTMENT}:
-            raise ValueError("Only budget and investment accounts can be reconciled")
+            raise ValueError("Only budget and investment accounts can use the legacy attempt API")
         cutoff = payload["cutoff"]
         if isinstance(cutoff, str):
             cutoff = date.fromisoformat(cutoff)
@@ -4086,52 +4181,34 @@ class DojoService:
             if account.get("budget_account_type") == BUDGET_ACCOUNT_TYPE_CREDIT_CARD
             else int(payload["source_ending_value_minor"])
         )
-        reconciliation_id = str(uuid4())
-        now = self.clock.now()
-        with self.db.transaction() as connection:
-            connection.execute(
-                load_sql("queries/insert_reconciliation_commit"),
-                (
-                    reconciliation_id,
-                    account_id,
-                    account["account_class"],
-                    source_kind,
-                    period_start,
-                    cutoff,
-                    cutoff,
-                    evidence_id,
-                    evidence_digest,
-                    digest,
-                    ending_value,
-                    now,
-                ),
-            )
-            for ordinal, item in enumerate(payload.get("source_records", [])):
-                record = source_records[ordinal]
-                connection.execute(
-                    load_sql("queries/insert_reconciliation_source_record"),
-                    (
-                        evidence_id,
-                        record.source_record_id,
-                        record.transaction_id,
-                        ordinal,
-                        account_id,
-                        record.posted_date,
-                        record.cleared_date,
-                        record.signed_amount_minor,
-                        record.status,
-                        record.description,
-                        source_digest(record),
-                        json_dumps(item.get("raw_payload")),
-                    ),
-                )
+        reconciliation_attempt_id = str(uuid4())
+        source_as_of = payload.get("source_as_of", self.clock.now())
+        if isinstance(source_as_of, str):
+            source_as_of = datetime.fromisoformat(source_as_of)
+        self._reconciliation_attempts[reconciliation_attempt_id] = {
+            "account_id": account_id,
+            "account_class": account["account_class"],
+            "source_kind": source_kind,
+            "source_adapter": payload.get("source_adapter", "manual"),
+            "source_as_of": source_as_of,
+            "period_start": period_start,
+            "cutoff": cutoff,
+            "source_records": source_records,
+            "source_payload_records": payload.get("source_records", []),
+            "evidence_id": evidence_id,
+            "evidence_digest": evidence_digest,
+            "baseline_digest": digest,
+            "source_ending_value_minor": ending_value,
+        }
         comparison = compare_records(period_records, source_records)
         return {
-            "reconciliation_id": reconciliation_id,
+            "reconciliation_id": reconciliation_attempt_id,
+            "reconciliation_attempt_id": reconciliation_attempt_id,
             "account_id": account_id,
-            "state": "DRAFT",
+            "state": "READY",
             "source_kind": source_kind,
             "cutoff": str(cutoff),
+            "source_as_of": source_as_of,
             "source_ending_value_minor": ending_value,
             "ledger_value_minor": local_balance,
             "difference_minor": ending_value - local_balance,
@@ -4147,102 +4224,79 @@ class DojoService:
     def apply_reconciliation(
         self, reconciliation_id: str, payload: dict[str, Any]
     ) -> dict[str, Any]:
-        draft = self.db.fetch_one(
-            load_sql("queries/reconciliation_commit_by_id"),
-            (reconciliation_id,),
-        )
-        if draft is None:
-            raise ValueError("Reconciliation not found")
-        account_id = str(draft["account_id"])
         request = {"reconciliation_id": reconciliation_id, **payload}
         now = self.clock.now()
 
         def apply(connection: Any, _fingerprint: str) -> dict[str, Any]:
-            if draft["state"] != "DRAFT":
-                raise ValueError("Reconciliation is no longer a draft")
-            cutoff = draft["effective_date"]
+            attempt = self._reconciliation_attempts.get(reconciliation_id)
+            if attempt is None:
+                raise ValueError("Reconciliation attempt not found or has expired")
+            account_id = str(attempt["account_id"])
+            cutoff = attempt["cutoff"]
             local_records = self._reconciliation_local_records(account_id, date.min, cutoff)
             current_digest = baseline_digest(
                 local_records,
                 account_id=account_id,
                 cutoff=cutoff,
-                source_evidence_id=str(draft["source_evidence_id"]),
-                source_evidence_digest=str(draft["source_evidence_digest"]),
+                source_evidence_id=str(attempt["evidence_id"]),
+                source_evidence_digest=str(attempt["evidence_digest"]),
                 settings_versions=self._reconciliation_settings_versions(account_id, cutoff),
             )
-            if current_digest != draft["baseline_digest"]:
-                raise ValueError("Reconciliation draft is stale; create a new draft")
+            if current_digest != attempt["baseline_digest"]:
+                raise ValueError("Reconciliation attempt is stale; create a new attempt")
             ledger_value = self._reconciliation_ending_value(
                 account_id=account_id,
-                account_class=str(draft["account_class"]),
+                account_class=str(attempt["account_class"]),
                 cutoff=cutoff,
                 ledger_records=local_records,
             )
-            difference = int(draft["source_ending_value_minor"]) - ledger_value
-            adjustment = payload.get("balance_adjustment_minor")
-            if adjustment is not None and draft["account_class"] == ACCOUNT_CLASS_INVESTMENT:
-                raise ValueError("Investment reconciliation cannot use a ledger balance adjustment")
-            if difference != 0 and adjustment != difference:
-                raise ValueError("Apply requires zero difference or an explicit balance adjustment")
-            adjustment_id = None
-            if adjustment is not None:
-                adjustment_id = str(uuid4())
-                insert_version(
-                    connection,
-                    "transactions",
-                    {
-                        "transaction_id": adjustment_id,
-                        "date": cutoff,
-                        "account_id": account_id,
-                        "amount_minor": int(adjustment),
-                        "category_id": None,
-                        "system_category": SYSTEM_CATEGORY_BALANCE_ADJUSTMENT,
-                        "status": "CLEARED",
-                        "memo": "Balance adjustment from reconciliation",
-                        "entry_order": int(
-                            connection.execute(load_sql("queries/max_entry_order")).fetchone()[0]
-                            or 0
-                        )
-                        + 1,
-                        "record_order": self._next_financial_event_order(connection),
-                        "valid_from": now,
-                        "valid_to": MAX_TS,
-                        "created_at": now,
-                        "created_by_user_id": None,
-                    },
-                )
-                local_records = self._reconciliation_local_records(account_id, date.min, cutoff)
-            committed_digest = baseline_digest(
-                local_records,
+            difference = int(attempt["source_ending_value_minor"]) - ledger_value
+            if difference != 0:
+                raise ValueError("Reconciliation requires a matching canonical balance")
+            evidence = NormalizedEvidence(
+                entity_id=account_id,
+                entity_class=str(attempt["account_class"]),
+                evidence_kind=str(attempt["source_kind"]),
+                source_adapter=str(attempt["source_adapter"]),
+                source_as_of=attempt["source_as_of"],
+                normalized_payload={
+                    "period_start": str(attempt["period_start"]),
+                    "period_end": str(attempt["cutoff"]),
+                    "source_ending_value_minor": attempt["source_ending_value_minor"],
+                },
+                records=tuple(
+                    self._normalized_source_record(
+                        record, attempt["source_payload_records"][ordinal]
+                    )
+                    for ordinal, record in enumerate(attempt["source_records"])
+                ),
+                evidence_id=str(attempt["evidence_id"]),
+            )
+            complete_records, complete_baseline_refs = self._capture_transaction_ledger_baseline(
+                connection,
+                account_id=account_id,
+            )
+            complete_baseline_digest = baseline_digest(
+                complete_records,
                 account_id=account_id,
                 cutoff=cutoff,
-                source_evidence_id=str(draft["source_evidence_id"]),
-                source_evidence_digest=str(draft["source_evidence_digest"]),
+                source_evidence_id=str(attempt["evidence_id"]),
+                source_evidence_digest=str(attempt["evidence_digest"]),
                 settings_versions=self._reconciliation_settings_versions(account_id, cutoff),
             )
-            connection.execute(
-                load_sql("queries/update_reconciliation_commit_baseline"),
-                (now, committed_digest, reconciliation_id),
+            result = self.reconciliation_repository.create_commit(
+                entity_id=account_id,
+                entity_class=str(attempt["account_class"]),
+                evidence=evidence,
+                committed_at=now,
+                baseline_digest=complete_baseline_digest,
+                baseline_refs=complete_baseline_refs,
+                reconciliation_id=reconciliation_id,
+                connection=connection,
             )
-            for record in local_records:
-                connection.execute(
-                    load_sql("queries/insert_reconciliation_transaction_ref"),
-                    (
-                        reconciliation_id,
-                        record.transaction_id,
-                        record.valid_from,
-                        account_id,
-                        transaction_digest(record),
-                    ),
-                )
-            return {
-                "reconciliation_id": reconciliation_id,
-                "state": "CURRENT",
-                "difference_minor": 0,
-                "balance_adjustment_transaction_id": adjustment_id,
-            }
+            return result | {"state": "SUCCESSFUL", "difference_minor": 0}
 
-        return execute_financial_command(
+        result = execute_financial_command(
             self.db,
             client_operation_id=payload["client_operation_id"],
             command_kind="RECONCILIATION_APPLY",
@@ -4250,63 +4304,480 @@ class DojoService:
             command=apply,
             now=now,
         )
+        return result
+
+    def create_reconciliation_commit(
+        self, entity_id: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        account = self._require_account(entity_id)
+        evidence = payload.get("evidence", payload)
+        if not isinstance(evidence, dict):
+            raise ValueError("Reconciliation evidence must be an object")
+        committed_at = payload.get("committed_at", self.clock.now())
+        entity_class = str(account["account_class"])
+        if entity_class != ACCOUNT_CLASS_BUDGET:
+            return self.reconciliation_repository.create_commit(
+                entity_id=entity_id,
+                entity_class=entity_class,
+                evidence=evidence,
+                committed_at=committed_at,
+                baseline_digest=payload.get("baseline_digest"),
+                baseline_refs=payload.get("baseline_refs", ()),
+                reconciliation_id=payload.get("reconciliation_id"),
+                created_by_user_id=payload.get("created_by_user_id"),
+            )
+
+        reconciliation_id = str(payload.get("reconciliation_id") or uuid4())
+        with self.db.transaction() as connection:
+            _complete_records, complete_baseline_refs = self._capture_transaction_ledger_baseline(
+                connection,
+                account_id=entity_id,
+            )
+            return self.reconciliation_repository.create_commit(
+                entity_id=entity_id,
+                entity_class=entity_class,
+                evidence=evidence,
+                committed_at=committed_at,
+                baseline_digest=self._baseline_reference_digest(complete_baseline_refs),
+                baseline_refs=complete_baseline_refs,
+                reconciliation_id=reconciliation_id,
+                created_by_user_id=payload.get("created_by_user_id"),
+                connection=connection,
+            )
+
+    @staticmethod
+    def _baseline_reference_digest(refs: tuple[dict[str, Any], ...]) -> str:
+        return sha256(json_dumps([dict(ref) for ref in refs]).encode()).hexdigest()
+
+    def void_reconciliation_commit(
+        self, entity_id: str, reconciliation_id: str, payload: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        state = self._reconciliation_state(entity_id)
+        undoable = state["undoable_reconciliation"]
+        if undoable is None or str(undoable["reconciliation_id"]) != str(reconciliation_id):
+            raise ValueError("Only the latest successful reconciliation may be undone")
+        result = self.undo_last_reconciliation(entity_id, payload)
+        return cast(dict[str, Any], result["undo_record"])
+
+    def undo_last_reconciliation(
+        self, account_id: str, payload: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        account = self._require_account(account_id)
+        values = payload or {}
+        operation_id = str(values.get("client_operation_id") or uuid4())
+        request = {"account_id": account_id, **values}
+        now = self.clock.now()
+
+        def undo(connection: duckdb.DuckDBPyConnection, _fingerprint: str) -> dict[str, Any]:
+            state = self._reconciliation_state(account_id, connection=connection)
+            undoable = state["undoable_reconciliation"]
+            if undoable is None:
+                raise ReconciliationUndoUnavailableError()
+            void = self.reconciliation_repository.void_commit(
+                reconciliation_id=str(undoable["reconciliation_id"]),
+                entity_id=account_id,
+                entity_class=str(account["account_class"]),
+                recorded_at=values.get("recorded_at", now),
+                reason=values.get("reason"),
+                metadata=values.get("metadata"),
+                connection=connection,
+            )
+            return self._reconciliation_response(
+                account_id,
+                state=self._reconciliation_state(account_id, connection=connection),
+            ) | {"undo_record": void}
+
+        return execute_financial_command(
+            self.db,
+            client_operation_id=operation_id,
+            command_kind="RECONCILIATION_UNDO",
+            request=request,
+            command=undo,
+            now=now,
+        )
 
     def get_reconciliation(self, reconciliation_id: str) -> dict[str, Any]:
-        row = self.db.fetch_one(
-            load_sql("queries/reconciliation_commit_by_id"), (reconciliation_id,)
-        )
-        if row is None:
-            raise ValueError("Reconciliation not found")
-        records = self._source_records(str(row["source_evidence_id"]))
+        result = self.reconciliation_repository.read_commit(reconciliation_id)
+        evidence = result["evidence"]
+        source_records = self._source_records(str(evidence["evidence_id"]))
+        payload = evidence.get("normalized_payload", {})
+        if (
+            not isinstance(payload, dict)
+            or "period_start" not in payload
+            or "period_end" not in payload
+        ):
+            return result | {"source_records": source_records}
         local = self._reconciliation_local_records(
-            str(row["account_id"]), row["period_start"], row["period_end"]
+            str(result["entity_id"]),
+            date.fromisoformat(str(payload["period_start"])),
+            date.fromisoformat(str(payload["period_end"])),
         )
-        return row | {"source_records": records, "classifications": compare_records(local, records)}
+        return result | {
+            "source_records": source_records,
+            "classifications": compare_records(local, source_records),
+        }
 
     def list_reconciliations(self, account_id: str) -> list[dict[str, Any]]:
         self._require_account(account_id)
-        return self.db.fetch_all(
-            load_sql("queries/reconciliation_commits_by_account"),
-            (account_id,),
-        )
+        state = self._reconciliation_state(account_id)
+        voided = state["voided_reconciliation_ids"]
+        return [
+            commit | {"undone": str(commit["reconciliation_id"]) in voided}
+            for commit in state["commits"]
+        ]
+
+    def reconciliation_history(self, account_id: str) -> list[dict[str, Any]]:
+        self._require_account(account_id)
+        return self.reconciliation_repository.list_history(account_id)
 
     def reconciliation_working_set(self, account_id: str) -> dict[str, Any]:
         self._require_account(account_id)
-        latest = self.db.fetch_one(
-            load_sql("queries/latest_current_reconciliation_by_account"),
-            (account_id,),
+        return self._reconciliation_response(account_id)
+
+    def _selected_reconciliation_baseline(self, account_id: str) -> dict[str, Any] | None:
+        return cast(
+            dict[str, Any] | None,
+            self._reconciliation_state(account_id)["effective_reconciliation"],
         )
-        if latest is None:
-            return {"account_id": account_id, "state": "NOT_RECONCILED", "items": []}
-        local = self._reconciliation_local_records(
-            account_id, latest["period_start"], latest["period_end"]
-        )
-        source = self._source_records(str(latest["source_evidence_id"]))
+
+    def _reconciliation_state(
+        self,
+        account_id: str,
+        *,
+        connection: duckdb.DuckDBPyConnection | None = None,
+    ) -> dict[str, Any]:
+        """Resolve effective baseline and latest-only undo from immutable facts."""
+
+        if connection is None:
+            commits = self.reconciliation_repository.list_commits(account_id)
+            history = self.reconciliation_repository.list_history(account_id)
+        else:
+            commits = self._connection_rows(
+                connection,
+                load_sql("queries/reconciliation_commits_by_entity"),
+                (account_id,),
+            )
+            history = self._connection_rows(
+                connection,
+                load_sql("queries/reconciliation_history_by_entity"),
+                (account_id,),
+            )
+        resolved = resolve_effective_reconciliation(commits, history)
+        return {
+            "commits": commits,
+            "history": history,
+            **resolved,
+        }
+
+    def _reconciliation_response(
+        self,
+        account_id: str,
+        *,
+        state: dict[str, Any] | None = None,
+        connection: duckdb.DuckDBPyConnection | None = None,
+    ) -> dict[str, Any]:
+        state = state or self._reconciliation_state(account_id, connection=connection)
+        baseline = state["effective_reconciliation"]
+        if baseline is None:
+            items = self._resolve_reconciliation_working_set(account_id, connection=connection)
+        else:
+            items = self._resolve_reconciliation_working_set(
+                account_id,
+                reconciliation_id=str(baseline["reconciliation_id"]),
+                committed_at=baseline["committed_at"],
+                connection=connection,
+            )
+        attention = self._reconciliation_attention(items, baseline)
+        last = state["last_reconciliation"]
+        undoable = state["undoable_reconciliation"]
+        effective_summary = self._reconciliation_summary(baseline)
+        last_summary = self._reconciliation_summary(last)
         return {
             "account_id": account_id,
-            "state": self.get_reconciliation_status(account_id),
-            "items": compare_records(local, source),
+            # Kept for older callers; attention is the canonical response below.
+            "state": "CURRENT" if baseline is not None else "NOT_RECONCILED",
+            "never_reconciled": baseline is None,
+            "effective_reconciliation": effective_summary,
+            "effective_reconciliation_id": (
+                effective_summary["reconciliation_id"] if effective_summary else None
+            ),
+            "effective_committed_at": (
+                effective_summary["committed_at"] if effective_summary else None
+            ),
+            "last_reconciliation": last_summary,
+            "undo": {
+                "available": undoable is not None,
+                "reconciliation": self._reconciliation_summary(undoable),
+            },
+            "attention": attention,
+            "changes_since_count": attention["changes_since"],
+            "carried_pending_count": attention["carried_pending"],
+            "reconciled_history_changed_count": attention["reconciled_history_changed"],
+            "baseline_reconciliation_id": (
+                str(baseline["reconciliation_id"]) if baseline is not None else None
+            ),
+            "items": items,
+        }
+
+    @staticmethod
+    def _reconciliation_summary(commit: Mapping[str, Any] | None) -> dict[str, Any] | None:
+        if commit is None:
+            return None
+        committed_at = commit.get("committed_at")
+        return {
+            "reconciliation_id": str(commit["reconciliation_id"]),
+            "committed_at": committed_at,
+            "committed_date": committed_at.date().isoformat()
+            if isinstance(committed_at, datetime)
+            else str(committed_at)[:10],
+        }
+
+    @staticmethod
+    def _reconciliation_attention(
+        items: Sequence[Mapping[str, Any]], baseline: Mapping[str, Any] | None
+    ) -> dict[str, Any]:
+        changes_since = sum(item["classification"] != "CARRIED_PENDING" for item in items)
+        carried_pending = sum(
+            item.get("baseline") is not None
+            and item["baseline"].get("status") == "PENDING"
+            and item.get("current") is not None
+            and item["current"].get("status") == "PENDING"
+            for item in items
+        )
+        history_changed = sum(
+            item.get("baseline") is not None
+            and item["baseline"].get("status") == "CLEARED"
+            and (item.get("current") is None or bool(item.get("changed_fields")))
+            for item in items
+        )
+        return {
+            "last_reconciled": (
+                baseline["committed_at"].date().isoformat()
+                if baseline is not None and isinstance(baseline.get("committed_at"), datetime)
+                else None
+            ),
+            "changes_since": int(changes_since),
+            "carried_pending": int(carried_pending),
+            "reconciled_history_changed": int(history_changed),
+            "never_reconciled": baseline is None,
+            "changes_since_count": int(changes_since),
+            "carried_pending_count": int(carried_pending),
+            "reconciled_history_changed_count": int(history_changed),
+        }
+
+    @staticmethod
+    def _connection_rows(
+        connection: duckdb.DuckDBPyConnection,
+        query: str,
+        params: tuple[Any, ...] = (),
+    ) -> list[dict[str, Any]]:
+        cursor = connection.execute(query, params)
+        columns = [column[0] for column in cursor.description]
+        return [dict(zip(columns, row, strict=True)) for row in cursor.fetchall()]
+
+    def evaluate_reconciled_history_changes(
+        self, mutations: Sequence[Mapping[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Evaluate known existing transaction mutations as one batch."""
+
+        with self.db.transaction() as connection:
+            return self._evaluate_reconciled_history_changes(connection, mutations)
+
+    def _require_reconciled_history_acknowledgment(
+        self,
+        connection: duckdb.DuckDBPyConnection,
+        mutations: Sequence[Mapping[str, Any]],
+        *,
+        acknowledged: bool,
+    ) -> None:
+        affected = self._evaluate_reconciled_history_changes(connection, mutations)
+        if affected and not acknowledged:
+            raise ReconciledHistoryChangeConfirmationRequired(affected)
+
+    def _evaluate_reconciled_history_changes(
+        self,
+        connection: duckdb.DuckDBPyConnection,
+        mutations: Sequence[Mapping[str, Any]],
+    ) -> list[dict[str, Any]]:
+        missing_current_ids = [
+            str(mutation["transaction_id"])
+            for mutation in mutations
+            if mutation.get("current") is None
+        ]
+        current_rows = []
+        if missing_current_ids:
+            current_rows = self._connection_rows(
+                connection,
+                render_sql(
+                    "queries/current_transactions_by_ids",
+                    transaction_placeholders=",".join("?" for _ in missing_current_ids),
+                ),
+                tuple(missing_current_ids),
+            )
+        current_by_id = {str(row["transaction_id"]): row for row in current_rows}
+        normalized: list[dict[str, Any]] = []
+        for mutation in mutations:
+            transaction_id = str(mutation["transaction_id"])
+            current = mutation.get("current") or current_by_id.get(transaction_id)
+            if current is not None:
+                normalized.append(
+                    {
+                        "transaction_id": transaction_id,
+                        "current": current,
+                        "proposed": mutation.get("proposed"),
+                    }
+                )
+        if not normalized:
+            return []
+
+        states: dict[str, dict[str, Any]] = {}
+        baseline_rows_by_account: dict[str, dict[str, dict[str, Any]]] = {}
+        for mutation in normalized:
+            account_id = str(mutation["current"]["account_id"])
+            if account_id in states:
+                continue
+            state = self._reconciliation_state(account_id, connection=connection)
+            states[account_id] = state
+            baseline = state["effective_reconciliation"]
+            if baseline is None:
+                baseline_rows_by_account[account_id] = {}
+                continue
+            rows = self._connection_rows(
+                connection,
+                load_sql("queries/reconciliation_baseline_versions_by_commit"),
+                (str(baseline["reconciliation_id"]),),
+            )
+            baseline_rows_by_account[account_id] = {str(row["transaction_id"]): row for row in rows}
+
+        affected: list[dict[str, Any]] = []
+        for mutation in normalized:
+            current = mutation["current"]
+            account_id = str(current["account_id"])
+            state = states[account_id]
+            baseline = state["effective_reconciliation"]
+            baseline_row = baseline_rows_by_account[account_id].get(mutation["transaction_id"])
+            if baseline is None or baseline_row is None:
+                continue
+            if baseline_row.get("row_id") is None or str(baseline_row.get("status")) != "CLEARED":
+                continue
+            if not self._source_comparable_equal(current, baseline_row):
+                continue
+            proposed = mutation["proposed"]
+            changed_fields = [
+                field
+                for field in ("account_id", "date", "amount_minor", "status")
+                if proposed is None
+                or self._source_comparable_value(current.get(field), field)
+                != self._source_comparable_value(proposed.get(field), field)
+            ]
+            if not changed_fields:
+                continue
+            affected.append(
+                {
+                    "transaction_id": mutation["transaction_id"],
+                    "account_id": account_id,
+                    "reconciliation_id": str(baseline["reconciliation_id"]),
+                    "committed_at": baseline["committed_at"],
+                    "changed_fields": changed_fields,
+                    "operation": "REMOVED" if proposed is None else "UPDATED",
+                }
+            )
+        return affected
+
+    @staticmethod
+    def _source_comparable_equal(left: Mapping[str, Any], right: Mapping[str, Any]) -> bool:
+        return all(
+            DojoService._source_comparable_value(left.get(field), field)
+            == DojoService._source_comparable_value(right.get(field), field)
+            for field in ("account_id", "date", "amount_minor", "status")
+        )
+
+    @staticmethod
+    def _source_comparable_value(value: Any, field: str) -> Any:
+        return str(value) if field == "account_id" and value is not None else value
+
+    def _resolve_reconciliation_working_set(
+        self,
+        account_id: str,
+        *,
+        reconciliation_id: str | None = None,
+        committed_at: datetime | None = None,
+        connection: duckdb.DuckDBPyConnection | None = None,
+    ) -> list[dict[str, Any]]:
+        if connection is None:
+
+            def fetch_all(query: str, params: tuple[Any, ...]) -> list[dict[str, Any]]:
+                return self.db.fetch_all(query, params)
+        else:
+
+            def fetch_all(query: str, params: tuple[Any, ...]) -> list[dict[str, Any]]:
+                return self._connection_rows(connection, query, params)
+
+        baseline_rows = (
+            fetch_all(
+                load_sql("queries/reconciliation_baseline_versions_by_commit"), (reconciliation_id,)
+            )
+            if reconciliation_id is not None
+            else []
+        )
+        baseline_refs = [
+            {
+                "transaction_id": str(row["transaction_id"]),
+                "valid_from": row["baseline_valid_from"],
+                "account_id": str(row["baseline_account_id"]),
+                "canonical_row_digest": str(row["canonical_row_digest"]),
+            }
+            for row in baseline_rows
+        ]
+        baseline_versions = [
+            self._transaction_row_for_working_set(row)
+            for row in baseline_rows
+            if row.get("row_id") is not None
+        ]
+        current_versions = [
+            self._transaction_row_for_working_set(row)
+            for row in fetch_all(load_sql("queries/current_transactions_by_account"), (account_id,))
+        ]
+        historical_versions = fetch_all(
+            load_sql(
+                "queries/transaction_history_by_account"
+                if reconciliation_id is not None
+                else "queries/transaction_history_for_account"
+            ),
+            (reconciliation_id, account_id) if reconciliation_id is not None else (account_id,),
+        )
+        return resolve_transaction_working_set(
+            baseline_refs,
+            baseline_versions,
+            current_versions,
+            historical_versions,
+            baseline_committed_at=committed_at,
+        )
+
+    @staticmethod
+    def _transaction_row_for_working_set(row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "transaction_id": str(row["transaction_id"]),
+            "row_id": str(row["row_id"]),
+            "account_id": str(row["account_id"]),
+            "date": row["date"],
+            "amount_minor": int(row["amount_minor"]),
+            "category_id": str(row["category_id"]) if row.get("category_id") else None,
+            "system_category": row.get("system_category"),
+            "status": str(row["status"]),
+            "memo": str(row.get("memo") or ""),
+            "entry_order": row.get("entry_order"),
+            "record_order": row.get("record_order"),
+            "valid_from": row["valid_from"],
+            "valid_to": row["valid_to"],
+            "created_at": row["created_at"],
+            "created_by_user_id": row.get("created_by_user_id"),
         }
 
     def get_reconciliation_status(self, account_id: str) -> str:
-        latest = self.db.fetch_one(
-            load_sql("queries/latest_current_reconciliation_by_account"),
-            (account_id,),
-        )
-        if latest is None:
+        if self._reconciliation_state(account_id)["effective_reconciliation"] is None:
             return "NOT_RECONCILED"
-        local = self._reconciliation_local_records(account_id, date.min, latest["period_end"])
-        digest = baseline_digest(
-            local,
-            account_id=account_id,
-            cutoff=latest["effective_date"],
-            source_evidence_id=str(latest["source_evidence_id"]),
-            source_evidence_digest=str(latest["source_evidence_digest"]),
-            settings_versions=self._reconciliation_settings_versions(
-                account_id, latest["effective_date"]
-            ),
-        )
-        return "CURRENT" if digest == latest["baseline_digest"] else "REOPENED"
+        return "CURRENT"
 
     def _reconciliation_ending_value(
         self,
@@ -4332,21 +4803,49 @@ class DojoService:
             load_sql("queries/current_reconciliation_transactions_for_period"),
             (account_id, start, cutoff),
         )
-        return [
-            LocalRecord(
-                transaction_id=str(row["transaction_id"]),
-                valid_from=str(row["valid_from"]),
-                account_id=str(row["account_id"]),
-                posted_date=row["date"],
-                signed_amount_minor=int(row["amount_minor"]),
-                status=str(row["status"]),
-                category_id=str(row["category_id"]) if row.get("category_id") else None,
-                system_category=row.get("system_category"),
-                memo=str(row.get("memo") or ""),
-                source_record_id=None,
-            )
-            for row in rows
+        return [self._local_record_from_transaction_row(row) for row in rows]
+
+    def _capture_transaction_ledger_baseline(
+        self,
+        connection: duckdb.DuckDBPyConnection,
+        *,
+        account_id: str,
+    ) -> tuple[list[LocalRecord], tuple[dict[str, Any], ...]]:
+        """Capture every current logical transaction in one account-scoped read."""
+
+        cursor = connection.execute(
+            load_sql("queries/current_transactions_by_account"), (account_id,)
+        )
+        rows = [
+            dict(zip([column[0] for column in cursor.description], row, strict=True))
+            for row in cursor.fetchall()
         ]
+        records = [self._local_record_from_transaction_row(row) for row in rows]
+        refs = tuple(
+            {
+                "transaction_id": record.transaction_id,
+                "valid_from": record.valid_from,
+                "account_id": account_id,
+                "canonical_row_digest": transaction_digest(record),
+            }
+            for record in records
+        )
+        return records, refs
+
+    @staticmethod
+    def _local_record_from_transaction_row(row: dict[str, Any]) -> LocalRecord:
+        return LocalRecord(
+            transaction_id=str(row["transaction_id"]),
+            valid_from=str(row["valid_from"]),
+            account_id=str(row["account_id"]),
+            posted_date=row["date"],
+            signed_amount_minor=int(row["amount_minor"]),
+            status=str(row["status"]),
+            category_id=str(row["category_id"]) if row.get("category_id") else None,
+            system_category=row.get("system_category"),
+            memo=str(row.get("memo") or ""),
+            source_record_id=None,
+        )
 
     def _reconciliation_settings_versions(self, account_id: str, cutoff: date) -> list[str]:
         rows = self.db.fetch_all(
@@ -4372,19 +4871,41 @@ class DojoService:
     def _source_records(self, evidence_id: str) -> list[SourceRecord]:
         return [
             SourceRecord(
-                source_record_id=str(row["source_record_id"]),
+                source_record_id=str(row["source_record_id"] or row["ordinal"]),
                 posted_date=row["posted_date"],
                 cleared_date=row["cleared_date"],
-                signed_amount_minor=int(row["signed_amount_minor"]),
-                status=str(row["source_status"]),
+                signed_amount_minor=int(row["signed_amount_minor"] or 0),
+                status=str(row["settlement_state"]),
                 description=str(row["description"]),
                 transaction_id=(str(row["transaction_id"]) if row.get("transaction_id") else None),
             )
             for row in self.db.fetch_all(
-                load_sql("queries/reconciliation_source_records_by_evidence"),
+                load_sql("queries/reconciliation_evidence_records_by_id"),
                 (evidence_id,),
             )
         ]
+
+    @staticmethod
+    def _normalized_source_record(
+        record: SourceRecord, source_payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        return {
+            "source_record_id": record.source_record_id,
+            "transaction_id": record.transaction_id,
+            "posted_date": record.posted_date,
+            "cleared_date": record.cleared_date,
+            "signed_amount_minor": record.signed_amount_minor,
+            "settlement_state": record.status,
+            "description": record.description,
+            "normalized_payload": {
+                "posted_date": record.posted_date,
+                "cleared_date": record.cleared_date,
+                "signed_amount_minor": record.signed_amount_minor,
+                "settlement_state": record.status,
+                "description": record.description,
+            },
+            "raw_payload": source_payload.get("raw_payload"),
+        }
 
     def create_tracking_snapshot(self, account_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         self._require_account_class(account_id, ACCOUNT_CLASS_TRACKING)

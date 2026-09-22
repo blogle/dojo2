@@ -9,10 +9,29 @@ from dojo.sql import load_sql
 
 def apply_migrations(connection: duckdb.DuckDBPyConnection) -> None:
     connection.execute(load_sql("schema/current"))
+    _migrate_reconciliation_foundation(connection)
     _migrate_legacy_transaction_constraint(connection)
     _migrate_transaction_entry_order(connection)
     connection.execute(load_sql("schema/migrations/add_rich_account_fields"))
     connection.execute(load_sql("schema/migrations/add_backup_oauth_token"))
+
+
+def _migrate_reconciliation_foundation(connection: duckdb.DuckDBPyConnection) -> None:
+    columns = {
+        row[0]
+        for row in connection.execute(
+            load_sql("queries/duckdb_columns_by_table"), ("reconciliation_commits",)
+        ).fetchall()
+    }
+    if not columns or "entity_id" in columns:
+        return
+
+    legacy_tables = {
+        row[0] for row in connection.execute(load_sql("queries/duckdb_table_names")).fetchall()
+    }
+    if "reconciliation_commits_legacy" not in legacy_tables:
+        connection.execute(load_sql("schema/migrations/rename_legacy_reconciliation"))
+    connection.execute(load_sql("schema/migrations/reconciliation_foundation"))
 
 
 def provision_database(path: str) -> None:
