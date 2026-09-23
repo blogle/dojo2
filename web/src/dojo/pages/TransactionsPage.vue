@@ -10,6 +10,7 @@ import {
   fetchAccounts,
   fetchCategories,
   createTransaction,
+  createTransfer,
   updateTransaction,
   deleteTransaction,
   restoreTransaction,
@@ -245,15 +246,52 @@ function handleCommitEdit(
   );
 }
 
-function handleSubmit(payload: {
-  date: string;
-  account_id: string;
-  amount_minor: number;
-  category_id: string | null;
-  system_category: string | null;
-  status: "PENDING" | "CLEARED";
-  memo: string;
-}) {
+function handleSubmit(
+  payload:
+    | {
+        date: string;
+        account_id: string;
+        amount_minor: number;
+        category_id: string | null;
+        system_category: string | null;
+        status: "PENDING" | "CLEARED";
+        memo: string;
+      }
+    | {
+        kind: "transfer";
+        date: string;
+        from_account_id: string;
+        to_account_id: string;
+        amount_minor: number;
+        status: "PENDING" | "CLEARED";
+        memo: string;
+        counterparty_date: string;
+        counterparty_status: "PENDING" | "CLEARED";
+        counterparty_memo: string;
+      },
+) {
+  if ("kind" in payload) {
+    void createTransfer({
+      date: payload.date,
+      from_account_id: payload.from_account_id,
+      to_account_id: payload.to_account_id,
+      amount_minor: payload.amount_minor,
+      status: payload.status,
+      memo: payload.memo,
+      source_date: payload.date,
+      source_status: payload.status,
+      source_memo: payload.memo,
+      destination_date: payload.counterparty_date,
+      destination_status: payload.counterparty_status,
+      destination_memo: payload.counterparty_memo,
+    })
+      .then(() => {
+        entryForm.value?.resetForm();
+        invalidateRelatedQueries();
+      })
+      .catch(handleMutationError);
+    return;
+  }
   createMutation.mutate(payload);
 }
 

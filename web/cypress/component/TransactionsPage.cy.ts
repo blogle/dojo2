@@ -15,6 +15,8 @@ const router = createRouter({
 });
 
 const currentMonth = new Date().toISOString().slice(0, 7);
+const today = new Date();
+const currentDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
 
 const mockCategories = [
   {
@@ -109,9 +111,13 @@ const mockTransactions = [
   },
 ];
 
-function stubFetch() {
-  cy.stub(window, "fetch").callsFake((url: string) => {
+function stubFetch(
+  override?: (path: string, init?: RequestInit) => Response | undefined,
+) {
+  cy.stub(window, "fetch").callsFake((url: string, init?: RequestInit) => {
     const path = new URL(url, "http://localhost").pathname;
+    const overridden = override?.(path, init);
+    if (overridden) return Promise.resolve(overridden);
 
     if (path === "/api/bootstrap") {
       return Promise.resolve(
@@ -180,8 +186,10 @@ function stubFetch() {
   });
 }
 
-function mountPage() {
-  stubFetch();
+function mountPage(
+  override?: (path: string, init?: RequestInit) => Response | undefined,
+) {
+  stubFetch(override);
   const queryClient = createDojoQueryClient();
   return mount(TransactionsPage, {
     global: {
@@ -226,24 +234,110 @@ describe("TransactionsPage", () => {
     cy.get("[data-cy=transaction-filter-bar]").should("be.visible");
   });
 
-  it("offers investment accounts only for transfer entry", () => {
+  it("removes Entry type and offers compatible counterparty accounts in transfer mode", () => {
     mountPage();
     cy.get("[data-cy=transaction-entry-form]").within(() => {
+      cy.contains("label", "Entry type").should("not.exist");
+      cy.contains("button", "Transaction").should("be.visible");
+      cy.contains("button", "Transfer").click();
       cy.contains("label", "Account")
         .find("option")
         .should("contain.text", "Checking");
-      cy.contains("label", "Account")
+      cy.contains("label", "From account")
         .find("option")
         .should("not.contain.text", "Brokerage");
-      cy.contains("label", "Entry type")
-        .find("select")
-        .select("ACCOUNT_TRANSFER");
-      cy.contains("label", "Account")
+      cy.contains("label", "Counterparty")
         .find("option")
         .should("contain.text", "Brokerage");
-      cy.contains("label", "Account")
+      cy.contains("label", "Counterparty")
         .find("option")
         .should("not.contain.text", "Legacy Loan");
+      cy.contains("label", "Category").should("not.exist");
+    });
+  });
+
+  it("offers Available to budget as a category and submits its system semantic", () => {
+    let submitted: Record<string, unknown> | undefined;
+    mountPage((path, init) => {
+      if (path === "/api/transactions" && init?.method === "POST") {
+        submitted = JSON.parse(String(init.body)) as Record<string, unknown>;
+        return new Response("{}", {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return undefined;
+    });
+    cy.get("[data-cy=transaction-entry-form]").within(() => {
+      cy.contains("label", "Category")
+        .find("select")
+        .select("__available_to_budget__");
+      cy.contains("label", "Account").find("select").select("acc1");
+      cy.contains("label", "Amount").find("input").type("12");
+      cy.contains("label", "Memo").find("input").type("Budget adjustment");
+      cy.contains("button", "Add").click();
+    });
+    cy.wrap(null).should(() => {
+      expect(submitted).to.include({
+        account_id: "acc1",
+        category_id: null,
+        system_category: "TX_AVAILABLE_TO_BUDGET",
+      });
+    });
+  });
+
+  it("submits an atomic transfer with inherited counterparty details", () => {
+    let submitted: Record<string, unknown> | undefined;
+    mountPage((path, init) => {
+      if (path === "/api/transfers" && init?.method === "POST") {
+        submitted = JSON.parse(String(init.body)) as Record<string, unknown>;
+        return new Response("{}", {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return undefined;
+    });
+    cy.get("[data-cy=transaction-entry-form]").within(() => {
+      cy.contains("button", "Transfer").click();
+      cy.contains("label", "From account").find("select").select("acc1");
+      cy.contains("label", "Counterparty")
+        .find("select")
+        .select("investment-1");
+      cy.contains("label", "Amount").find("input").type("25");
+      cy.contains("label", "Status").find("select").select("CLEARED");
+      cy.contains("label", "Memo").find("input").type("Move funds");
+      cy.contains("button", "Counterparty details").click();
+      cy.contains("label", "Counterparty posted date")
+        .find("input")
+        .should("have.value", currentDate);
+      cy.contains("label", "Counterparty status")
+        .find("select")
+        .should("have.value", "CLEARED");
+      cy.contains("label", "Counterparty memo")
+        .find("input")
+        .should("have.value", "Move funds");
+      cy.contains("label", "Counterparty status")
+        .find("select")
+        .select("PENDING");
+      cy.contains("label", "Counterparty memo")
+        .find("input")
+        .clear()
+        .type("Investment contribution");
+      cy.contains("button", "Add").click();
+    });
+    cy.wrap(null).should(() => {
+      expect(submitted).to.include({
+        from_account_id: "acc1",
+        to_account_id: "investment-1",
+        amount_minor: 2500,
+        source_date: submitted?.date,
+        destination_date: submitted?.date,
+        source_status: "CLEARED",
+        destination_status: "PENDING",
+        source_memo: "Move funds",
+        destination_memo: "Investment contribution",
+      });
     });
   });
 

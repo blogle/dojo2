@@ -439,6 +439,12 @@ export async function createTransfer(payload: {
   amount_minor: number;
   status: "PENDING" | "CLEARED";
   memo: string;
+  source_date?: string;
+  source_status?: "PENDING" | "CLEARED";
+  source_memo?: string;
+  destination_date?: string;
+  destination_status?: "PENDING" | "CLEARED";
+  destination_memo?: string;
 }): Promise<void> {
   await request("/api/transfers", {
     method: "POST",

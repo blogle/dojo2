@@ -733,6 +733,12 @@ def create_transfer(request: Request, payload: TransferPayload) -> dict[str, Any
         transfer_date=payload.date,
         memo=payload.memo,
         status=payload.status,
+        source_date=payload.source_date,
+        source_status=payload.source_status,
+        source_memo=payload.source_memo,
+        destination_date=payload.destination_date,
+        destination_status=payload.destination_status,
+        destination_memo=payload.destination_memo,
     )
 
 
