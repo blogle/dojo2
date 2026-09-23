@@ -621,6 +621,7 @@ def test_investment_contribution_funds_linked_category_and_withdrawal_returns_at
         for group in transfer_component["groups"]
         if group["key"] == f"{investment_id}:{checking_id}"
     )
+    assert withdrawal_group["key"] == f"{investment_id}:{checking_id}"
     assert withdrawal_group["label"] == "Brokerage -> Checking"
     withdrawal_detail = service.explain_available_to_budget_records(
         month="2026-02",
@@ -837,6 +838,7 @@ def test_unmatched_linked_investment_transfers_use_effective_category_and_atb(
 
     assert service.compute_available_to_budget() == 10_000
     detail = transfer_explanation()
+    assert detail["group"]["key"] == f"{investment_id}:out"
     assert detail["group"]["label"] == "Brokerage (outflow)"
     assert sum(item["contribution_minor"] for item in detail["items"]) == 10_000
 
@@ -850,6 +852,7 @@ def test_unmatched_linked_investment_transfers_use_effective_category_and_atb(
     )
     assert service.compute_available_to_budget() == 10_000
     detail = transfer_explanation()
+    assert detail["group"]["key"] == f"{investment_id}:out"
     assert detail["group"]["label"] == "Brokerage (outflow)"
     assert sum(item["contribution_minor"] for item in detail["items"]) == 10_000
 
