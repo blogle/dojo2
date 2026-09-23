@@ -20,6 +20,8 @@ BUMP_TYPES = frozenset({"patch", "minor", "major", "none"})
 RELEASE_SECTION_PATTERN = re.compile(r"(?m)^## (v\d+\.\d+\.\d+) - \d{4}-\d{2}-\d{2}$")
 GENERATED_START = "<!-- BEGIN GENERATED RELEASES -->"
 GENERATED_END = "<!-- END GENERATED RELEASES -->"
+PR_ACKNOWLEDGEMENT = "PR title is suitable as a changelog/release-note entry, or this PR is marked [release:none]."
+PR_ACKNOWLEDGEMENT_PATTERN = re.compile(rf"(?m)^- \[[xX]\] {re.escape(PR_ACKNOWLEDGEMENT)}$")
 
 
 class ReleaseRecord(TypedDict):
@@ -137,6 +139,18 @@ def release_directive(title: str) -> str:
     return matches[0]
 
 
+def validate_pull_request(title: str, body: str) -> None:
+    """Validate the release-note acknowledgement in a pull request body."""
+    directive = release_directive(title)
+    if directive == "none":
+        return
+    if not PR_ACKNOWLEDGEMENT_PATTERN.search(body):
+        raise ValueError(
+            "Pull request body must contain the checked changelog acknowledgement: "
+            f"- [x] {PR_ACKNOWLEDGEMENT}"
+        )
+
+
 def bump_version(version: tuple[int, int, int], bump: str) -> tuple[int, int, int]:
     validate_bump(bump)
     major, minor, patch = version
@@ -169,6 +183,8 @@ def main() -> int:
     directive_parser.add_argument("title", nargs="?")
     sync_parser = subparsers.add_parser("sync-changelog")
     sync_parser.add_argument("path", type=Path)
+    validate_pr_parser = subparsers.add_parser("validate-pr")
+    validate_pr_parser.add_argument("event", type=Path)
     args = parser.parse_args()
 
     if args.command == "next-version":
@@ -176,8 +192,13 @@ def main() -> int:
     elif args.command == "directive":
         title = args.title if args.title is not None else sys.stdin.read()
         print(release_directive(title))
-    else:
+    elif args.command == "sync-changelog":
         _sync_changelog_file(args.path)
+    else:
+        event = json.loads(args.event.read_text(encoding="utf-8"))
+        pull_request = event["pull_request"]
+        validate_pull_request(pull_request["title"], pull_request.get("body") or "")
+        print("Pull request changelog acknowledgement is valid.")
     return 0
 
 
