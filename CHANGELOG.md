@@ -2,6 +2,15 @@
 
 <!-- BEGIN GENERATED RELEASES -->
 
+## v0.0.12 - 2026-09-23
+
+- DOJO-34: Correct ATB accounting semantics by @anvil-daemon[bot] in https://github.com/blogle/dojo2/pull/13
+
+## v0.0.11 - 2026-09-23
+
+- Automate changelog sync from published releases by @anvil-daemon[bot] in https://github.com/blogle/dojo2/pull/14
+- @anvil-daemon[bot] made their first contribution in https://github.com/blogle/dojo2/pull/14
+
 ## v0.0.10 - 2026-09-22
 
 - feat: add reconciliation undo and attention by @blogle in https://github.com/blogle/dojo2/pull/10
