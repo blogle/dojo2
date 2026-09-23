@@ -6,6 +6,7 @@ concurrency:
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, edited]
 
 permissions:
   contents: read
@@ -15,6 +16,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Validate changelog acknowledgement
+        if: github.event_name == 'pull_request'
+        run: python3 scripts/release.py validate-pr "$GITHUB_EVENT_PATH"
       - uses: DeterminateSystems/nix-installer-action@main
 
       - name: Install project dependencies
