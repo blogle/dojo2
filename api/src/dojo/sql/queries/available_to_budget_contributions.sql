@@ -1,4 +1,6 @@
-WITH operation_accounts AS (
+WITH effective_link_intervals AS (
+    {account_budget_link_effective_intervals}
+), operation_accounts AS (
     SELECT
         legs.transaction_id,
         CAST(legs.operation_id AS VARCHAR) AS operation_id,
@@ -75,13 +77,25 @@ transfer_facts AS (
         COALESCE(t.record_order, 0) AS record_order,
         t.amount_minor,
         CASE
-            WHEN a.account_class = 'BUDGET' THEN t.amount_minor
-            WHEN a.account_class = 'INVESTMENT' AND t.amount_minor > 0 THEN t.amount_minor
+            WHEN a.account_class = 'INVESTMENT'
+             AND investment_link.category_id IS NOT NULL
+             AND t.amount_minor < 0 THEN -t.amount_minor
             ELSE 0
         END AS contribution_minor
     FROM current_transactions AS t
     JOIN current_accounts AS a
       ON a.account_id = t.account_id
+    LEFT JOIN LATERAL (
+        SELECT link.category_id
+        FROM effective_link_intervals AS link
+        WHERE link.account_id = t.account_id
+        AND link.link_behavior = 'INVESTMENT_CONTRIBUTION'
+          AND link.derivation_method = 'TRANSFER_IN_ONLY'
+          AND link.effective_date <= t.date
+          AND (link.end_date IS NULL OR t.date < link.end_date)
+        ORDER BY link.effective_date DESC
+        LIMIT 1
+    ) AS investment_link ON TRUE
     WHERE t.system_category = 'TX_ACCOUNT_TRANSFER'
       AND a.account_class IN ('BUDGET', 'INVESTMENT')
       AND t.date <= ?
@@ -92,26 +106,26 @@ transfer_contributions AS (
         CASE
             WHEN oa.counterparty_account_id IS NOT NULL THEN
                 CASE
-                    WHEN tf.contribution_minor >= 0
+                    WHEN tf.amount_minor >= 0
                         THEN CONCAT(oa.counterparty_account_id, ':', tf.account_id)
                     ELSE CONCAT(tf.account_id, ':', oa.counterparty_account_id)
                 END
             ELSE CONCAT(
                 tf.account_id,
-                CASE WHEN tf.contribution_minor >= 0 THEN ':in' ELSE ':out' END
+                CASE WHEN tf.amount_minor >= 0 THEN ':in' ELSE ':out' END
             )
         END AS group_key,
         CASE
             WHEN oa.counterparty_account_id IS NOT NULL THEN
                 CASE
-                    WHEN tf.contribution_minor >= 0
+                    WHEN tf.amount_minor >= 0
                         THEN CONCAT(oa.counterparty_account_name, ' -> ', tf.account_name)
                     ELSE CONCAT(tf.account_name, ' -> ', oa.counterparty_account_name)
                 END
             ELSE CONCAT(
                 tf.account_name,
                 CASE
-                    WHEN tf.contribution_minor >= 0 THEN ' (inflow)' ELSE ' (outflow)'
+                    WHEN tf.amount_minor >= 0 THEN ' (inflow)' ELSE ' (outflow)'
                 END
             )
         END AS group_label,

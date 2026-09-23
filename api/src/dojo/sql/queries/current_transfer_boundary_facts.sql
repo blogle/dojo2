@@ -1,3 +1,6 @@
+WITH effective_link_intervals AS (
+    {account_budget_link_effective_intervals}
+)
 SELECT
     CAST(t.row_id AS VARCHAR) AS version,
     CAST(t.transaction_id AS VARCHAR) AS transaction_id,
@@ -10,7 +13,16 @@ SELECT
     t.status,
     t.memo,
     t.entry_order,
-    t.record_order
+    t.record_order,
+    EXISTS (
+        SELECT 1
+        FROM effective_link_intervals link
+        WHERE link.account_id = t.account_id
+          AND link.link_behavior = 'INVESTMENT_CONTRIBUTION'
+          AND link.derivation_method = 'TRANSFER_IN_ONLY'
+          AND link.effective_date <= t.date
+          AND (link.end_date IS NULL OR t.date < link.end_date)
+    ) AS has_effective_budget_link
 FROM current_transactions t
 JOIN current_accounts a ON a.account_id = t.account_id
 WHERE t.system_category = 'TX_ACCOUNT_TRANSFER'

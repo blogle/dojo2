@@ -2373,7 +2373,14 @@ class DojoService:
                 },
             )
 
-        transfer_rows = self.db.fetch_all(load_sql("queries/current_transfer_boundary_facts"))
+        transfer_rows = self.db.fetch_all(
+            render_sql(
+                "queries/current_transfer_boundary_facts",
+                account_budget_link_effective_intervals=load_sql(
+                    "queries/account_budget_link_effective_intervals"
+                ),
+            )
+        )
         transfer_ids = [str(row["transaction_id"]) for row in transfer_rows]
         if include_details and transfer_ids:
             placeholders = ",".join("?" for _ in transfer_ids)
@@ -2395,6 +2402,7 @@ class DojoService:
                 amount_minor=int(row["amount_minor"]),
                 effective_date=row["effective_date"],
                 status=str(row["status"]),
+                has_effective_budget_link=bool(row["has_effective_budget_link"]),
             )
             for row in transfer_rows
         ]
@@ -2554,9 +2562,18 @@ class DojoService:
         return self.db.fetch_all(
             render_sql(
                 "queries/available_to_budget_component_groups",
-                contributions_query=load_sql("queries/available_to_budget_contributions"),
+                contributions_query=self._available_to_budget_contributions_query(),
             ),
             (as_of,),
+        )
+
+    @staticmethod
+    def _available_to_budget_contributions_query() -> str:
+        return render_sql(
+            "queries/available_to_budget_contributions",
+            account_budget_link_effective_intervals=load_sql(
+                "queries/account_budget_link_effective_intervals"
+            ),
         )
 
     def _atb_component_groups(self, *, component_key: str, as_of: date) -> list[dict[str, Any]]:
@@ -2622,7 +2639,7 @@ class DojoService:
         group = next((item for item in groups if item["key"] == group_key), None)
         if group is None:
             raise ValueError("Available to budget group not found")
-        contributions_query = load_sql("queries/available_to_budget_contributions")
+        contributions_query = self._available_to_budget_contributions_query()
         stats = self.db.fetch_one(
             render_sql(
                 "queries/available_to_budget_component_record_stats",
@@ -3280,6 +3297,11 @@ class DojoService:
         if amount_minor <= 0:
             raise ValueError("Transfer amount must be positive")
         self._require_distinct_accounts(from_account_id, to_account_id)
+        if all(
+            self._require_account(account_id)["account_class"] == ACCOUNT_CLASS_INVESTMENT
+            for account_id in (from_account_id, to_account_id)
+        ):
+            raise ValueError("Investment-to-investment transfers are not supported")
         now = self.clock.now()
         with self.db.transaction() as connection:
             return self._insert_transfer(
