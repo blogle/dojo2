@@ -90,6 +90,10 @@ commits, the workflow uses the first non-empty line after `Merge pull request
 feature PRs; the changelog sync PR is the automated promotion path from
 published GitHub Releases.
 
+PR titles are the generated changelog/release-note entries. Normal releasing
+PRs must check the changelog acknowledgement in the pull request template;
+`[release:none]` PRs are exempt because they intentionally produce no release.
+
 For local inspection, pipe a commit title to `just release-directive`, or use
 `just release-next-version [patch|minor|major]`. Resolve workflow failures
 before retrying; do not force-move an existing release tag. For an existing tag

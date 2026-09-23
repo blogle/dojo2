@@ -66,6 +66,28 @@ def test_release_directive_rejects_invalid_titles(title: str) -> None:
         release.release_directive(title)
 
 
+def test_pull_request_acknowledgement_passes_when_checked() -> None:
+    release.validate_pull_request(
+        "feat: add forecasting",
+        "## Changelog\n\n- [x] " + release.PR_ACKNOWLEDGEMENT,
+    )
+
+
+@pytest.mark.parametrize("body", ["", "- [ ] " + release.PR_ACKNOWLEDGEMENT])
+def test_pull_request_acknowledgement_fails_when_missing_or_unchecked(body: str) -> None:
+    with pytest.raises(ValueError, match="checked changelog acknowledgement"):
+        release.validate_pull_request("feat: add forecasting", body)
+
+
+def test_release_none_title_exempts_pull_request_acknowledgement() -> None:
+    release.validate_pull_request("chore: docs [release:none]", "")
+
+
+def test_pull_request_malformed_directive_fails_closed() -> None:
+    with pytest.raises(ValueError, match="Malformed release directive"):
+        release.validate_pull_request("feat: docs [release:minor", "")
+
+
 @pytest.mark.parametrize(
     ("version", "bump", "expected"),
     [
@@ -131,6 +153,19 @@ def test_release_workflow_syncs_changelog_on_automation_branch_and_reuses_pr() -
     assert "[release:none]" in workflow
     assert "git log -1 --pretty=%B" in workflow
     assert "git log -1 --pretty=%s" not in workflow
+
+
+def test_pr_body_validator_is_pull_request_only_and_reads_event_json() -> None:
+    workflow = CI_WORKFLOW.read_text(encoding="utf-8")
+
+    verify = workflow.split("  verify:", 1)[1].split("  publish-pr-image:", 1)[0]
+    assert "Validate changelog acknowledgement" in verify
+    assert "if: github.event_name == 'pull_request'" in verify
+    assert 'validate-pr "$GITHUB_EVENT_PATH"' in verify
+    assert verify.index("Validate changelog acknowledgement") < verify.index(
+        "Install project dependencies"
+    )
+    assert "github.event.pull_request.body" not in workflow
 
 
 def test_release_workflow_builds_once_and_promotes_the_immutable_image() -> None:

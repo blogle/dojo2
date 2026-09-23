@@ -16,6 +16,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
+      - name: Validate changelog acknowledgement
+        if: github.event_name == 'pull_request'
+        run: nix develop --command python3 scripts/release.py validate-pr "$GITHUB_EVENT_PATH"
 
       - name: Install project dependencies
         run: nix develop --command just setup
