@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+<!-- BEGIN GENERATED RELEASES -->
 
 ## v0.0.10 - 2026-09-22
 
@@ -21,6 +21,8 @@
 ## v0.0.6 - 2026-09-18
 
 - feat: explain Available to budget progressively by @blogle in https://github.com/blogle/dojo2/pull/7
+
+<!-- END GENERATED RELEASES -->
 
 ## v0.0.4 - 2026-09-17
 

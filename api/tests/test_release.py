@@ -61,36 +61,41 @@ def test_bump_version(
     assert release.bump_version(version, bump) == expected
 
 
-def test_sync_changelog_backfills_published_releases_without_dangling_tag() -> None:
+def test_sync_changelog_backfills_published_releases_without_unreleased_bucket() -> None:
     old_history = "## v0.0.4 - 2026-09-17\n\n- Old history.\n"
-    existing = "# Changelog\n\n## Unreleased\n\n- Stale v0.0.6-v0.0.10 material.\n\n" + old_history
+    existing = "# Changelog\n\n## Unreleased\n\n- Stale notes.\n\n" + old_history
     releases = [
-        {
-            "tag": "v0.0.6",
-            "date": "2026-09-18",
-            "body": "* Explain Available to budget progressively.",
-        },
-        {"tag": "v0.0.7", "date": "2026-09-20", "body": ["Make failed backups retryable."]},
+        {"tag": "v0.0.4", "date": "2026-09-17", "body": "* legacy duplicate"},
+        {"tag": "v0.0.6", "date": "2026-09-18", "body": "* release six"},
+        {"tag": "v0.0.7", "date": "2026-09-20", "body": "* release seven"},
+        {"tag": "v0.0.8", "date": "2026-09-20", "body": "* release eight"},
+        {"tag": "v0.0.9", "date": "2026-09-21", "body": "* release nine"},
+        {"tag": "v0.0.10", "date": "2026-09-22", "body": "* release ten"},
     ]
 
     synced = release.sync_changelog(existing, releases)
 
-    assert "## v0.0.6 - 2026-09-18" in synced
-    assert "## v0.0.7 - 2026-09-20" in synced
+    assert "## Unreleased" not in synced
     assert "v0.0.5" not in synced
-    assert synced.index("## v0.0.7") < synced.index("## v0.0.6")
-    assert synced.index("## Unreleased") < synced.index("## v0.0.7")
-    assert "Stale v0.0.6-v0.0.10 material" in synced
+    assert synced.count("## v0.0.4 - 2026-09-17") == 1
+    assert synced.index("v0.0.10") < synced.index("v0.0.9")
+    assert synced.index("v0.0.9") < synced.index("v0.0.8")
+    assert synced.index("v0.0.8") < synced.index("v0.0.7")
+    assert synced.index("v0.0.7") < synced.index("v0.0.6")
+    assert "Stale notes" not in synced
     assert synced.endswith(old_history)
     assert release.sync_changelog(synced, releases) == synced
 
 
-def test_sync_changelog_detects_missing_published_release() -> None:
-    with pytest.raises(ValueError, match="missing published releases"):
-        release.validate_changelog(
-            "# Changelog\n\n## Unreleased\n",
-            [{"tag": "v0.0.6", "date": "2026-09-18", "body": "* note"}],
-        )
+def test_sync_changelog_replaces_generated_region_when_release_body_changes() -> None:
+    existing = "# Changelog\n\n<!-- BEGIN GENERATED RELEASES -->\n\n## v0.0.6 - 2026-09-18\n\n- old\n\n<!-- END GENERATED RELEASES -->\n\n## v0.0.4 - 2026-09-17\n\n- legacy\n"
+    releases = [{"tag": "v0.0.6", "date": "2026-09-18", "body": "* corrected"}]
+
+    synced = release.sync_changelog(existing, releases)
+
+    assert "- corrected" in synced
+    assert "- old" not in synced
+    assert synced.count("BEGIN GENERATED RELEASES") == 1
 
 
 def test_release_workflow_syncs_changelog_on_automation_branch_and_reuses_pr() -> None:

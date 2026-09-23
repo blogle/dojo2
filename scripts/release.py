@@ -17,6 +17,8 @@ TAG_PATTERN = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 RELEASE_DIRECTIVE_PATTERN = re.compile(r"\[release:([^\]\s]+)\]")
 BUMP_TYPES = frozenset({"patch", "minor", "major", "none"})
 RELEASE_SECTION_PATTERN = re.compile(r"(?m)^## (v\d+\.\d+\.\d+) - \d{4}-\d{2}-\d{2}$")
+GENERATED_START = "<!-- BEGIN GENERATED RELEASES -->"
+GENERATED_END = "<!-- END GENERATED RELEASES -->"
 
 
 class ReleaseRecord(TypedDict):
@@ -43,45 +45,36 @@ def _release_bullets(body: str | Sequence[str]) -> list[str]:
     return [f"- {bullet}" for bullet in bullets if bullet and "Full Changelog" not in bullet]
 
 
-def changelog_versions(changelog: str) -> set[str]:
-    return set(RELEASE_SECTION_PATTERN.findall(changelog))
-
-
-def validate_changelog(changelog: str, releases: Sequence[ReleaseRecord]) -> None:
-    missing = sorted(
-        {release["tag"] for release in releases} - changelog_versions(changelog),
-        key=_version_key,
-    )
-    if missing:
-        raise ValueError("Changelog is missing published releases: " + ", ".join(missing))
-
-
 def sync_changelog(existing: str, releases: Sequence[ReleaseRecord]) -> str:
-    """Add published release records without changing existing release history."""
-    existing_tags = changelog_versions(existing)
+    """Render published releases before the preserved legacy changelog history."""
+    generated_match = re.search(
+        rf"(?s){re.escape(GENERATED_START)}.*?{re.escape(GENERATED_END)}\n?",
+        existing,
+    )
+    first_release = re.search(r"(?m)^## v\d+\.\d+\.\d+ - \d{4}-\d{2}-\d{2}$", existing)
+    if generated_match:
+        legacy = existing[generated_match.end() :].lstrip("\n")
+    elif first_release:
+        legacy = existing[first_release.start() :]
+    else:
+        legacy = ""
+    legacy_tags = set(RELEASE_SECTION_PATTERN.findall(legacy))
     sections: list[str] = []
     for release in releases:
         tag = release["tag"]
         _version_key(tag)
-        if tag in existing_tags:
+        if tag in legacy_tags:
             continue
         date = release["date"]
         bullets = _release_bullets(release["body"])
         sections.append(f"## {tag} - {date}\n\n" + "\n".join(bullets))
-    if not sections:
-        validate_changelog(existing, releases)
-        return existing
     sections.sort(
         key=lambda section: _version_key(section.split()[1]),
         reverse=True,
     )
     insertion = "\n\n".join(sections)
-    first_release = re.search(r"(?m)^## v\d+\.\d+\.\d+ - \d{4}-\d{2}-\d{2}$", existing)
-    history = existing[first_release.start() :] if first_release else ""
-    prefix = existing[: first_release.start()] if first_release else existing.rstrip() + "\n\n"
-    result = prefix + insertion + ("\n\n" if insertion else "") + history
-    validate_changelog(result, releases)
-    return result
+    generated = f"{GENERATED_START}\n\n{insertion}\n\n{GENERATED_END}"
+    return f"# Changelog\n\n{generated}\n\n{legacy}"
 
 
 def _sync_changelog_file(path: Path) -> None:
