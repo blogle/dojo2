@@ -106,26 +106,26 @@ transfer_contributions AS (
         CASE
             WHEN oa.counterparty_account_id IS NOT NULL THEN
                 CASE
-                    WHEN tf.contribution_minor >= 0
-                        THEN CONCAT(oa.counterparty_account_id, ':', tf.account_id)
-                    ELSE CONCAT(tf.account_id, ':', oa.counterparty_account_id)
+                    WHEN tf.amount_minor < 0
+                        THEN CONCAT(tf.account_id, ':', oa.counterparty_account_id)
+                    ELSE CONCAT(oa.counterparty_account_id, ':', tf.account_id)
                 END
             ELSE CONCAT(
                 tf.account_id,
-                CASE WHEN tf.contribution_minor >= 0 THEN ':in' ELSE ':out' END
+                CASE WHEN tf.amount_minor < 0 THEN ':out' ELSE ':in' END
             )
         END AS group_key,
         CASE
             WHEN oa.counterparty_account_id IS NOT NULL THEN
                 CASE
-                    WHEN tf.contribution_minor >= 0
-                        THEN CONCAT(oa.counterparty_account_name, ' -> ', tf.account_name)
-                    ELSE CONCAT(tf.account_name, ' -> ', oa.counterparty_account_name)
+                    WHEN tf.amount_minor < 0
+                        THEN CONCAT(tf.account_name, ' -> ', oa.counterparty_account_name)
+                    ELSE CONCAT(oa.counterparty_account_name, ' -> ', tf.account_name)
                 END
             ELSE CONCAT(
                 tf.account_name,
                 CASE
-                    WHEN tf.contribution_minor >= 0 THEN ' (inflow)' ELSE ' (outflow)'
+                    WHEN tf.amount_minor < 0 THEN ' (outflow)' ELSE ' (inflow)'
                 END
             )
         END AS group_label,

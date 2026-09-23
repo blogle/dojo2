@@ -3,6 +3,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from threading import Barrier
+from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -612,6 +613,23 @@ def test_investment_contribution_funds_linked_category_and_withdrawal_returns_at
     )
     assert service.compute_available_to_budget() == 4_000
     assert service.compute_category_available(category_id) == -10_000
+    transfer_component = service.explain_available_to_budget_component(
+        month="2026-02", component_key="transfers"
+    )
+    withdrawal_group = next(
+        group
+        for group in transfer_component["groups"]
+        if group["key"] == f"{investment_id}:{checking_id}"
+    )
+    assert withdrawal_group["label"] == "Brokerage -> Checking"
+    withdrawal_detail = service.explain_available_to_budget_records(
+        month="2026-02",
+        component_key="transfers",
+        group_key=f"{investment_id}:{checking_id}",
+        offset=0,
+        limit=10,
+    )
+    assert sum(item["contribution_minor"] for item in withdrawal_detail["items"]) == 4_000
     assert _account(service, investment_id)["current_value_minor"] == 6_000
     assert service.get_net_worth()["current_net_worth_minor"] == 0
     assert len([item for item in service.list_category_activity() if item["is_derived"]]) == 1
@@ -808,18 +826,19 @@ def test_unmatched_linked_investment_transfers_use_effective_category_and_atb(
 
     add_transfer("2026-02-10", -10_000)
 
-    def transfer_explanation_minor() -> int:
-        detail = service.explain_available_to_budget_records(
+    def transfer_explanation() -> dict[str, Any]:
+        return service.explain_available_to_budget_records(
             month="2026-02",
             component_key="transfers",
-            group_key=f"{investment_id}:in",
+            group_key=f"{investment_id}:out",
             offset=0,
             limit=10,
         )
-        return sum(item["contribution_minor"] for item in detail["items"])
 
     assert service.compute_available_to_budget() == 10_000
-    assert transfer_explanation_minor() == 10_000
+    detail = transfer_explanation()
+    assert detail["group"]["label"] == "Brokerage (outflow)"
+    assert sum(item["contribution_minor"] for item in detail["items"]) == 10_000
 
     service.set_account_budget_link(
         investment_id,
@@ -830,7 +849,9 @@ def test_unmatched_linked_investment_transfers_use_effective_category_and_atb(
         },
     )
     assert service.compute_available_to_budget() == 10_000
-    assert transfer_explanation_minor() == 10_000
+    detail = transfer_explanation()
+    assert detail["group"]["label"] == "Brokerage (outflow)"
+    assert sum(item["contribution_minor"] for item in detail["items"]) == 10_000
 
     add_transfer("2026-02-15", 20_000)
     categories = {
