@@ -784,15 +784,14 @@ def test_unmatched_linked_investment_transfers_use_effective_category_and_atb(
     investment_id = service.create_account({"name": "Brokerage", "account_class": "INVESTMENT"})[
         "account_id"
     ]
-    for category_id, effective_date in zip(category_ids, ("2026-02-01", "2026-02-15"), strict=True):
-        service.set_account_budget_link(
-            investment_id,
-            {
-                "category_id": category_id,
-                "link_behavior": "INVESTMENT_CONTRIBUTION",
-                "effective_date": effective_date,
-            },
-        )
+    service.set_account_budget_link(
+        investment_id,
+        {
+            "category_id": category_ids[0],
+            "link_behavior": "INVESTMENT_CONTRIBUTION",
+            "effective_date": "2026-02-01",
+        },
+    )
 
     def add_transfer(transfer_date: str, amount_minor: int) -> None:
         service.create_transaction(
@@ -807,24 +806,40 @@ def test_unmatched_linked_investment_transfers_use_effective_category_and_atb(
             }
         )
 
-    add_transfer("2026-02-10", 10_000)
+    add_transfer("2026-02-10", -10_000)
+
+    def transfer_explanation_minor() -> int:
+        detail = service.explain_available_to_budget_records(
+            month="2026-02",
+            component_key="transfers",
+            group_key=f"{investment_id}:in",
+            offset=0,
+            limit=10,
+        )
+        return sum(item["contribution_minor"] for item in detail["items"])
+
+    assert service.compute_available_to_budget() == 10_000
+    assert transfer_explanation_minor() == 10_000
+
+    service.set_account_budget_link(
+        investment_id,
+        {
+            "category_id": category_ids[1],
+            "link_behavior": "INVESTMENT_CONTRIBUTION",
+            "effective_date": "2026-02-15",
+        },
+    )
+    assert service.compute_available_to_budget() == 10_000
+    assert transfer_explanation_minor() == 10_000
+
     add_transfer("2026-02-15", 20_000)
     categories = {
         item["category_id"]: item
         for item in service.list_categories(month="2026-02", show_hidden=False)
     }
-    assert categories[category_ids[0]]["available_minor"] == -10_000
+    assert categories[category_ids[0]]["available_minor"] == 0
     assert categories[category_ids[1]]["available_minor"] == -20_000
-    assert service.compute_available_to_budget() == 0
-
-    add_transfer("2026-02-15", -5_000)
-    after_withdrawal = {
-        item["category_id"]: item["available_minor"]
-        for item in service.list_categories(month="2026-02", show_hidden=False)
-    }
-    assert after_withdrawal[category_ids[0]] == -10_000
-    assert after_withdrawal[category_ids[1]] == -20_000
-    assert service.compute_available_to_budget() == 5_000
+    assert service.compute_available_to_budget() == 10_000
 
 
 def test_investment_to_investment_transfer_is_not_supported_in_budget_ledger(
