@@ -14,6 +14,7 @@ class TransferBoundaryFact:
     amount_minor: int
     effective_date: date
     status: str
+    has_effective_budget_link: bool = False
 
 
 def compute_transfer_boundary_adjustment(facts: list[TransferBoundaryFact], *, as_of: date) -> int:
@@ -22,8 +23,12 @@ def compute_transfer_boundary_adjustment(facts: list[TransferBoundaryFact], *, a
     for fact in facts:
         if fact.effective_date > as_of or fact.system_category != "TX_ACCOUNT_TRANSFER":
             continue
-        if fact.account_class == "BUDGET":
-            adjustment += fact.amount_minor
-        elif fact.account_class == "INVESTMENT" and fact.amount_minor > 0:
-            adjustment += fact.amount_minor
+        # Raw transfers never directly change ATB. Only investment withdrawals
+        # cross back into the budget, and only when that investment is linked.
+        if (
+            fact.account_class == "INVESTMENT"
+            and fact.has_effective_budget_link
+            and fact.amount_minor < 0
+        ):
+            adjustment -= fact.amount_minor
     return adjustment

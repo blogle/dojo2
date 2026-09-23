@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from dataclasses import replace
+from uuid import uuid4
+
+from dojo.aggregate_validation import _expected_available_to_budget
+from dojo.importer import fixture_bundle
 from dojo.service import DojoService
 
 
@@ -39,6 +44,39 @@ def test_import_validation_report_is_structured_and_passing(service: DojoService
     assert atb["actual_minor"] == 424000
     assert "Dashboard!J3" in atb["source_reference"]
     assert "Calculations!B59" in atb["source_reference"]
+
+
+def test_aspire_transfer_residual_205_51_validates_to_zero_atb(service: DojoService) -> None:
+    bundle = fixture_bundle()
+    transfer_template = next(
+        transaction
+        for transaction in bundle.transactions
+        if transaction.system_category == "TX_ACCOUNT_TRANSFER"
+    )
+    residual_amounts = (32_347, -57, -11_739)
+    transfers = [
+        replace(
+            transfer_template,
+            transaction_id=str(uuid4()),
+            amount_minor=amount_minor,
+            memo="Sanitized Aspire Account Transfer",
+        )
+        for amount_minor in residual_amounts
+    ]
+    bundle.transactions = transfers
+    bundle.allocations = []
+    bundle.valuations = []
+
+    assert [transaction.amount_minor for transaction in transfers] == [32_347, -57, -11_739]
+    assert sum(transaction.amount_minor for transaction in transfers) == 20_551
+    assert _expected_available_to_budget(bundle) == 0
+
+    report = service._apply_import_bundle(bundle)
+    current_month = service.default_budget_month()
+    atb = _find_check(report["checks"], "budget.available_to_budget", current_month, current_month)
+    assert report["passed"] is True
+    assert atb["expected_minor"] == 0
+    assert atb["actual_minor"] == 0
 
 
 def test_validation_report_tracks_hidden_budget_summary_semantics(service: DojoService) -> None:
