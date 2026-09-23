@@ -35,6 +35,25 @@ def test_release_directive_ignores_commit_body() -> None:
 
 
 @pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        (
+            "Merge pull request #14 from blogle/automation/changelog\n\n"
+            "docs: synchronize published changelog [release:none]",
+            "none",
+        ),
+        (
+            "Merge pull request #15 from blogle/feat/forecasting\n\n"
+            "feat: add forecasting [release:minor]",
+            "minor",
+        ),
+    ],
+)
+def test_release_directive_uses_github_merge_pr_title(message: str, expected: str) -> None:
+    assert release.release_directive(message) == expected
+
+
+@pytest.mark.parametrize(
     "title",
     [
         "feat: mixed release [release:minor] [release:major]",
@@ -110,6 +129,8 @@ def test_release_workflow_syncs_changelog_on_automation_branch_and_reuses_pr() -
     assert 'git push --force-with-lease origin "master"' not in workflow
     assert "gh pr list" in workflow
     assert "[release:none]" in workflow
+    assert "git log -1 --pretty=%B" in workflow
+    assert "git log -1 --pretty=%s" not in workflow
 
 
 def test_release_workflow_builds_once_and_promotes_the_immutable_image() -> None:
