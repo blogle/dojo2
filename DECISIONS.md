@@ -266,11 +266,12 @@ metadata from concurrent feature merges.
 
 ### Decision
 
-Use the first line of the merged commit title as the release control surface.
-The default is a patch release; `[release:minor]`, `[release:major]`, and
-`[release:none]` opt into a different bump or suppress the release. The
-workflow tags the exact pushed commit and publishes from that tag without
-mutating `master`.
+Use the effective merged commit title as the release control surface. For an
+ordinary commit this is the first line; for a GitHub default merge commit it is
+the first non-empty line after `Merge pull request #...`. The default is a
+patch release; `[release:minor]`, `[release:major]`, and `[release:none]` opt
+into a different bump or suppress the release. The workflow tags the exact
+pushed commit and publishes from that tag without mutating `master`.
 
 After a successful GitHub Release, published GitHub Releases are the changelog
 authority. The workflow replaces the generated release region and force-updates

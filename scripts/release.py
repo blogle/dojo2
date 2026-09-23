@@ -15,6 +15,7 @@ from typing import TypedDict
 ROOT = Path(__file__).resolve().parent.parent
 TAG_PATTERN = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 RELEASE_DIRECTIVE_PATTERN = re.compile(r"\[release:([^\]\s]+)\]")
+GITHUB_MERGE_TITLE_PATTERN = re.compile(r"^Merge pull request #\d+ from \S+")
 BUMP_TYPES = frozenset({"patch", "minor", "major", "none"})
 RELEASE_SECTION_PATTERN = re.compile(r"(?m)^## (v\d+\.\d+\.\d+) - \d{4}-\d{2}-\d{2}$")
 GENERATED_START = "<!-- BEGIN GENERATED RELEASES -->"
@@ -105,12 +106,24 @@ def validate_bump(value: str) -> str:
     return value
 
 
+def effective_release_title(commit_message: str) -> str:
+    """Return the ordinary or GitHub-merge commit title used for release control."""
+    lines = commit_message.splitlines()
+    if not lines:
+        return ""
+    if GITHUB_MERGE_TITLE_PATTERN.fullmatch(lines[0].strip()):
+        for line in lines[1:]:
+            if line.strip():
+                return line.strip()
+    return lines[0].strip()
+
+
 def release_directive(title: str) -> str:
-    """Return the release directive encoded in a commit title."""
-    first_line = title.splitlines()[0] if title else ""
-    matches = RELEASE_DIRECTIVE_PATTERN.findall(first_line)
+    """Return the release directive encoded in a commit title or message."""
+    effective_title = effective_release_title(title)
+    matches = RELEASE_DIRECTIVE_PATTERN.findall(effective_title)
     if not matches:
-        if "[release:" in first_line:
+        if "[release:" in effective_title:
             raise ValueError("Malformed release directive")
         return "patch"
     invalid = sorted(set(matches) - BUMP_TYPES)

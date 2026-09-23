@@ -68,7 +68,7 @@ Before finishing a change, run `just check`. For CI-equivalent verification, run
 ## Version And Release Process
 
 Git tags named `vMAJOR.MINOR.PATCH` are the release authority. Release behavior
-is selected by the first line of the commit pushed to `master`:
+is selected by the effective title of the commit pushed to `master`:
 
 - No directive or `[release:patch]`: create the next patch release.
 - `[release:minor]`: create the next minor release.
@@ -83,10 +83,12 @@ or reuses one `[release:none]` pull request. It never pushes `master` or moves
 tags. Conflicting or malformed directives fail the workflow rather than
 guessing. Release runs are serialized so each merge sees the previous tag.
 
-Configure squash merges to use the pull request title as the default commit
-title. Put the directive in that title when a release other than the default
-patch is needed. Do not maintain changelog notes in feature PRs; the changelog
-sync PR is the automated promotion path from published GitHub Releases.
+Put the directive in the ordinary commit title or pull request title when a
+release other than the default patch is needed. For GitHub default merge
+commits, the workflow uses the first non-empty line after `Merge pull request
+#...` as the effective pull request title. Do not maintain changelog notes in
+feature PRs; the changelog sync PR is the automated promotion path from
+published GitHub Releases.
 
 For local inspection, pipe a commit title to `just release-directive`, or use
 `just release-next-version [patch|minor|major]`. Resolve workflow failures

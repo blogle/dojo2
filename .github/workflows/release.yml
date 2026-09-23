@@ -37,7 +37,7 @@ jobs:
         id: release
         shell: bash
         run: |
-          title="$(git log -1 --pretty=%s)"
+          title="$(git log -1 --pretty=%B)"
           directive="$(printf '%s\n' "$title" | nix develop --command just release-directive)"
           echo "Release directive: ${directive}"
           if [[ "$directive" == "none" ]]; then
