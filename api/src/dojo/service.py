@@ -3276,6 +3276,12 @@ class DojoService:
         transfer_date: date,
         memo: str,
         status: str,
+        source_date: date | None = None,
+        source_status: str | None = None,
+        source_memo: str | None = None,
+        destination_date: date | None = None,
+        destination_status: str | None = None,
+        destination_memo: str | None = None,
     ) -> dict[str, Any]:
         if amount_minor <= 0:
             raise ValueError("Transfer amount must be positive")
@@ -3290,6 +3296,12 @@ class DojoService:
                 transfer_date=transfer_date,
                 memo=memo,
                 status=status,
+                source_date=source_date,
+                source_status=source_status,
+                source_memo=source_memo,
+                destination_date=destination_date,
+                destination_status=destination_status,
+                destination_memo=destination_memo,
                 now=now,
             )
 
@@ -5828,6 +5840,8 @@ class DojoService:
         status: str | None = None,
         source_status: str | None = None,
         destination_status: str | None = None,
+        source_memo: str | None = None,
+        destination_memo: str | None = None,
         now: datetime,
     ) -> dict[str, Any]:
         self._require_distinct_accounts(from_account_id, to_account_id)
@@ -5865,7 +5879,13 @@ class DojoService:
                         if index == 1 and destination_status is not None
                         else status
                     ),
-                    "memo": memo,
+                    "memo": (
+                        source_memo
+                        if index == 0 and source_memo is not None
+                        else destination_memo
+                        if index == 1 and destination_memo is not None
+                        else memo
+                    ),
                     "entry_order": next_order,
                     "record_order": record_order,
                     "valid_from": now,

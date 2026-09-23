@@ -24,6 +24,10 @@
 
 <!-- END GENERATED RELEASES -->
 
+## Unreleased
+
+- Simplified transaction entry with Transaction and Transfer modes, Available to budget category selection, and atomic transfers with independent counterparty details.
+
 ## v0.0.4 - 2026-09-17
 
 - Fixed transaction edits on production DuckDB by avoiding the incompatible conditional-update `RETURNING` path.
