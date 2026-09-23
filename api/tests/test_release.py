@@ -165,6 +165,7 @@ def test_pr_body_validator_is_pull_request_only_and_reads_event_json() -> None:
     assert verify.index("Validate changelog acknowledgement") < verify.index(
         "Install project dependencies"
     )
+    assert "types: [opened, synchronize, reopened, edited]" in workflow
     assert "github.event.pull_request.body" not in workflow
 
 
