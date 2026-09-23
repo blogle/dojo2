@@ -85,8 +85,8 @@ guessing. Release runs are serialized so each merge sees the previous tag.
 
 Configure squash merges to use the pull request title as the default commit
 title. Put the directive in that title when a release other than the default
-patch is needed. Do not create version sections in feature PRs; the changelog
-sync PR is the automated promotion path.
+patch is needed. Do not maintain changelog notes in feature PRs; the changelog
+sync PR is the automated promotion path from published GitHub Releases.
 
 For local inspection, pipe a commit title to `just release-directive`, or use
 `just release-next-version [patch|minor|major]`. Resolve workflow failures
