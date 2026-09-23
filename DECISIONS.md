@@ -250,11 +250,11 @@ The repository had a `v0.0.1` tag, but its changelog entries were still grouped 
 
 ### Decision
 
-Use Git tags as the release authority and promote a non-empty `CHANGELOG.md` `Unreleased` section to the next patch version on every qualifying push to `master`. The release workflow updates the API and web package versions, commits the release metadata, creates the annotated tag, publishes the versioned container, and creates a GitHub Release. Empty release notes are a no-op.
+Use Git tags as the release authority and promote a non-empty `CHANGELOG.md` notes section to the next patch version on every qualifying push to `master`. The release workflow updates the API and web package versions, commits the release metadata, creates the annotated tag, publishes the versioned container, and creates a GitHub Release. Empty release notes are a no-op.
 
 ### Consequence
 
-Merges are self-contained release inputs and the current post-`v0.0.1` work will become `v0.0.2` automatically. Release metadata is intentionally a bot-authored follow-up commit, so feature PRs only maintain `Unreleased` notes and do not race with a future version number.
+Merges are self-contained release inputs and the current post-`v0.0.1` work will become `v0.0.2` automatically. Release metadata is intentionally a bot-authored follow-up commit, so feature PRs do not race with a future version number.
 
 ## 2026-09-18 — Use commit-title release directives
 
@@ -266,18 +266,25 @@ metadata from concurrent feature merges.
 
 ### Decision
 
-Use the first line of the merged commit title as the release control surface.
-The default is a patch release; `[release:minor]`, `[release:major]`, and
-`[release:none]` opt into a different bump or suppress the release. The
-workflow tags the exact pushed commit and publishes from that tag without
-mutating `master`.
+Use the effective merged commit title as the release control surface. For an
+ordinary commit this is the first line; for a GitHub default merge commit it is
+the first non-empty line after `Merge pull request #...`. The default is a
+patch release; `[release:minor]`, `[release:major]`, and `[release:none]` opt
+into a different bump or suppress the release. The workflow tags the exact
+pushed commit and publishes from that tag without mutating `master`.
+
+After a successful GitHub Release, published GitHub Releases are the changelog
+authority. The workflow replaces the generated release region and force-updates
+only `automation/changelog`, then creates or reuses one pull request titled
+with `[release:none]`. The bot never pushes `master` or moves a release tag.
 
 ### Consequence
 
 Each qualifying merge produces at most one release and never creates a second
 metadata PR. A skipped merge is included in the next release that is created.
-Conflicting or malformed directives fail closed. GitHub-generated release notes
-and the human-maintained changelog are separate from version selection.
+Conflicting or malformed directives fail closed. The checked-in changelog has
+published release sections only and is synchronized through the automation pull
+request.
 
 ## 2026-06-10 — Adopt self-contained ExecPlans for complex implementation work
 

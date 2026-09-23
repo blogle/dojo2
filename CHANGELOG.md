@@ -1,14 +1,28 @@
 # Changelog
 
-## Unreleased
+<!-- BEGIN GENERATED RELEASES -->
 
-- Added a subordinate Available to budget explanation page with canonical signed components, anomaly-oriented constituent ordering, progressive zoom into bounded virtualized source entries, shared sticky calculation subtotals, and explicit current-state context.
-- Added commit-title release directives with serialized tag-only release publishing for patch, minor, major, and skipped changes.
-- Added an in-app retry action for failed scheduled backups, with Kubernetes-scoped Job enqueueing and a separate Google Drive repair action.
-- Added Git SHA build provenance to container metadata and made scheduled backups derive immutable worker images from their own build identity; startup failures remain retryable.
-- Reworked image publication so each Git SHA is built once and staging, PR, and release tags promote that immutable artifact.
+## v0.0.10 - 2026-09-22
 
-- Added a subordinate Available to budget explanation page with canonical signed components, anomaly-oriented constituent ordering, progressive zoom into bounded virtualized source entries, shared sticky calculation subtotals, and explicit current-state context.
+- feat: add reconciliation undo and attention by @blogle in https://github.com/blogle/dojo2/pull/10
+
+## v0.0.9 - 2026-09-21
+
+- test: cover transaction edit SCD regression by @blogle in https://github.com/blogle/dojo2/pull/11
+
+## v0.0.8 - 2026-09-20
+
+- fix: promote immutable release images by @blogle in https://github.com/blogle/dojo2/pull/9
+
+## v0.0.7 - 2026-09-20
+
+- feat: make failed backups retryable by @blogle in https://github.com/blogle/dojo2/pull/8
+
+## v0.0.6 - 2026-09-18
+
+- feat: explain Available to budget progressively by @blogle in https://github.com/blogle/dojo2/pull/7
+
+<!-- END GENERATED RELEASES -->
 
 ## v0.0.4 - 2026-09-17
 
