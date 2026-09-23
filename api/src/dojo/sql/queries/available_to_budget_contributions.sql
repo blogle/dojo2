@@ -75,13 +75,23 @@ transfer_facts AS (
         COALESCE(t.record_order, 0) AS record_order,
         t.amount_minor,
         CASE
-            WHEN a.account_class = 'BUDGET' THEN t.amount_minor
-            WHEN a.account_class = 'INVESTMENT' AND t.amount_minor > 0 THEN t.amount_minor
+            WHEN a.account_class = 'INVESTMENT'
+             AND investment_link.category_id IS NOT NULL
+             AND t.amount_minor < 0 THEN -t.amount_minor
             ELSE 0
         END AS contribution_minor
     FROM current_transactions AS t
     JOIN current_accounts AS a
       ON a.account_id = t.account_id
+    LEFT JOIN LATERAL (
+        SELECT link.category_id
+        FROM current_account_budget_links AS link
+        WHERE link.account_id = t.account_id
+          AND link.link_behavior = 'INVESTMENT_CONTRIBUTION'
+          AND link.effective_date <= t.date
+        ORDER BY link.effective_date DESC, link.valid_from DESC
+        LIMIT 1
+    ) AS investment_link ON TRUE
     WHERE t.system_category = 'TX_ACCOUNT_TRANSFER'
       AND a.account_class IN ('BUDGET', 'INVESTMENT')
       AND t.date <= ?

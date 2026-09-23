@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from datetime import date
 from threading import Barrier
 from uuid import uuid4
 
@@ -610,6 +611,7 @@ def test_investment_contribution_funds_linked_category_and_withdrawal_returns_at
         },
     )
     assert service.compute_available_to_budget() == 4_000
+    assert service.compute_category_available(category_id) == -10_000
     assert _account(service, investment_id)["current_value_minor"] == 6_000
     assert service.get_net_worth()["current_net_worth_minor"] == 0
     assert len([item for item in service.list_category_activity() if item["is_derived"]]) == 1
@@ -752,11 +754,143 @@ def test_investment_link_changes_preserve_prior_derived_category_activity(
     }
     assert categories[category_ids[0]]["month_activity_minor"] == -10_000
     assert categories[category_ids[1]]["month_activity_minor"] == -20_000
+    assert categories[category_ids[0]]["available_minor"] == -10_000
+    assert categories[category_ids[1]]["available_minor"] == -20_000
+    assert service.compute_available_to_budget() == 0
     derived = [item for item in service.list_category_activity() if item["is_derived"]]
     assert {(item["category_id"], item["amount_minor"]) for item in derived} == {
         (category_ids[0], -10_000),
         (category_ids[1], -20_000),
     }
+
+
+def test_unmatched_linked_investment_transfers_use_effective_category_and_atb(
+    service: DojoService,
+) -> None:
+    group_id = service.create_category_group(
+        {"name": "Investing", "sort_order": 1, "is_hidden": False}
+    )["group_id"]
+    category_ids = [
+        service.create_category(
+            {
+                "group_id": group_id,
+                "name": name,
+                "category_kind": "STANDARD",
+                "sort_order": index,
+            }
+        )["category_id"]
+        for index, name in enumerate(("First contributions", "Second contributions"), start=1)
+    ]
+    investment_id = service.create_account({"name": "Brokerage", "account_class": "INVESTMENT"})[
+        "account_id"
+    ]
+    for category_id, effective_date in zip(category_ids, ("2026-02-01", "2026-02-15"), strict=True):
+        service.set_account_budget_link(
+            investment_id,
+            {
+                "category_id": category_id,
+                "link_behavior": "INVESTMENT_CONTRIBUTION",
+                "effective_date": effective_date,
+            },
+        )
+
+    def add_transfer(transfer_date: str, amount_minor: int) -> None:
+        service.create_transaction(
+            {
+                "account_id": investment_id,
+                "date": transfer_date,
+                "amount_minor": amount_minor,
+                "category_id": None,
+                "system_category": "TX_ACCOUNT_TRANSFER",
+                "status": "CLEARED",
+                "memo": "Unmatched investment transfer",
+            }
+        )
+
+    add_transfer("2026-02-10", 10_000)
+    add_transfer("2026-02-15", 20_000)
+    categories = {
+        item["category_id"]: item
+        for item in service.list_categories(month="2026-02", show_hidden=False)
+    }
+    assert categories[category_ids[0]]["available_minor"] == -10_000
+    assert categories[category_ids[1]]["available_minor"] == -20_000
+    assert service.compute_available_to_budget() == 0
+
+    add_transfer("2026-02-15", -5_000)
+    after_withdrawal = {
+        item["category_id"]: item["available_minor"]
+        for item in service.list_categories(month="2026-02", show_hidden=False)
+    }
+    assert after_withdrawal[category_ids[0]] == -10_000
+    assert after_withdrawal[category_ids[1]] == -20_000
+    assert service.compute_available_to_budget() == 5_000
+
+
+def test_investment_to_investment_transfer_is_not_supported_in_budget_ledger(
+    service: DojoService,
+) -> None:
+    source_id = service.create_account({"name": "Source Brokerage", "account_class": "INVESTMENT"})[
+        "account_id"
+    ]
+    destination_id = service.create_account(
+        {"name": "Destination Brokerage", "account_class": "INVESTMENT"}
+    )["account_id"]
+
+    with pytest.raises(ValueError, match="Investment-to-investment transfers are not supported"):
+        service.create_transfer(
+            from_account_id=source_id,
+            to_account_id=destination_id,
+            amount_minor=5_000,
+            transfer_date=date(2026, 2, 10),
+            memo="Between brokerages",
+            status="CLEARED",
+        )
+
+
+def test_budget_account_transfers_do_not_change_atb_or_category_availability(
+    service: DojoService,
+) -> None:
+    accounts = [
+        service.create_account(
+            {"name": name, "account_class": "BUDGET", "budget_account_type": "DEPOSIT"}
+        )["account_id"]
+        for name in ("Checking", "Savings")
+    ]
+    group_id = service.create_category_group(
+        {"name": "Savings", "sort_order": 1, "is_hidden": False}
+    )["group_id"]
+    category_id = service.create_category(
+        {
+            "group_id": group_id,
+            "name": "Emergency fund",
+            "category_kind": "STANDARD",
+            "sort_order": 1,
+        }
+    )["category_id"]
+
+    service.create_transfer(
+        from_account_id=accounts[0],
+        to_account_id=accounts[1],
+        amount_minor=12_000,
+        transfer_date=date(2026, 2, 10),
+        memo="Budget transfer",
+        status="CLEARED",
+    )
+    service.create_transaction(
+        {
+            "account_id": accounts[0],
+            "date": "2026-02-11",
+            "amount_minor": -3_000,
+            "category_id": None,
+            "system_category": "TX_ACCOUNT_TRANSFER",
+            "status": "CLEARED",
+            "memo": "Unmatched budget transfer leg",
+        }
+    )
+
+    assert service.compute_available_to_budget() == 0
+    assert service.compute_category_available(category_id) == 0
 
 
 def test_credit_card_payment_is_idempotent_and_records_operation_provenance(

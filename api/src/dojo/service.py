@@ -2395,6 +2395,7 @@ class DojoService:
                 amount_minor=int(row["amount_minor"]),
                 effective_date=row["effective_date"],
                 status=str(row["status"]),
+                has_effective_budget_link=bool(row["has_effective_budget_link"]),
             )
             for row in transfer_rows
         ]
@@ -3280,6 +3281,11 @@ class DojoService:
         if amount_minor <= 0:
             raise ValueError("Transfer amount must be positive")
         self._require_distinct_accounts(from_account_id, to_account_id)
+        if all(
+            self._require_account(account_id)["account_class"] == ACCOUNT_CLASS_INVESTMENT
+            for account_id in (from_account_id, to_account_id)
+        ):
+            raise ValueError("Investment-to-investment transfers are not supported")
         now = self.clock.now()
         with self.db.transaction() as connection:
             return self._insert_transfer(

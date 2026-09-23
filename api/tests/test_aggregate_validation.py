@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dojo.aggregate_validation import _expected_available_to_budget
+from dojo.importer import fixture_bundle
 from dojo.service import DojoService
 
 
@@ -39,6 +41,40 @@ def test_import_validation_report_is_structured_and_passing(service: DojoService
     assert atb["actual_minor"] == 424000
     assert "Dashboard!J3" in atb["source_reference"]
     assert "Calculations!B59" in atb["source_reference"]
+
+
+def test_source_atb_oracle_ignores_transfer_residual() -> None:
+    bundle = fixture_bundle()
+    original_total = _expected_available_to_budget(bundle)
+    transfer = next(
+        transaction
+        for transaction in bundle.transactions
+        if transaction.system_category == "TX_ACCOUNT_TRANSFER"
+    )
+    transfer.amount_minor += 20_551
+
+    assert _expected_available_to_budget(bundle) == original_total
+
+
+def test_import_validation_rejects_dojo_transfer_atb_regression(service: DojoService) -> None:
+    bundle = fixture_bundle()
+    transfer = next(
+        transaction
+        for transaction in bundle.transactions
+        if transaction.system_category == "TX_ACCOUNT_TRANSFER"
+    )
+    transfer.amount_minor = 20_551
+    bundle.transactions = [transfer]
+    bundle.allocations = []
+    bundle.valuations = []
+    assert _expected_available_to_budget(bundle) == 0
+
+    report = service._apply_import_bundle(bundle)
+    current_month = service.default_budget_month()
+    atb = _find_check(report["checks"], "budget.available_to_budget", current_month, current_month)
+    assert report["passed"] is True
+    assert atb["expected_minor"] == 0
+    assert atb["actual_minor"] == 0
 
 
 def test_validation_report_tracks_hidden_budget_summary_semantics(service: DojoService) -> None:
