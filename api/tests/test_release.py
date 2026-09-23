@@ -161,9 +161,17 @@ def test_pr_body_validator_is_pull_request_only_and_reads_event_json() -> None:
     verify = workflow.split("  verify:", 1)[1].split("  publish-pr-image:", 1)[0]
     assert "Validate changelog acknowledgement" in verify
     assert "if: github.event_name == 'pull_request'" in verify
-    assert 'validate-pr "$GITHUB_EVENT_PATH"' in verify
-    assert verify.index("Validate changelog acknowledgement") < verify.index(
-        "Install project dependencies"
+    assert 'run: python3 scripts/release.py validate-pr "$GITHUB_EVENT_PATH"' in verify
+    assert (
+        "nix develop"
+        not in verify.split("Validate changelog acknowledgement", 1)[1].split(
+            "uses: DeterminateSystems/nix-installer-action@main", 1
+        )[0]
+    )
+    assert (
+        verify.index("Validate changelog acknowledgement")
+        < verify.index("uses: DeterminateSystems/nix-installer-action@main")
+        < verify.index("Install project dependencies")
     )
     assert "types: [opened, synchronize, reopened, edited]" in workflow
     assert "github.event.pull_request.body" not in workflow
