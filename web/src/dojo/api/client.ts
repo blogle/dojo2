@@ -220,6 +220,18 @@ export async function fetchTransactionsPage(
   return request<TransactionPage>(`/api/transactions?${params.toString()}`);
 }
 
+export async function fetchTransactionMemoSuggestions(
+  query: string,
+  accountId?: string,
+): Promise<string[]> {
+  const params = new URLSearchParams({ query, limit: "8" });
+  if (accountId) params.set("account_id", accountId);
+  const response = await request<{ items: string[] }>(
+    `/api/transaction-memo-suggestions?${params.toString()}`,
+  );
+  return response.items;
+}
+
 export async function fetchAccounts(showHidden: boolean): Promise<Account[]> {
   const params = new URLSearchParams({ show_hidden: String(showHidden) });
   const response = await request<{ items: Account[] }>(

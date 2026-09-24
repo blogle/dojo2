@@ -650,6 +650,23 @@ def transactions(
     )
 
 
+@router.get("/transaction-memo-suggestions")
+def transaction_memo_suggestions(
+    request: Request,
+    *,
+    query: str = Query(min_length=2, max_length=100),
+    account_id: str | None = None,
+    limit: int = Query(default=8, ge=1, le=8),
+) -> dict[str, Any]:
+    return {
+        "items": get_service(request).suggest_transaction_memos(
+            query=query,
+            account_id=account_id,
+            limit=limit,
+        )
+    }
+
+
 @router.post("/transactions")
 def create_transaction(request: Request, payload: TransactionPayload) -> dict[str, Any]:
     try:

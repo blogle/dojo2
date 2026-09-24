@@ -173,6 +173,17 @@ function stubFetch(
       );
     }
 
+    if (path === "/api/transaction-memo-suggestions") {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            items: ["Groceries", "Market", "Investment contribution"],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    }
+
     if (path.startsWith("/api/transactions/")) {
       return Promise.resolve(new Response(null, { status: 204, headers: {} }));
     }
@@ -184,6 +195,27 @@ function stubFetch(
       }),
     );
   });
+}
+
+function chooseComboboxOption(label: string, query: string, option: string) {
+  cy.contains(".combobox-field__label", label)
+    .parent()
+    .find("[data-cy=combobox-field-trigger]")
+    .click();
+  cy.contains(".combobox-field__label", label)
+    .parent()
+    .find("[data-cy=combobox-field-search]")
+    .clear()
+    .type(query);
+  cy.get("[role=option]").contains(option).click();
+}
+
+function typeFreeformMemo(label: string, value: string) {
+  cy.contains(".memo-autocomplete__label", label)
+    .parent()
+    .find("[data-cy=memo-autocomplete-input]")
+    .clear()
+    .type(value);
 }
 
 function mountPage(
@@ -223,10 +255,8 @@ describe("TransactionsPage", () => {
   it("shows the transaction entry form", () => {
     mountPage();
     cy.get("[data-cy=transaction-entry-form]").should("be.visible");
-    cy.get("[data-cy=transaction-entry-form]").should(
-      "contain.text",
-      "Add transaction",
-    );
+    cy.contains("button", "Transaction").should("be.visible");
+    cy.contains("h3", "Add transaction").should("not.exist");
   });
 
   it("shows the filter bar", () => {
@@ -234,26 +264,32 @@ describe("TransactionsPage", () => {
     cy.get("[data-cy=transaction-filter-bar]").should("be.visible");
   });
 
-  it("removes Entry type and offers compatible counterparty accounts in transfer mode", () => {
+  it("removes Entry type and offers compatible From and To accounts in transfer mode", () => {
     mountPage();
     cy.get("[data-cy=transaction-entry-form]").within(() => {
       cy.contains("label", "Entry type").should("not.exist");
       cy.contains("button", "Transaction").should("be.visible");
       cy.contains("button", "Transfer").click();
-      cy.contains("label", "Account")
-        .find("option")
-        .should("contain.text", "Checking");
-      cy.contains("label", "From account")
-        .find("option")
-        .should("not.contain.text", "Brokerage");
-      cy.contains("label", "Counterparty")
-        .find("option")
-        .should("contain.text", "Brokerage");
-      cy.contains("label", "Counterparty")
-        .find("option")
-        .should("not.contain.text", "Legacy Loan");
+      cy.contains(".combobox-field__label", "From account").should("exist");
+      cy.contains(".combobox-field__label", "To account").should("exist");
       cy.contains("label", "Category").should("not.exist");
+      cy.get(".entry-form__row--transfer").within(() => {
+        cy.contains("To account details").should("not.exist");
+      });
+      cy.get("[data-cy=to-account-disclosure]")
+        .should("contain.text", "To account details")
+        .find("button")
+        .should("have.attr", "aria-expanded", "false");
+      cy.get("[data-cy=to-account-details-content]").should("not.be.visible");
+      cy.get("[data-cy=to-account-details-content]")
+        .parent()
+        .should("have.attr", "data-cy", "to-account-disclosure");
     });
+    cy.get("[data-cy=transaction-entry-form]")
+      .invoke("text")
+      .should((text) => {
+        expect(text.toLowerCase()).not.to.contain("counterparty");
+      });
   });
 
   it("offers Available to budget as a category and submits its system semantic", () => {
@@ -269,12 +305,10 @@ describe("TransactionsPage", () => {
       return undefined;
     });
     cy.get("[data-cy=transaction-entry-form]").within(() => {
-      cy.contains("label", "Category")
-        .find("select")
-        .select("__available_to_budget__");
-      cy.contains("label", "Account").find("select").select("acc1");
+      chooseComboboxOption("Category", "Available", "Available to budget");
+      chooseComboboxOption("Account", "Check", "Checking");
       cy.contains("label", "Amount").find("input").type("12");
-      cy.contains("label", "Memo").find("input").type("Budget adjustment");
+      typeFreeformMemo("Memo", "Budget adjustment");
       cy.contains("button", "Add").click();
     });
     cy.wrap(null).should(() => {
@@ -282,11 +316,67 @@ describe("TransactionsPage", () => {
         account_id: "acc1",
         category_id: null,
         system_category: "TX_AVAILABLE_TO_BUDGET",
+        memo: "Budget adjustment",
       });
     });
   });
 
-  it("submits an atomic transfer with inherited counterparty details", () => {
+  it("uses direct Direction and Status toggles", () => {
+    mountPage();
+    cy.get("[data-cy=binary-toggle-direction]")
+      .should("contain.text", "Outflow")
+      .and("not.contain.text", "Inflow")
+      .click()
+      .should("contain.text", "Inflow")
+      .and("not.contain.text", "Outflow")
+      .click()
+      .should("contain.text", "Outflow")
+      .and("not.contain.text", "Inflow");
+    cy.get("[data-cy=binary-toggle-status]")
+      .should("contain.text", "Pending")
+      .and("not.contain.text", "Cleared")
+      .click()
+      .should("contain.text", "Cleared")
+      .and("not.contain.text", "Pending")
+      .click()
+      .should("contain.text", "Pending")
+      .and("not.contain.text", "Cleared");
+  });
+
+  it("fuzzy-suggests prior memos while allowing new free-form memo text", () => {
+    let submitted: Record<string, unknown> | undefined;
+    mountPage((path, init) => {
+      if (path === "/api/transactions" && init?.method === "POST") {
+        submitted = JSON.parse(String(init.body)) as Record<string, unknown>;
+        return new Response("{}", {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return undefined;
+    });
+    cy.get("[data-cy=transaction-entry-form]").within(() => {
+      chooseComboboxOption("Account", "Check", "Checking");
+      chooseComboboxOption("Category", "Gro", "Groceries");
+      cy.contains("label", "Amount").find("input").type("9");
+      typeFreeformMemo("Memo", "groc");
+      cy.get("[role=option]")
+        .contains("Groceries")
+        .should("be.visible")
+        .click();
+      cy.contains(".memo-autocomplete__label", "Memo")
+        .parent()
+        .find("[data-cy=memo-autocomplete-input]")
+        .should("have.value", "Groceries");
+      typeFreeformMemo("Memo", "Brand new note");
+      cy.contains("button", "Add").click();
+    });
+    cy.wrap(null).should(() => {
+      expect(submitted).to.include({ memo: "Brand new note" });
+    });
+  });
+
+  it("submits an atomic transfer with independently editable To account details", () => {
     let submitted: Record<string, unknown> | undefined;
     mountPage((path, init) => {
       if (path === "/api/transfers" && init?.method === "POST") {
@@ -300,30 +390,39 @@ describe("TransactionsPage", () => {
     });
     cy.get("[data-cy=transaction-entry-form]").within(() => {
       cy.contains("button", "Transfer").click();
-      cy.contains("label", "From account").find("select").select("acc1");
-      cy.contains("label", "Counterparty")
-        .find("select")
-        .select("investment-1");
+      chooseComboboxOption("From account", "Check", "Checking");
+      chooseComboboxOption("To account", "Brok", "Brokerage");
       cy.contains("label", "Amount").find("input").type("25");
-      cy.contains("label", "Status").find("select").select("CLEARED");
-      cy.contains("label", "Memo").find("input").type("Move funds");
-      cy.contains("button", "Counterparty details").click();
-      cy.contains("label", "Counterparty posted date")
-        .find("input")
-        .should("have.value", currentDate);
-      cy.contains("label", "Counterparty status")
-        .find("select")
-        .should("have.value", "CLEARED");
-      cy.contains("label", "Counterparty memo")
-        .find("input")
-        .should("have.value", "Move funds");
-      cy.contains("label", "Counterparty status")
-        .find("select")
-        .select("PENDING");
-      cy.contains("label", "Counterparty memo")
-        .find("input")
-        .clear()
-        .type("Investment contribution");
+      cy.get("[data-cy=binary-toggle-status]")
+        .click()
+        .should("contain.text", "Cleared")
+        .and("not.contain.text", "Pending");
+      typeFreeformMemo("Memo", "Move funds");
+      cy.get("[data-cy=to-account-disclosure]")
+        .find("button")
+        .click()
+        .should("have.attr", "aria-expanded", "true");
+      cy.get("[data-cy=to-account-disclosure]").within(() => {
+        cy.get("[data-cy=to-account-details-content]").should("be.visible");
+        cy.contains("label", "To account posted date")
+          .find("input")
+          .should("have.value", currentDate);
+        cy.get("[data-cy=binary-toggle-to-account-status]")
+          .should("contain.text", "Cleared")
+          .and("not.contain.text", "Pending");
+        cy.get("[data-cy=memo-autocomplete-input]").should(
+          "have.value",
+          "Move funds",
+        );
+        cy.get(".entry-form__to-account-row")
+          .children()
+          .should("have.length", 3);
+        typeFreeformMemo("To account memo", "Investment contribution");
+      });
+      cy.get("[data-cy=binary-toggle-to-account-status]")
+        .click()
+        .should("contain.text", "Pending")
+        .and("not.contain.text", "Cleared");
       cy.contains("button", "Add").click();
     });
     cy.wrap(null).should(() => {
@@ -366,15 +465,16 @@ describe("TransactionsPage", () => {
       return undefined;
     });
     cy.get("[data-cy=transaction-entry-form]").within(() => {
-      cy.contains("label", "Account").find("select").select("acc1");
-      cy.contains("label", "Category").find("select").select("c1");
+      chooseComboboxOption("Account", "Check", "Checking");
+      chooseComboboxOption("Category", "Gro", "Groceries");
       cy.contains("label", "Amount").find("input").type("12.34");
-      cy.contains("label", "Memo").find("input").type("Keep this draft{enter}");
+      typeFreeformMemo("Memo", "Keep this draft{enter}");
       cy.contains("label", "Amount")
         .find("input")
         .should("have.value", "12.34");
-      cy.contains("label", "Memo")
-        .find("input")
+      cy.contains(".memo-autocomplete__label", "Memo")
+        .parent()
+        .find("[data-cy=memo-autocomplete-input]")
         .should("have.value", "Keep this draft");
     });
   });
