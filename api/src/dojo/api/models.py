@@ -6,6 +6,8 @@ from uuid import UUID
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
+Date = date
+
 AccountClass = Literal["BUDGET", "TRACKING", "INVESTMENT", "LOAN", "TANGIBLE_ASSET"]
 BudgetAccountType = Literal["DEPOSIT", "CREDIT_CARD"]
 InvestmentTaxTreatment = Literal[
@@ -165,6 +167,12 @@ class TransferPayload(BaseModel):
     amount_minor: int = Field(gt=0)
     status: TransactionStatus
     memo: str = ""
+    source_date: Date | None = None
+    source_status: TransactionStatus | None = None
+    source_memo: str | None = None
+    destination_date: Date | None = None
+    destination_status: TransactionStatus | None = None
+    destination_memo: str | None = None
 
 
 class AccountBudgetLinkPayload(BaseModel):

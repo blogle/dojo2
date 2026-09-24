@@ -210,6 +210,12 @@ def test_transfers_preserve_current_net_worth(amount_minor: int) -> None:
             transfer_date=date(2026, 2, 15),
             memo="transfer-property",
             status=STATUS_CLEARED,
+            source_date=date(2026, 2, 14),
+            source_status=STATUS_PENDING,
+            source_memo="source memo",
+            destination_date=date(2026, 2, 15),
+            destination_status=STATUS_CLEARED,
+            destination_memo="destination memo",
         )
         after = imported_service.get_net_worth()["current_net_worth_minor"]
         assert after == before
@@ -217,7 +223,7 @@ def test_transfers_preserve_current_net_worth(amount_minor: int) -> None:
         rows = imported_service.db.fetch_all(
             render_sql(
                 "templates/select_columns_where_ordered",
-                columns="transaction_id, amount_minor, valid_from",
+                columns="transaction_id, amount_minor, valid_from, date, status, memo",
                 table="current_transactions",
                 predicate="transaction_id IN (?, ?)",
                 order_by="transaction_id",
@@ -226,6 +232,9 @@ def test_transfers_preserve_current_net_worth(amount_minor: int) -> None:
         )
         assert sorted(row["amount_minor"] for row in rows) == [-amount_minor, amount_minor]
         assert len({row["valid_from"] for row in rows}) == 1
+        assert {row["date"] for row in rows} == {date(2026, 2, 14), date(2026, 2, 15)}
+        assert {row["status"] for row in rows} == {STATUS_PENDING, STATUS_CLEARED}
+        assert {row["memo"] for row in rows} == {"source memo", "destination memo"}
 
 
 @settings(max_examples=15, deadline=None)
