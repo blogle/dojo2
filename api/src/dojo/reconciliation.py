@@ -7,7 +7,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timezone
 from hashlib import sha256
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
 import duckdb
@@ -16,6 +16,64 @@ from dojo.database import Database, json_dumps
 from dojo.sql import load_sql
 
 SUPPORTED_ENTITY_CLASSES = frozenset({"BUDGET", "INVESTMENT", "LOAN", "TRACKING", "TANGIBLE_ASSET"})
+
+
+@dataclass(frozen=True, slots=True)
+class BudgetBalances:
+    cleared_minor: int
+    pending_minor: int
+    actual_minor: int
+    derived: str | None = None
+
+
+def normalize_budget_balances(
+    *, cleared_minor: int | None, pending_minor: int | None, actual_minor: int | None
+) -> BudgetBalances:
+    supplied = {
+        name: value
+        for name, value in (
+            ("cleared", cleared_minor),
+            ("pending", pending_minor),
+            ("actual", actual_minor),
+        )
+        if value is not None
+    }
+    if len(supplied) != 2 or any(type(value) is not int for value in supplied.values()):
+        raise ValueError("Provide exactly two integer source balances")
+    if "cleared" not in supplied:
+        cleared_minor = cast(int, actual_minor) - cast(int, pending_minor)
+        derived = "cleared"
+    elif "pending" not in supplied:
+        pending_minor = cast(int, actual_minor) - cast(int, cleared_minor)
+        derived = "pending"
+    else:
+        actual_minor = cast(int, cleared_minor) + cast(int, pending_minor)
+        derived = "actual"
+    return BudgetBalances(
+        cast(int, cleared_minor), cast(int, pending_minor), cast(int, actual_minor), derived
+    )
+
+
+def budget_balance_proof(source: BudgetBalances, dojo: BudgetBalances) -> dict[str, Any]:
+    deltas = {
+        "cleared_delta_minor": source.cleared_minor - dojo.cleared_minor,
+        "pending_delta_minor": source.pending_minor - dojo.pending_minor,
+        "actual_delta_minor": source.actual_minor - dojo.actual_minor,
+    }
+    if deltas["actual_delta_minor"] != (
+        deltas["cleared_delta_minor"] + deltas["pending_delta_minor"]
+    ):
+        raise ValueError("Budget balance delta identity violated")
+    return {
+        "dojo": {
+            "cleared_minor": dojo.cleared_minor,
+            "pending_minor": dojo.pending_minor,
+            "actual_minor": dojo.actual_minor,
+        },
+        "deltas": deltas,
+        "certification_allowed": deltas["cleared_delta_minor"] == 0
+        and deltas["pending_delta_minor"] == 0,
+    }
 
 
 @dataclass(frozen=True)

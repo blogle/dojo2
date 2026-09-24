@@ -4,7 +4,7 @@ from datetime import date
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
 
 Date = date
 
@@ -473,15 +473,43 @@ class ReconciliationSourceRecordPayload(BaseModel):
 
 
 class ReconciliationDraftPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     source_kind: Literal["BANK_STATEMENT", "CREDIT_CARD_STATEMENT", "INVESTMENT_STATEMENT"]
     period_start: date | None = None
     cutoff: date
-    source_ending_value_minor: int = Field(
-        validation_alias=AliasChoices(
-            "source_ending_value_minor", "ending_value_minor", "ending_balance_minor"
-        )
-    )
+    source_cleared_minor: StrictInt | None = None
+    source_pending_minor: StrictInt | None = None
+    source_actual_minor: StrictInt | None = None
+    source_ending_value_minor: int | None = None
     source_records: list[ReconciliationSourceRecordPayload] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_balance_pair(self) -> "ReconciliationDraftPayload":
+        supplied = sum(
+            value is not None
+            for value in (
+                self.source_cleared_minor,
+                self.source_pending_minor,
+                self.source_actual_minor,
+            )
+        )
+        if supplied != 2 and not (supplied == 0 and self.source_ending_value_minor is not None):
+            raise ValueError(
+                "Provide exactly two source balances (or a legacy ending value for investment reconciliation)"
+            )
+        if supplied and self.source_ending_value_minor is not None:
+            raise ValueError("Do not combine source balances with a legacy ending value")
+        if (
+            self.source_ending_value_minor is not None
+            and self.source_kind != "INVESTMENT_STATEMENT"
+        ):
+            raise ValueError(
+                "A legacy ending value is only supported for investment reconciliation"
+            )
+        if supplied == 2 and self.source_kind == "INVESTMENT_STATEMENT":
+            raise ValueError("Investment reconciliation uses its statement value")
+        return self
 
 
 class ReconciliationApplyPayload(BaseModel):
