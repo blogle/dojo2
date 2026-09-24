@@ -280,10 +280,14 @@ def test_merge_workflow_is_exact_comment_and_revalidates_before_squash() -> None
     assert ".statuses" in workflow
     assert 'git rev-parse origin/master)" == "$master_sha"' in workflow
     assert "git push" in workflow
-    assert "merge_method=squash" in workflow
+    assert 'gh pr merge "$PR_NUMBER" --auto --squash --match-head-commit "$final_head"' in workflow
+    assert '--subject "$title (#${PR_NUMBER})"' in workflow
+    assert 'gh api -X PUT "${pr_url}/merge"' not in workflow
+    assert "merge_result" not in workflow
+    assert "merge_sha" not in workflow
     assert "the PR title changed after validation" in workflow
     assert "the PR release directive changed after validation" in workflow
     assert "group_by(.context)" in workflow
-    assert "merge_sha=\"$(jq -r '.sha // empty'" in workflow
-    assert 'gh workflow run release.yml --ref master -f commit="$merge_sha"' in workflow
+    assert "gh workflow run release.yml" not in workflow
+    assert "Protected squash auto-merge armed" in workflow
     assert "master-merge" in workflow
