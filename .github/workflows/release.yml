@@ -1,61 +1,71 @@
 name: Release
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: dojo-release-${{ github.event_name == 'workflow_dispatch' && inputs.commit || github.sha }}
   cancel-in-progress: false
 
 on:
   push:
     branches: [master]
-    tags: ["staging", "v*"]
   workflow_dispatch:
     inputs:
-      version:
-        description: Existing release version to publish or recover, without the v prefix
+      commit:
+        description: Exact master commit to publish
         required: true
         type: string
 
 permissions:
   contents: write
-  pull-requests: write
+
+env:
+  TARGET_COMMIT: ${{ github.event_name == 'workflow_dispatch' && inputs.commit || github.sha }}
 
 jobs:
   prepare-release:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
     outputs:
-      created: ${{ steps.release.outputs.created }}
-      version: ${{ steps.release.outputs.version }}
+      commit: ${{ steps.version.outputs.commit }}
+      created: ${{ steps.version.outputs.created }}
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.commit || github.sha }}
           fetch-depth: 0
       - uses: DeterminateSystems/nix-installer-action@main
-      - name: Determine next release
-        id: release
-        shell: bash
+      - name: Determine release introduced by this commit
+        id: version
         run: |
-          title="$(git log -1 --pretty=%B)"
-          directive="$(printf '%s\n' "$title" | nix develop --command just release-directive)"
-          echo "Release directive: ${directive}"
-          if [[ "$directive" == "none" ]]; then
-            echo "created=false" >> "$GITHUB_OUTPUT"
-            exit 0
+          test "$(git rev-parse HEAD)" = "$TARGET_COMMIT"
+          git fetch origin master
+          git merge-base --is-ancestor "$TARGET_COMMIT" origin/master
+          parent="$(git rev-parse "${TARGET_COMMIT}^")"
+          git show "${parent}:CHANGELOG.md" > /tmp/parent-CHANGELOG.md
+          version="$(nix develop --command python3 scripts/release.py changelog-delta /tmp/parent-CHANGELOG.md CHANGELOG.md)"
+          echo "commit=$TARGET_COMMIT" >> "$GITHUB_OUTPUT"
+          if [[ -z "$version" ]]; then
+            echo 'created=false' >> "$GITHUB_OUTPUT"
+            echo 'This master commit introduced no generated release; staging will still be updated.'
+          else
+            echo 'created=true' >> "$GITHUB_OUTPUT"
+            echo "version=$version" >> "$GITHUB_OUTPUT"
           fi
-          version="$(nix develop --command just release-next-version "$directive")"
-          echo "created=true" >> "$GITHUB_OUTPUT"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
 
-  publish-image:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+  publish-staging:
+    needs: prepare-release
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+    env:
+      MASTER_COMMIT: ${{ needs.prepare-release.outputs.commit }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare-release.outputs.commit }}
+          fetch-depth: 0
       - uses: DeterminateSystems/nix-installer-action@main
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -63,28 +73,85 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Install project dependencies
-        run: nix develop --command just setup
-      - name: Build or reuse immutable container
+      - name: Build or reuse exact master image and update staging
         run: |
-          build_sha="$GITHUB_SHA"
-          source_image="ghcr.io/blogle/dojo2:git-${build_sha}"
+          source_image="ghcr.io/blogle/dojo2:git-${MASTER_COMMIT}"
           if docker manifest inspect "$source_image" >/dev/null 2>&1; then
-            printf 'Reusing existing immutable image %s.\n' "$source_image"
             docker pull "$source_image"
           else
             nix develop --command just build-web
-            DOJO_BUILD_SHA="$build_sha" nix build .#container --impure
+            DOJO_BUILD_SHA="$MASTER_COMMIT" nix build .#container --impure
             docker load < "$(readlink -f result)"
-            docker build --build-arg DOJO_BUILD_SHA="$build_sha" --tag "$source_image" .
+            docker build --build-arg DOJO_BUILD_SHA="$MASTER_COMMIT" --tag "$source_image" .
             docker push "$source_image"
+          fi
+          # An older delayed publication may build its exact image, but it must
+          # not move staging behind the current master ref.
+          remote_master="$(git ls-remote origin refs/heads/master | cut -f1)"
+          if [[ "$remote_master" != "$MASTER_COMMIT" ]]; then
+            printf 'Master advanced to %s; leaving staging unchanged.\n' "$remote_master"
+            exit 0
           fi
           docker tag "$source_image" ghcr.io/blogle/dojo2:staging
           docker push ghcr.io/blogle/dojo2:staging
 
   tag-release:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master' && needs.prepare-release.outputs.created == 'true'
-    needs: [prepare-release, publish-image]
+    needs: prepare-release
+    if: needs.prepare-release.outputs.created == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      MASTER_COMMIT: ${{ needs.prepare-release.outputs.commit }}
+      VERSION: ${{ needs.prepare-release.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare-release.outputs.commit }}
+          fetch-depth: 0
+      - name: Tag exact pushed commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          tag="v${VERSION}"
+          if git show-ref --tags --verify --quiet "refs/tags/${tag}"; then
+            test "$(git rev-parse "${tag}^{commit}")" = "$MASTER_COMMIT"
+          else
+            git tag --annotate "$tag" --message "dojo $tag" "$MASTER_COMMIT"
+            git push origin "$tag"
+          fi
+
+  publish-release-image:
+    needs: [prepare-release, publish-staging, tag-release]
+    if: needs.prepare-release.outputs.created == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      MASTER_COMMIT: ${{ needs.prepare-release.outputs.commit }}
+      VERSION: ${{ needs.prepare-release.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare-release.outputs.commit }}
+          fetch-depth: 1
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Promote exact master image
+        run: |
+          source_image="ghcr.io/blogle/dojo2:git-${MASTER_COMMIT}"
+          release_image="ghcr.io/blogle/dojo2:v${VERSION}"
+          docker pull "$source_image"
+          docker tag "$source_image" "$release_image"
+          docker push "$release_image"
+
+  create-release:
+    needs: [prepare-release, publish-release-image, tag-release]
+    if: needs.prepare-release.outputs.created == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -93,130 +160,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
-      - name: Tag the already-published source build
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          tag="v${VERSION}"
-          git tag --annotate "$tag" --message "dojo $tag" "$GITHUB_SHA"
-          git push origin "$tag"
-
-  promote-image:
-    if: |
-      always() && (
-        (github.event_name == 'push' && github.ref == 'refs/heads/master' && needs.prepare-release.outputs.created == 'true' && needs.publish-image.result == 'success' && needs.tag-release.result == 'success') ||
-        (github.event_name == 'push' && (github.ref == 'refs/tags/staging' || startsWith(github.ref, 'refs/tags/v'))) ||
-        (github.event_name == 'workflow_dispatch' && inputs.version != '')
-      )
-    needs: [prepare-release, publish-image, tag-release]
-    outputs:
-      release_tag: ${{ steps.promote.outputs.release_tag }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    env:
-      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || (github.ref == 'refs/heads/master' && format('v{0}', needs.prepare-release.outputs.version) || github.ref_name) }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          ref: ${{ github.event_name == 'workflow_dispatch' && 'master' || github.ref }}
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Promote immutable source build
-        id: promote
-        run: |
-          if [[ "$GITHUB_REF" == "refs/heads/master" ]]; then
-            source_sha="$GITHUB_SHA"
-          elif [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
-            source_sha="$(git rev-parse "refs/tags/${RELEASE_TAG}^{commit}")"
-          else
-            source_sha="$(git rev-parse "refs/tags/${GITHUB_REF_NAME}^{commit}")"
-          fi
-          if [[ ! "$source_sha" =~ ^[0-9a-f]{40}$ ]]; then
-            printf 'Could not resolve a full Git SHA for %s.\n' "$RELEASE_TAG" >&2
-            exit 1
-          fi
-          source_image="ghcr.io/blogle/dojo2:git-${source_sha}"
-          alias_image="ghcr.io/blogle/dojo2:${RELEASE_TAG}"
-          printf 'Promoting %s to %s without rebuilding.\n' "$source_image" "$alias_image"
-          docker pull "$source_image"
-          docker tag "$source_image" "$alias_image"
-          docker push "$alias_image"
-          echo "release_tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
-
-  create-release:
-    if: |
-      always() && (
-        (github.event_name == 'push' && github.ref == 'refs/heads/master' && needs.promote-image.result == 'success') ||
-        (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && needs.promote-image.result == 'success') ||
-        (github.event_name == 'workflow_dispatch' && needs.promote-image.result == 'success')
-      )
-    needs: promote-image
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    env:
-      RELEASE_TAG: ${{ needs.promote-image.outputs.release_tag }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Create GitHub release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release create "${RELEASE_TAG}" --title "dojo ${RELEASE_TAG}" --generate-notes --verify-tag
-
-  sync-changelog:
-    if: needs.create-release.result == 'success'
-    needs: create-release
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: master
+          ref: ${{ needs.prepare-release.outputs.commit }}
           fetch-depth: 1
       - uses: DeterminateSystems/nix-installer-action@main
-      - name: Synchronize published release notes
+      - name: Create or refresh release from exact changelog entry
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          branch="automation/changelog"
-          git fetch origin master
-          git fetch origin "refs/heads/$branch:refs/remotes/origin/$branch" || true
-          git checkout -B "$branch" origin/master
-          gh api repos/${GITHUB_REPOSITORY}/releases --paginate --slurp |
-            jq 'flatten | map(select(.draft == false and .prerelease == false and .published_at != null) | {tag: .tag_name, date: (.published_at | split("T")[0]), body: (.body // "")})' > /tmp/releases.json
-          nix develop --command python3 scripts/release.py sync-changelog CHANGELOG.md < /tmp/releases.json
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add CHANGELOG.md
-          if [[ -z "$(git diff --cached --name-only)" ]]; then
-            exit 0
-          fi
-          git commit -m "docs: synchronize published changelog [release:none]"
-          git push --force-with-lease origin "$branch"
-          if [[ -z "$(gh pr list --head "$branch" --base master --state open --json number --jq '.[].number')" ]]; then
-            cat > /tmp/changelog-pr-body.md <<'EOF'
-          ## Summary
-
-          Automated synchronization from published GitHub Releases.
-
-          ## Changelog
-
-          - [x] PR title is suitable as a changelog/release-note entry, or this PR is marked [release:none].
-
-          ## Validation
-
-          Generated by the release workflow.
-          EOF
-            gh pr create --base master --head "$branch" \
-              --title "docs: synchronize published changelog [release:none]" \
-              --body-file /tmp/changelog-pr-body.md
+          tag="v${VERSION}"
+          nix develop --command python3 scripts/release.py changelog-entry CHANGELOG.md "$VERSION" > /tmp/release-notes.md
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release edit "$tag" --title "dojo $tag" --notes-file /tmp/release-notes.md
+          else
+            gh release create "$tag" --title "dojo $tag" --notes-file /tmp/release-notes.md --verify-tag
           fi

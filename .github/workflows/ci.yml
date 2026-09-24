@@ -7,6 +7,20 @@ concurrency:
 on:
   pull_request:
     types: [opened, synchronize, reopened, edited]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Candidate branch to validate
+        required: true
+        type: string
+      sha:
+        description: Candidate commit to mark validated
+        required: true
+        type: string
+      context:
+        description: Unique commit-status context for this validation
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -14,9 +28,15 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      statuses: write
     steps:
       - uses: actions/checkout@v4
-      - name: Validate changelog acknowledgement
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.sha || github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - name: Validate release directive
         if: github.event_name == 'pull_request'
         run: python3 scripts/release.py validate-pr "$GITHUB_EVENT_PATH"
       - uses: DeterminateSystems/nix-installer-action@main
@@ -24,11 +44,31 @@ jobs:
       - name: Install project dependencies
         run: nix develop --command just setup
       - name: Run canonical CI command
+        id: candidate-ci
+        continue-on-error: ${{ github.event_name == 'workflow_dispatch' }}
         run: nix develop --command just ci
+      - name: Publish candidate validation status
+        if: always() && github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VALIDATION_STATE: ${{ steps.candidate-ci.outcome == 'success' && 'success' || 'failure' }}
+        run: |
+          description='Candidate CI failed'
+          if [[ "$VALIDATION_STATE" == "success" ]]; then
+            description='Candidate CI passed'
+          fi
+          gh api "repos/${GITHUB_REPOSITORY}/statuses/${{ inputs.sha }}" \
+            -f state="$VALIDATION_STATE" \
+            -f context='${{ inputs.context }}' \
+            -f description="$description" \
+            -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" >/dev/null
+      - name: Return candidate CI result
+        if: github.event_name == 'workflow_dispatch' && steps.candidate-ci.outcome != 'success'
+        run: exit 1
 
   publish-pr-image:
     needs: verify
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     permissions:
       contents: read
