@@ -68,7 +68,7 @@ Before finishing a change, run `just check`. For CI-equivalent verification, run
 ## Version And Release Process
 
 Git tags named `vMAJOR.MINOR.PATCH` are the release authority. Release intent
-lives in the PR body as `<!-- dojo-release: patch|minor|major|none -->`; the
+lives in the PR body as `[release:patch|minor|major|none]`; the
 template defaults to `patch`. The PR title remains the human-facing changelog
 entry. Maintainers request the local ChatOps flow with exactly `/merge`.
 
