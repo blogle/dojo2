@@ -22,10 +22,13 @@ import colorSwatchGrid from "@/dojo/components/foundations/ColorSwatchGrid.fixtu
 import radiusScale from "@/dojo/components/foundations/RadiusScale.fixtures";
 import spacingScale from "@/dojo/components/foundations/SpacingScale.fixtures";
 import typographySpecimen from "@/dojo/components/foundations/TypographySpecimen.fixtures";
+import binaryToggle from "@/dojo/components/forms/BinaryToggle.fixtures";
+import comboboxField from "@/dojo/components/forms/ComboboxField.fixtures";
 import currencyField from "@/dojo/components/forms/CurrencyField.fixtures";
 import datePicker from "@/dojo/components/forms/DatePicker.fixtures";
 import iconPicker from "@/dojo/components/forms/IconPicker.fixtures";
 import institutionCombobox from "@/dojo/components/forms/InstitutionCombobox.fixtures";
+import memoAutocompleteField from "@/dojo/components/forms/MemoAutocompleteField.fixtures";
 import radioGroup from "@/dojo/components/forms/RadioGroup.fixtures";
 import selectField from "@/dojo/components/forms/SelectField.fixtures";
 import slider from "@/dojo/components/forms/Slider.fixtures";
@@ -66,9 +69,12 @@ export const fixtureRegistry: Record<string, ComponentFixtureSet> = {
   "foundations/SpacingScale.fixtures.ts": spacingScale,
   "foundations/TypographySpecimen.fixtures.ts": typographySpecimen,
   "forms/CurrencyField.fixtures.ts": currencyField,
+  "forms/ComboboxField.fixtures.ts": comboboxField,
+  "forms/BinaryToggle.fixtures.ts": binaryToggle,
   "forms/DatePicker.fixtures.ts": datePicker,
   "forms/IconPicker.fixtures.ts": iconPicker,
   "forms/InstitutionCombobox.fixtures.ts": institutionCombobox,
+  "forms/MemoAutocompleteField.fixtures.ts": memoAutocompleteField,
   "forms/RadioGroup.fixtures.ts": radioGroup,
   "forms/SelectField.fixtures.ts": selectField,
   "forms/Slider.fixtures.ts": slider,

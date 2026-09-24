@@ -1898,6 +1898,32 @@ class DojoService:
             "status_counts": status_counts,
         }
 
+    def suggest_transaction_memos(
+        self, *, query: str, account_id: str | None, limit: int
+    ) -> list[str]:
+        normalized_query = query.strip()
+        if len(normalized_query) < 2:
+            return []
+
+        selected_accounts = (account_id, None) if account_id else (None,)
+        for selected_account_id in selected_accounts:
+            predicate = "account_id = ?" if selected_account_id else "1 = 1"
+            parameters: tuple[Any, ...] = (
+                (selected_account_id, normalized_query, normalized_query, limit)
+                if selected_account_id
+                else (normalized_query, normalized_query, limit)
+            )
+            rows = self.db.fetch_all(
+                render_sql(
+                    "queries/transaction_memo_suggestions",
+                    account_predicate=predicate,
+                ),
+                parameters,
+            )
+            if rows:
+                return [str(row["memo"]) for row in rows]
+        return []
+
     def account_transaction_summary(
         self, *, account_id: str, days: int = 30, show_hidden: bool = False
     ) -> dict[str, Any]:

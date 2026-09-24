@@ -27,6 +27,7 @@
 ## Unreleased
 
 - Simplified transaction entry with Transaction and Transfer modes, Available to budget category selection, and atomic transfers with independent counterparty details.
+- Refined transaction entry with searchable entity pickers, direct segmented choices, clearer transfer labels, and bounded fuzzy memo suggestions.
 
 ## v0.0.4 - 2026-09-17
 

@@ -265,9 +265,9 @@ function handleSubmit(
         amount_minor: number;
         status: "PENDING" | "CLEARED";
         memo: string;
-        counterparty_date: string;
-        counterparty_status: "PENDING" | "CLEARED";
-        counterparty_memo: string;
+        to_account_date: string;
+        to_account_status: "PENDING" | "CLEARED";
+        to_account_memo: string;
       },
 ) {
   if ("kind" in payload) {
@@ -281,9 +281,9 @@ function handleSubmit(
       source_date: payload.date,
       source_status: payload.status,
       source_memo: payload.memo,
-      destination_date: payload.counterparty_date,
-      destination_status: payload.counterparty_status,
-      destination_memo: payload.counterparty_memo,
+      destination_date: payload.to_account_date,
+      destination_status: payload.to_account_status,
+      destination_memo: payload.to_account_memo,
     })
       .then(() => {
         entryForm.value?.resetForm();
