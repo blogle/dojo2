@@ -232,6 +232,11 @@ def test_release_workflow_is_publication_only() -> None:
     assert "ghcr.io/blogle/dojo2:staging" in workflow
     assert "git ls-remote origin refs/heads/master" in workflow
     assert "leaving staging unchanged" in workflow
+    publish_staging = workflow.split("publish-staging:", 1)[1].split("  tag-release:", 1)[0]
+    assert "nix develop --command just setup" in publish_staging
+    assert publish_staging.index("nix develop --command just setup") < publish_staging.index(
+        "nix develop --command just build-web"
+    )
     assert 'git show "${parent}:CHANGELOG.md"' in workflow
     assert "git log -1" not in workflow
     assert "changelog-version" not in workflow
@@ -275,10 +280,14 @@ def test_merge_workflow_is_exact_comment_and_revalidates_before_squash() -> None
     assert ".statuses" in workflow
     assert 'git rev-parse origin/master)" == "$master_sha"' in workflow
     assert "git push" in workflow
-    assert "merge_method=squash" in workflow
+    assert 'gh pr merge "$PR_NUMBER" --auto --squash --match-head-commit "$final_head"' in workflow
+    assert '--subject "$title (#${PR_NUMBER})"' in workflow
+    assert 'gh api -X PUT "${pr_url}/merge"' not in workflow
+    assert "merge_result" not in workflow
+    assert "merge_sha" not in workflow
     assert "the PR title changed after validation" in workflow
     assert "the PR release directive changed after validation" in workflow
     assert "group_by(.context)" in workflow
-    assert "merge_sha=\"$(jq -r '.sha // empty'" in workflow
-    assert 'gh workflow run release.yml --ref master -f commit="$merge_sha"' in workflow
+    assert "gh workflow run release.yml" not in workflow
+    assert "Protected squash auto-merge armed" in workflow
     assert "master-merge" in workflow
