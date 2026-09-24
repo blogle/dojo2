@@ -7,14 +7,14 @@ import argparse
 import re
 import subprocess
 import sys
+from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Iterable
 
 ROOT = Path(__file__).resolve().parent.parent
 TAG_PATTERN = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 BUMP_TYPES = frozenset({"patch", "minor", "major", "none"})
-DIRECTIVE_PATTERN = re.compile(r"(?im)^\s*<!--\s*dojo-release:\s*([^\s]+)\s*-->\s*$")
-DIRECTIVE_MARKER_PATTERN = re.compile(r"(?i)dojo-release\s*:")
+DIRECTIVE_PATTERN = re.compile(r"(?i)(?<!\w)\[release:([^\]\s]+)\]")
+DIRECTIVE_MARKER_PATTERN = re.compile(r"(?i)\[release:")
 GENERATED_START = "<!-- BEGIN GENERATED RELEASES -->"
 GENERATED_END = "<!-- END GENERATED RELEASES -->"
 GENERATED_SECTION_PATTERN = re.compile(
@@ -81,6 +81,27 @@ def next_version_from_tags(tags: Iterable[str], bump: str = "patch") -> str:
     return ".".join(str(part) for part in bump_version(current, bump))
 
 
+def generated_versions(changelog: str) -> list[str]:
+    generated_match = re.search(
+        rf"(?s){re.escape(GENERATED_START)}(.*?){re.escape(GENERATED_END)}",
+        changelog,
+    )
+    if generated_match is None:
+        return []
+    return re.findall(
+        r"(?m)^## (v\d+\.\d+\.\d+)(?: - \d{4}-\d{2}-\d{2})?$", generated_match.group(1)
+    )
+
+
+def next_version_from_state(
+    tags: Iterable[str], changelog: str, bump: str = "patch"
+) -> str:
+    return next_version_from_tags(
+        [*tags, *generated_versions(changelog)],
+        bump,
+    )
+
+
 def repository_tags() -> list[str]:
     result = subprocess.run(
         ["git", "tag", "--list", "v*"],
@@ -93,7 +114,23 @@ def repository_tags() -> list[str]:
 
 
 def next_version(bump: str = "patch") -> str:
-    return next_version_from_tags(repository_tags(), bump)
+    return next_version_from_state(
+        repository_tags(),
+        (ROOT / "CHANGELOG.md").read_text(encoding="utf-8"),
+        bump,
+    )
+
+
+def latest_status_states(statuses: Iterable[Mapping[str, str]]) -> dict[str, str]:
+    """Keep only the newest legacy commit status for each context."""
+    latest: dict[str, tuple[str, int, str]] = {}
+    for index, status in enumerate(statuses):
+        context = status["context"]
+        timestamp = status.get("updated_at") or status.get("created_at") or ""
+        candidate = (timestamp, index, status["state"])
+        if context not in latest or candidate[:2] > latest[context][:2]:
+            latest[context] = candidate
+    return {context: candidate[2] for context, candidate in latest.items()}
 
 
 def _render_section(tag: str, title: str, author: str, number: str, url: str) -> str:

@@ -283,7 +283,7 @@ without a second changelog PR or a service that races protected `master`.
 
 ### Decision
 
-The PR body carries `<!-- dojo-release: patch|minor|major|none -->`, defaulting
+The PR body carries `[release:patch|minor|major|none]`, defaulting
 to `patch`. An authorized maintainer's exact `/merge` comment runs the local
 GitHub Actions workflow. Before squash-merging, it validates current-master
 ancestry and checks, writes the next undated generated `CHANGELOG.md` section

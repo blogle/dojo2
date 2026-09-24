@@ -10,6 +10,7 @@ REPO_ROOT = RELEASE_SCRIPT.parents[1]
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 RELEASE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "release.yml"
 MERGE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "merge.yml"
+PR_TEMPLATE = REPO_ROOT / ".github" / "pull_request_template.md"
 SPEC = importlib.util.spec_from_file_location("dojo_release", RELEASE_SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
 release = importlib.util.module_from_spec(SPEC)
@@ -20,10 +21,10 @@ SPEC.loader.exec_module(release)
     ("body", "expected"),
     [
         ("", "patch"),
-        ("<!-- dojo-release: patch -->", "patch"),
-        ("<!-- dojo-release: minor -->", "minor"),
-        ("<!-- dojo-release: major -->", "major"),
-        ("<!-- dojo-release: none -->", "none"),
+        ("[release:patch]", "patch"),
+        ("[release:minor]", "minor"),
+        ("[release:major]", "major"),
+        ("[release:none]", "none"),
     ],
 )
 def test_release_directive_defaults_and_parses_body(body: str, expected: str) -> None:
@@ -33,9 +34,9 @@ def test_release_directive_defaults_and_parses_body(body: str, expected: str) ->
 @pytest.mark.parametrize(
     "body",
     [
-        "<!-- dojo-release: weekly -->",
-        "<!-- dojo-release: minor",
-        "<!-- dojo-release: minor -->\n<!-- dojo-release: major -->",
+        "[release:weekly]",
+        "[release:minor",
+        "[release:minor]\n[release:major]",
     ],
 )
 def test_release_directive_rejects_invalid_or_conflicting_body(body: str) -> None:
@@ -59,6 +60,42 @@ def test_next_version_uses_highest_semver_tag(tags: list[str], bump: str, expect
 def test_release_none_has_no_version() -> None:
     with pytest.raises(ValueError, match="cannot be calculated"):
         release.next_version_from_tags(["v1.0.0"], "none")
+
+
+def test_next_version_advances_past_untagged_checked_in_release() -> None:
+    changelog = """# Changelog
+
+<!-- BEGIN GENERATED RELEASES -->
+
+## v0.0.11
+
+- pending release
+
+<!-- END GENERATED RELEASES -->
+"""
+
+    assert release.next_version_from_state(["v0.0.10"], changelog) == "0.0.12"
+
+
+def test_latest_status_states_uses_latest_status_per_context() -> None:
+    statuses = [
+        {
+            "context": "ci/test",
+            "state": "success",
+            "updated_at": "2026-09-24T10:00:00Z",
+        },
+        {
+            "context": "ci/test",
+            "state": "failure",
+            "updated_at": "2026-09-24T09:00:00Z",
+        },
+        {"context": "lint", "state": "success", "created_at": "2026-09-24T08:00:00Z"},
+    ]
+
+    assert release.latest_status_states(statuses) == {
+        "ci/test": "success",
+        "lint": "success",
+    }
 
 
 def test_update_changelog_adds_undated_release_and_preserves_legacy_history() -> None:
@@ -144,14 +181,23 @@ def test_release_workflow_is_publication_only() -> None:
     assert "--notes-file" in workflow
 
 
+def test_pr_template_defaults_to_required_body_directive() -> None:
+    template = PR_TEMPLATE.read_text(encoding="utf-8")
+
+    assert "[release:patch]" in template
+    assert "dojo-release" not in template
+
+
 def test_ci_validates_pr_body_and_supports_explicit_candidate_validation() -> None:
     workflow = CI_WORKFLOW.read_text(encoding="utf-8")
 
     assert "workflow_dispatch:" in workflow
     assert "validate-pr" in workflow
     assert "pull_request.body" not in workflow
-    assert "inputs.ref" in workflow
+    assert "description: Candidate branch to validate" in workflow
     assert "inputs.sha" in workflow
+    assert "inputs.context" in workflow
+    assert "ref: ${{ github.event_name == 'workflow_dispatch' && inputs.sha" in workflow
     assert "statuses: write" in workflow
 
 
@@ -163,6 +209,13 @@ def test_merge_workflow_is_exact_comment_and_revalidates_before_squash() -> None
     assert "collaborators" in workflow
     assert "merge-base --is-ancestor" in workflow
     assert "workflow run" in workflow
+    assert "gh run list" not in workflow
+    assert "validation_context" in workflow
+    assert ".statuses" in workflow
+    assert 'git rev-parse origin/master)" == "$master_sha"' in workflow
     assert "git push" in workflow
     assert "merge_method=squash" in workflow
+    assert "the PR title changed after validation" in workflow
+    assert "the PR release directive changed after validation" in workflow
+    assert "group_by(.context)" in workflow
     assert "master-merge" in workflow
