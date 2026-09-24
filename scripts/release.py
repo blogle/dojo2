@@ -13,8 +13,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 TAG_PATTERN = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 BUMP_TYPES = frozenset({"patch", "minor", "major", "none"})
-DIRECTIVE_PATTERN = re.compile(r"(?i)(?<!\w)\[release:([^\]\s]+)\]")
-DIRECTIVE_MARKER_PATTERN = re.compile(r"(?i)\[release:")
+DIRECTIVE_PATTERN = re.compile(
+    r"(?im)^[ \t]*\[release:(patch|minor|major|none)\][ \t]*$"
+)
+DIRECTIVE_MARKER_PATTERN = re.compile(r"(?im)^[ \t]*\[release:")
 GENERATED_START = "<!-- BEGIN GENERATED RELEASES -->"
 GENERATED_END = "<!-- END GENERATED RELEASES -->"
 GENERATED_SECTION_PATTERN = re.compile(
