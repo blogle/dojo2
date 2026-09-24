@@ -4,10 +4,13 @@ Describe the change briefly.
 
 ## Changelog
 
-The PR title is the release/changelog entry. Keep it concise and user-facing
-when this PR will release.
+The PR title is the human-facing release/changelog entry. Keep it concise and
+user-facing when this PR will release.
 
-- [ ] PR title is suitable as a changelog/release-note entry, or this PR is marked [release:none].
+<!-- dojo-release: patch -->
+
+Set the machine-readable directive above to `patch`, `minor`, `major`, or
+`none`. Maintainers merge with the exact `/merge` comment after CI passes.
 
 ## Validation
 

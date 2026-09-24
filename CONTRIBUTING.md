@@ -67,38 +67,27 @@ Before finishing a change, run `just check`. For CI-equivalent verification, run
 
 ## Version And Release Process
 
-Git tags named `vMAJOR.MINOR.PATCH` are the release authority. Release behavior
-is selected by the effective title of the commit pushed to `master`:
+Git tags named `vMAJOR.MINOR.PATCH` are the release authority. Release intent
+lives in the PR body as `<!-- dojo-release: patch|minor|major|none -->`; the
+template defaults to `patch`. The PR title remains the human-facing changelog
+entry. Maintainers request the local ChatOps flow with exactly `/merge`.
 
-- No directive or `[release:patch]`: create the next patch release.
-- `[release:minor]`: create the next minor release.
-- `[release:major]`: create the next major release.
-- `[release:none]`: do not create a release for this commit.
+The merge workflow checks authorization, PR state, current-master ancestry, and
+current checks. For a release directive it calculates the next version from
+tags, commits the undated generated changelog entry to the PR branch, explicitly
+dispatches CI for that new head (because `GITHUB_TOKEN` pushes do not trigger
+workflows), revalidates both master and the PR head, and squash-merges. For
+`none`, it skips the changelog commit. It never rewrites the contributor branch
+other than adding the generated changelog commit.
 
-The release workflow tags the exact `master` commit, publishes the matching
-`ghcr.io/blogle/dojo2:vX.Y.Z` image, and creates a GitHub Release with generated
-notes. Published GitHub Releases are authoritative for `CHANGELOG.md`; a
-successful release updates one fixed `automation/changelog` branch and creates
-or reuses one `[release:none]` pull request. It never pushes `master` or moves
-tags. Conflicting or malformed directives fail the workflow rather than
-guessing. Release runs are serialized so each merge sees the previous tag.
+The release workflow is publication-only. It reads the newest untagged generated
+entry from `CHANGELOG.md`, tags that exact master commit, promotes the matching
+container image, and creates the GitHub Release from that changelog entry. It
+does not infer a bump from a merge commit and never creates a changelog PR.
 
-Put the directive in the ordinary commit title or pull request title when a
-release other than the default patch is needed. For GitHub default merge
-commits, the workflow uses the first non-empty line after `Merge pull request
-#...` as the effective pull request title. Do not maintain changelog notes in
-feature PRs; the changelog sync PR is the automated promotion path from
-published GitHub Releases.
-
-PR titles are the generated changelog/release-note entries. Normal releasing
-PRs must check the changelog acknowledgement in the pull request template;
-`[release:none]` PRs are exempt because they intentionally produce no release.
-
-For local inspection, pipe a commit title to `just release-directive`, or use
+For local inspection, pipe a PR body to `just release-directive`, or use
 `just release-next-version [patch|minor|major]`. Resolve workflow failures
-before retrying; do not force-move an existing release tag. For an existing tag
-whose image or GitHub Release needs recovery, run the `Release` workflow
-manually with the version entered without the `v` prefix.
+before retrying; do not force-move an existing release tag.
 
 ## Repository Structure
 

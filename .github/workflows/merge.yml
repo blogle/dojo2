@@ -1,0 +1,122 @@
+name: ChatOps Merge
+
+concurrency:
+  group: dojo-master-merge
+  cancel-in-progress: false
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: read
+  statuses: read
+  actions: write
+
+jobs:
+  merge:
+    if: github.event.issue.pull_request && github.event.comment.body == '/merge'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: DeterminateSystems/nix-installer-action@main
+      - name: Process merge request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          pr_url="repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}"
+          comment_url="repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments"
+          fail() {
+            gh api "$comment_url" -f body="/merge rejected: $1" >/dev/null || true
+            exit 1
+          }
+          comment() {
+            gh api "$comment_url" -f body="$1" >/dev/null
+          }
+          validate_head() {
+            local head_sha="$1"
+            local master_sha="$2"
+            if [[ "$master_sha" != "$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/master" --jq '.object.sha')" ]]; then
+              fail "master advanced while this request was running; retry after rebasing."
+            fi
+            git fetch origin master
+            git fetch origin "$head_ref"
+            git merge-base --is-ancestor "origin/master" "$head_sha" || fail "the PR head is not based on the current master."
+            [[ "$(gh api "${pr_url}" --jq '.head.sha')" == "$head_sha" ]] || fail "the PR head changed while this request was running."
+            status_state="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${head_sha}/status" --jq '.state')"
+            [[ "$status_state" == "success" ]] || fail "current commit status is ${status_state}; all checks must pass."
+            checks="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${head_sha}/check-runs?per_page=100" --jq '.check_runs[] | [.status, (.conclusion // "")] | @tsv')"
+            while IFS=$'\t' read -r status conclusion; do
+              [[ -z "$status" ]] && continue
+              [[ "$status" == "completed" && "$conclusion" =~ ^(success|skipped|neutral)$ ]] || fail "a current check is ${status}/${conclusion}; all checks must pass."
+            done <<< "$checks"
+          }
+
+          commenter="${{ github.event.comment.user.login }}"
+          permission="$(gh api "repos/${GITHUB_REPOSITORY}/collaborators/${commenter}/permission" --jq '.permission' 2>/dev/null || true)"
+          [[ "$permission" =~ ^(admin|maintain|push|write)$ ]] || fail "@${commenter} does not have repository merge/write authorization."
+
+          gh api "$pr_url" > /tmp/pr.json
+          state="$(jq -r '.state' /tmp/pr.json)"
+          draft="$(jq -r '.draft' /tmp/pr.json)"
+          base="$(jq -r '.base.ref' /tmp/pr.json)"
+          mergeable="$(jq -r '.mergeable // false' /tmp/pr.json)"
+          head_repo="$(jq -r '.head.repo.full_name // empty' /tmp/pr.json)"
+          head_ref="$(jq -r '.head.ref' /tmp/pr.json)"
+          head_sha="$(jq -r '.head.sha' /tmp/pr.json)"
+          title="$(jq -r '.title' /tmp/pr.json)"
+          author="$(jq -r '.user.login' /tmp/pr.json)"
+          html_url="$(jq -r '.html_url' /tmp/pr.json)"
+          [[ "$state" == "open" ]] || fail "the PR is not open."
+          [[ "$draft" == "false" ]] || fail "draft PRs cannot be merged."
+          [[ "$base" == "master" ]] || fail "only PRs targeting master can be merged."
+          [[ "$mergeable" == "true" ]] || fail "GitHub does not currently consider this PR mergeable."
+          [[ "$head_repo" == "$GITHUB_REPOSITORY" ]] || fail "the PR head must be in this repository so the generated changelog commit can be pushed."
+
+          master_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/master" --jq '.object.sha')"
+          validate_head "$head_sha" "$master_sha"
+          body="$(jq -r '.body // ""' /tmp/pr.json)"
+          if ! directive="$(python3 scripts/release.py directive "$body")"; then
+            fail "the PR body has no valid release directive; use <!-- dojo-release: patch|minor|major|none -->."
+          fi
+
+          if [[ "$directive" != "none" ]]; then
+            version="$(python3 scripts/release.py next-version "$directive")" || fail "could not calculate the next release version from repository tags."
+            git checkout -B "$head_ref" "origin/$head_ref"
+            python3 scripts/release.py prepare-changelog CHANGELOG.md "$version" "$title" "$author" "$PR_NUMBER" "$html_url" || fail "could not generate the changelog release section."
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add CHANGELOG.md
+            git diff --cached --quiet || git commit -m "docs: record release v${version}"
+            git push origin "HEAD:${head_ref}" || fail "could not push the generated changelog commit to the PR branch."
+            head_sha="$(git rev-parse HEAD)"
+            # GITHUB_TOKEN pushes do not trigger pull_request workflows. Dispatching
+            # CI explicitly is the GitHub-native exception and avoids a PAT/App.
+            gh workflow run ci.yml --ref master -f ref="$head_ref" -f sha="$head_sha"
+            run_id=""
+            for attempt in {1..30}; do
+              sleep 5
+              run_id="$(gh run list --workflow ci.yml --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+              [[ -n "$run_id" ]] && break
+            done
+            [[ -n "$run_id" ]] || fail "could not find the explicit validation run for the generated changelog head."
+            gh run watch "$run_id" --exit-status || fail "the generated changelog head did not pass CI."
+          fi
+
+          gh api "$pr_url" > /tmp/pr-final.json
+          final_head="$(jq -r '.head.sha' /tmp/pr-final.json)"
+          final_master="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/master" --jq '.object.sha')"
+          [[ "$final_head" == "$head_sha" ]] || fail "the PR head changed after validation; no merge was attempted."
+          [[ "$final_master" == "$master_sha" ]] || fail "master advanced after validation; no merge was attempted."
+          validate_head "$final_head" "$final_master"
+          merge_result="$(gh api -X PUT "${pr_url}/merge" -f sha="$final_head" -f merge_method=squash -f commit_title="$title (#${PR_NUMBER})" --jq '.merged')"
+          [[ "$merge_result" == "true" ]] || fail "GitHub did not accept the squash merge."
+          comment "Merged with a validated squash commit. Release directive: ${directive}."
