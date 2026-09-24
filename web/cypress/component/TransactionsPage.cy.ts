@@ -278,7 +278,7 @@ describe("TransactionsPage", () => {
       });
       cy.get("[data-cy=to-account-disclosure]")
         .should("contain.text", "To account details")
-        .find("button")
+        .find(".entry-form__details-toggle")
         .should("have.attr", "aria-expanded", "false");
       cy.get("[data-cy=to-account-details-content]").should("not.be.visible");
       cy.get("[data-cy=to-account-details-content]")
@@ -444,7 +444,7 @@ describe("TransactionsPage", () => {
         .and("not.contain.text", "Pending");
       typeFreeformMemo("Memo", "Move funds");
       cy.get("[data-cy=to-account-disclosure]")
-        .find("button")
+        .find(".entry-form__details-toggle")
         .click()
         .should("have.attr", "aria-expanded", "true");
       cy.get("[data-cy=to-account-disclosure]").within(() => {
