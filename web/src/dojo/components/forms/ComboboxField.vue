@@ -44,6 +44,7 @@ const emit = defineEmits<{
 const root = ref<HTMLElement | null>(null);
 const trigger = ref<HTMLButtonElement | null>(null);
 const searchInput = ref<HTMLInputElement | null>(null);
+const selectedValue = ref(props.modelValue);
 const query = ref("");
 const isOpen = ref(false);
 const activeIndex = ref(-1);
@@ -53,19 +54,19 @@ const triggerId = `combobox-trigger-${id}`;
 const searchId = `combobox-search-${id}`;
 
 const selectedOption = computed(() =>
-  props.options.find((option) => option.value === props.modelValue),
+  props.options.find((option) => option.value === selectedValue.value),
 );
 const displayValue = computed(
   () =>
     selectedOption.value?.label ??
-    (props.allowCustom && props.modelValue
-      ? props.modelValue
+    (props.allowCustom && selectedValue.value
+      ? selectedValue.value
       : props.placeholder),
 );
 const isInvalid = computed(
   () =>
     props.invalid ||
-    Boolean(props.modelValue && !selectedOption.value && !props.allowCustom),
+    Boolean(selectedValue.value && !selectedOption.value && !props.allowCustom),
 );
 const filteredOptions = computed(() => {
   const normalizedQuery = query.value.trim().toLocaleLowerCase();
@@ -78,6 +79,13 @@ const activeOptionId = computed(() =>
 );
 
 watch(
+  () => props.modelValue,
+  (value) => {
+    selectedValue.value = value;
+  },
+);
+
+watch(
   () => props.options,
   () => {
     if (activeIndex.value >= filteredOptions.value.length)
@@ -87,7 +95,7 @@ watch(
 
 async function openPopover() {
   if (props.disabled) return;
-  query.value = props.allowCustom ? props.modelValue : "";
+  query.value = props.allowCustom ? selectedValue.value : "";
   activeIndex.value = -1;
   isOpen.value = true;
   emit("focus");
@@ -98,13 +106,14 @@ async function openPopover() {
 function closePopover({ restoreFocus = false } = {}) {
   isOpen.value = false;
   activeIndex.value = -1;
-  query.value = props.allowCustom ? props.modelValue : "";
+  query.value = props.allowCustom ? selectedValue.value : "";
   if (restoreFocus) void nextTick(() => trigger.value?.focus());
   emit("blur");
 }
 
 function selectOption(option: ComboboxOption) {
   if (option.disabled) return;
+  selectedValue.value = option.value;
   emit("update:modelValue", option.value);
   closePopover({ restoreFocus: true });
 }
@@ -138,7 +147,10 @@ function handleTriggerKeydown(event: KeyboardEvent) {
 function handleSearchInput(event: Event) {
   query.value = (event.target as HTMLInputElement).value;
   activeIndex.value = -1;
-  if (props.allowCustom) emit("update:modelValue", query.value);
+  if (props.allowCustom) {
+    selectedValue.value = query.value;
+    emit("update:modelValue", query.value);
+  }
 }
 
 function handleSearchKeydown(event: KeyboardEvent) {
@@ -231,7 +243,7 @@ onUnmounted(() =>
             'combobox-field__option--disabled': option.disabled,
           }"
           role="option"
-          :aria-selected="option.value === modelValue"
+          :aria-selected="option.value === selectedValue"
           :aria-disabled="option.disabled || undefined"
           @pointerdown.prevent
           @click="selectOption(option)"
