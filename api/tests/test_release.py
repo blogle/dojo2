@@ -31,6 +31,15 @@ def test_release_directive_defaults_and_parses_body(body: str, expected: str) ->
     assert release.release_directive(body) == expected
 
 
+def test_release_directive_ignores_inline_explanatory_syntax() -> None:
+    body = """[release:none]
+
+The supported values are `[release:patch|minor|major|none]`.
+"""
+
+    assert release.release_directive(body) == "none"
+
+
 @pytest.mark.parametrize(
     "body",
     [
