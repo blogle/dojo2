@@ -145,10 +145,10 @@ function handleSearchKeydown(event: KeyboardEvent) {
   if (event.key === "ArrowDown" || event.key === "ArrowUp") {
     event.preventDefault();
     moveActiveOption(event.key === "ArrowDown" ? 1 : -1);
-  } else if (event.key === "Enter") {
+  } else if (event.key === "Enter" && isOpen.value) {
+    event.preventDefault();
     const option = filteredOptions.value[activeIndex.value];
     if (option) {
-      event.preventDefault();
       selectOption(option);
     }
   } else if (event.key === "Escape") {
