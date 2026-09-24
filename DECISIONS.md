@@ -256,7 +256,7 @@ Use Git tags as the release authority and promote a non-empty `CHANGELOG.md` not
 
 Merges are self-contained release inputs and the current post-`v0.0.1` work will become `v0.0.2` automatically. Release metadata is intentionally a bot-authored follow-up commit, so feature PRs do not race with a future version number.
 
-## 2026-09-18 — Use commit-title release directives
+## 2026-09-18 — Use commit-title release directives (superseded)
 
 ### Context
 
@@ -266,25 +266,45 @@ metadata from concurrent feature merges.
 
 ### Decision
 
-Use the effective merged commit title as the release control surface. For an
-ordinary commit this is the first line; for a GitHub default merge commit it is
-the first non-empty line after `Merge pull request #...`. The default is a
-patch release; `[release:minor]`, `[release:major]`, and `[release:none]` opt
-into a different bump or suppress the release. The workflow tags the exact
-pushed commit and publishes from that tag without mutating `master`.
-
-After a successful GitHub Release, published GitHub Releases are the changelog
-authority. The workflow replaces the generated release region and force-updates
-only `automation/changelog`, then creates or reuses one pull request titled
-with `[release:none]`. The bot never pushes `master` or moves a release tag.
+Superseded by the 2026-09-24 PR-body directive and local ChatOps merge flow
+below. This entry records the retired title-driven design for historical
+context.
 
 ### Consequence
 
-Each qualifying merge produces at most one release and never creates a second
-metadata PR. A skipped merge is included in the next release that is created.
-Conflicting or malformed directives fail closed. The checked-in changelog has
-published release sections only and is synchronized through the automation pull
-request.
+Each qualifying merge produced at most one release under this retired design.
+
+## 2026-09-24 — Decide releases before the squash merge
+
+### Context
+
+Release metadata must be part of the same linear squash commit as the feature,
+without a second changelog PR or a service that races protected `master`.
+
+### Decision
+
+The PR body carries `[release:patch|minor|major|none]`, defaulting
+to `patch`. An authorized maintainer's exact `/merge` comment runs the local
+GitHub Actions workflow. Before squash-merging, it validates current-master
+ancestry and checks, writes the next undated generated `CHANGELOG.md` section
+onto the PR branch, explicitly dispatches CI for that new head because
+`GITHUB_TOKEN` pushes do not recursively trigger workflows, then revalidates
+the master and head SHAs. `release:none` skips the changelog section.
+
+The post-merge release workflow is publication-only: it compares the exact
+master push commit's generated changelog with its first parent, tags that exact
+commit when one release was introduced, promotes the matching container, and
+creates the matching GitHub Release. Every master push still updates staging,
+but delayed publication runs cannot move staging behind the current master.
+Dated legacy changelog history is preserved. The merge workflow explicitly
+dispatches publication with the squash commit SHA because `GITHUB_TOKEN`
+pushes do not recursively trigger workflows.
+
+### Consequence
+
+Master contains one squash commit per accepted PR, with release intent and
+changelog content decided before merge. No automation branch or changelog PR is
+created.
 
 ## 2026-06-10 — Adopt self-contained ExecPlans for complex implementation work
 
