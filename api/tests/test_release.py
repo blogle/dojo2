@@ -232,6 +232,11 @@ def test_release_workflow_is_publication_only() -> None:
     assert "ghcr.io/blogle/dojo2:staging" in workflow
     assert "git ls-remote origin refs/heads/master" in workflow
     assert "leaving staging unchanged" in workflow
+    publish_staging = workflow.split("publish-staging:", 1)[1].split("  tag-release:", 1)[0]
+    assert "nix develop --command just setup" in publish_staging
+    assert publish_staging.index("nix develop --command just setup") < publish_staging.index(
+        "nix develop --command just build-web"
+    )
     assert 'git show "${parent}:CHANGELOG.md"' in workflow
     assert "git log -1" not in workflow
     assert "changelog-version" not in workflow
