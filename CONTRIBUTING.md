@@ -80,10 +80,14 @@ workflows), revalidates both master and the PR head, and squash-merges. For
 `none`, it skips the changelog commit. It never rewrites the contributor branch
 other than adding the generated changelog commit.
 
-The release workflow is publication-only. It reads the newest untagged generated
-entry from `CHANGELOG.md`, tags that exact master commit, promotes the matching
-container image, and creates the GitHub Release from that changelog entry. It
-does not infer a bump from a merge commit and never creates a changelog PR.
+The release workflow is publication-only. It compares the exact pushed master
+commit's generated changelog section with its first parent, tags that exact
+commit when one release was introduced, promotes the matching container image,
+and creates the GitHub Release from that changelog entry. Every master push
+still updates `:staging`; release publication is skipped when no section was
+introduced. The merge workflow explicitly dispatches publication with the
+squash commit SHA because `GITHUB_TOKEN` pushes do not recursively trigger
+workflows.
 
 For local inspection, pipe a PR body to `just release-directive`, or use
 `just release-next-version [patch|minor|major]`. Resolve workflow failures

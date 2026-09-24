@@ -77,6 +77,35 @@ def test_next_version_advances_past_untagged_checked_in_release() -> None:
     assert release.next_version_from_state(["v0.0.10"], changelog) == "0.0.12"
 
 
+def test_introduced_release_version_returns_none_for_no_delta() -> None:
+    changelog = (
+        "# Changelog\n\n<!-- BEGIN GENERATED RELEASES -->\n\n<!-- END GENERATED RELEASES -->\n"
+    )
+
+    assert release.introduced_release_version(changelog, changelog) is None
+
+
+def test_introduced_release_version_returns_one_added_version() -> None:
+    parent = "# Changelog\n\n<!-- BEGIN GENERATED RELEASES -->\n\n<!-- END GENERATED RELEASES -->\n"
+    current = parent.replace(
+        "<!-- END GENERATED RELEASES -->",
+        "## v0.0.11\n\n- release\n\n<!-- END GENERATED RELEASES -->",
+    )
+
+    assert release.introduced_release_version(parent, current) == "v0.0.11"
+
+
+def test_introduced_release_version_rejects_multiple_added_versions() -> None:
+    parent = "# Changelog\n\n<!-- BEGIN GENERATED RELEASES -->\n\n<!-- END GENERATED RELEASES -->\n"
+    current = parent.replace(
+        "<!-- END GENERATED RELEASES -->",
+        "## v0.0.11\n\n- one\n\n## v0.0.12\n\n- two\n\n<!-- END GENERATED RELEASES -->",
+    )
+
+    with pytest.raises(ValueError, match="multiple generated release versions"):
+        release.introduced_release_version(parent, current)
+
+
 def test_latest_status_states_uses_latest_status_per_context() -> None:
     statuses = [
         {
@@ -173,12 +202,30 @@ def test_changelog_version_ignores_tagged_versions_and_legacy_dates() -> None:
 def test_release_workflow_is_publication_only() -> None:
     workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
 
-    assert "changelog-version" in workflow
+    assert "changelog-delta" in workflow
+    assert (
+        "ref: ${{ github.event_name == 'workflow_dispatch' && inputs.commit || github.sha }}"
+        in workflow
+    )
+    assert "${{ needs.prepare-release.outputs.commit }}" in workflow
+    assert "workflow_dispatch:" in workflow
+    assert "description: Exact master commit to publish" in workflow
+    assert "required: true" in workflow
+    assert "TARGET_COMMIT" in workflow
+    assert 'git merge-base --is-ancestor "$TARGET_COMMIT" origin/master' in workflow
+    assert "ref: master" not in workflow
+    assert "publish-staging:" in workflow
+    assert "ghcr.io/blogle/dojo2:staging" in workflow
+    assert "git ls-remote origin refs/heads/master" in workflow
+    assert "leaving staging unchanged" in workflow
+    assert 'git show "${parent}:CHANGELOG.md"' in workflow
     assert "git log -1" not in workflow
+    assert "changelog-version" not in workflow
     assert "sync-changelog" not in workflow
     assert "automation/changelog" not in workflow
     assert "gh pr create" not in workflow
     assert "--notes-file" in workflow
+    assert "gh release edit" in workflow
 
 
 def test_pr_template_defaults_to_required_body_directive() -> None:
@@ -218,4 +265,6 @@ def test_merge_workflow_is_exact_comment_and_revalidates_before_squash() -> None
     assert "the PR title changed after validation" in workflow
     assert "the PR release directive changed after validation" in workflow
     assert "group_by(.context)" in workflow
+    assert "merge_sha=\"$(jq -r '.sha // empty'" in workflow
+    assert 'gh workflow run release.yml --ref master -f commit="$merge_sha"' in workflow
     assert "master-merge" in workflow

@@ -291,10 +291,14 @@ onto the PR branch, explicitly dispatches CI for that new head because
 `GITHUB_TOKEN` pushes do not recursively trigger workflows, then revalidates
 the master and head SHAs. `release:none` skips the changelog section.
 
-The post-merge release workflow is publication-only: it reads the newest
-untagged generated changelog entry, tags that exact master commit, promotes the
-container, and creates the matching GitHub Release. Dated legacy changelog
-history is preserved.
+The post-merge release workflow is publication-only: it compares the exact
+master push commit's generated changelog with its first parent, tags that exact
+commit when one release was introduced, promotes the matching container, and
+creates the matching GitHub Release. Every master push still updates staging,
+but delayed publication runs cannot move staging behind the current master.
+Dated legacy changelog history is preserved. The merge workflow explicitly
+dispatches publication with the squash commit SHA because `GITHUB_TOKEN`
+pushes do not recursively trigger workflows.
 
 ### Consequence
 
