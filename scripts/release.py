@@ -93,6 +93,20 @@ def generated_versions(changelog: str) -> list[str]:
     )
 
 
+def introduced_release_version(parent: str, current: str) -> str | None:
+    """Return the one generated release heading introduced by a commit."""
+    introduced = sorted(
+        set(generated_versions(current)) - set(generated_versions(parent)),
+        key=_version_key,
+    )
+    if len(introduced) > 1:
+        raise ValueError(
+            "A master commit introduced multiple generated release versions: "
+            + ", ".join(introduced)
+        )
+    return introduced[0] if introduced else None
+
+
 def next_version_from_state(
     tags: Iterable[str], changelog: str, bump: str = "patch"
 ) -> str:
@@ -239,6 +253,9 @@ def main() -> int:
     entry_parser = subparsers.add_parser("changelog-entry")
     entry_parser.add_argument("path", type=Path)
     entry_parser.add_argument("version")
+    delta_parser = subparsers.add_parser("changelog-delta")
+    delta_parser.add_argument("parent", type=Path)
+    delta_parser.add_argument("current", type=Path)
     validate_parser = subparsers.add_parser("validate-pr")
     validate_parser.add_argument("event", type=Path)
     args = parser.parse_args()
@@ -259,6 +276,13 @@ def main() -> int:
             print(version.removeprefix("v"))
     elif args.command == "changelog-entry":
         print(changelog_entry(args.path.read_text(encoding="utf-8"), args.version))
+    elif args.command == "changelog-delta":
+        version = introduced_release_version(
+            args.parent.read_text(encoding="utf-8"),
+            args.current.read_text(encoding="utf-8"),
+        )
+        if version:
+            print(version.removeprefix("v"))
     else:
         import json
 
