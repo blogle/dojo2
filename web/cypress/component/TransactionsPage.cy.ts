@@ -438,7 +438,7 @@ describe("TransactionsPage", () => {
       chooseComboboxOption("From account", "Check", "Checking");
       chooseComboboxOption("To account", "Brok", "Brokerage");
       cy.contains("label", "Amount").find("input").type("25");
-      cy.get("[data-cy=binary-toggle-status]")
+      cy.get(".entry-form__row--transfer [data-cy=binary-toggle-status]")
         .click()
         .should("contain.text", "Cleared")
         .and("not.contain.text", "Pending");
