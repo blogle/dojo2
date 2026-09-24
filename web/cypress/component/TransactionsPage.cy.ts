@@ -294,8 +294,10 @@ describe("TransactionsPage", () => {
 
   it("offers Available to budget as a category and submits its system semantic", () => {
     let submitted: Record<string, unknown> | undefined;
+    let createCalls = 0;
     mountPage((path, init) => {
       if (path === "/api/transactions" && init?.method === "POST") {
+        createCalls += 1;
         submitted = JSON.parse(String(init.body)) as Record<string, unknown>;
         return new Response("{}", {
           status: 200,
@@ -305,19 +307,62 @@ describe("TransactionsPage", () => {
       return undefined;
     });
     cy.get("[data-cy=transaction-entry-form]").within(() => {
-      chooseComboboxOption("Category", "Available", "Available to budget");
       chooseComboboxOption("Account", "Check", "Checking");
+      cy.contains(".combobox-field__label", "Category")
+        .parent()
+        .find("[data-cy=combobox-field-trigger]")
+        .click();
+      cy.contains(".combobox-field__label", "Category")
+        .parent()
+        .find("[data-cy=combobox-field-search]")
+        .type("Available{downarrow}{enter}");
+      cy.contains(".combobox-field__label", "Category")
+        .parent()
+        .find("[data-cy=combobox-field-trigger]")
+        .should("contain.text", "Available to budget");
+      cy.wrap(null).should(() => expect(createCalls).to.equal(0));
       cy.contains("label", "Amount").find("input").type("12");
       typeFreeformMemo("Memo", "Budget adjustment");
+      cy.wrap(null).should(() => expect(createCalls).to.equal(0));
       cy.contains("button", "Add").click();
     });
     cy.wrap(null).should(() => {
+      expect(createCalls).to.equal(1);
       expect(submitted).to.include({
         account_id: "acc1",
         category_id: null,
         system_category: "TX_AVAILABLE_TO_BUDGET",
         memo: "Budget adjustment",
       });
+    });
+  });
+
+  it("consumes Enter in an open constrained selector when nothing matches", () => {
+    let createCalls = 0;
+    mountPage((path, init) => {
+      if (path === "/api/transactions" && init?.method === "POST") {
+        createCalls += 1;
+        return new Response("{}", {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return undefined;
+    });
+    cy.get("[data-cy=transaction-entry-form]").within(() => {
+      chooseComboboxOption("Account", "Check", "Checking");
+      chooseComboboxOption("Category", "Gro", "Groceries");
+      cy.contains("label", "Amount").find("input").type("8");
+      cy.contains(".combobox-field__label", "Category")
+        .parent()
+        .find("[data-cy=combobox-field-trigger]")
+        .click();
+      cy.contains(".combobox-field__label", "Category")
+        .parent()
+        .find("[data-cy=combobox-field-search]")
+        .type("no matching category{enter}");
+      cy.get("[role=status]").should("contain.text", "No matching options");
+      cy.wrap(null).should(() => expect(createCalls).to.equal(0));
     });
   });
 
