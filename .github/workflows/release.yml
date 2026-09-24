@@ -1,7 +1,7 @@
 name: Release
 
 concurrency:
-  group: dojo-master-release
+  group: dojo-release-${{ github.event_name == 'workflow_dispatch' && inputs.commit || github.sha }}
   cancel-in-progress: false
 
 on:

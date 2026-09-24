@@ -203,6 +203,11 @@ def test_release_workflow_is_publication_only() -> None:
     workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
 
     assert "changelog-delta" in workflow
+    assert "group: dojo-master-release" not in workflow
+    assert (
+        "group: dojo-release-${{ github.event_name == 'workflow_dispatch' && inputs.commit || github.sha }}"
+        in workflow
+    )
     assert (
         "ref: ${{ github.event_name == 'workflow_dispatch' && inputs.commit || github.sha }}"
         in workflow
