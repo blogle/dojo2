@@ -242,6 +242,34 @@ def test_transactions_endpoint_returns_bounded_sorted_pages(monkeypatch, tmp_pat
         assert payload["items"][0]["date"] >= payload["items"][-1]["date"]
 
 
+def test_transaction_memo_suggestions_are_fuzzy_and_bounded(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("SESSION_SECRET", "test-secret")
+    monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
+    monkeypatch.setenv(
+        "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
+    )
+    provisioned_main_module(monkeypatch, tmp_path, "memo-suggestions.duckdb")
+
+    with TestClient(main_module.app) as client:
+        imported = client.post(
+            "/api/import/google-sheet", json={"sheet_url_or_id": "fixture://default"}
+        )
+        assert imported.status_code == 200
+        transactions = client.get(
+            "/api/transactions", params={"show_hidden": "true", "limit": 20}
+        ).json()["items"]
+        transaction = next(item for item in transactions if len(item["memo"]) >= 7)
+
+        response = client.get(
+            "/api/transaction-memo-suggestions",
+            params={"query": transaction["memo"][:4].swapcase(), "limit": 2},
+        )
+
+        assert response.status_code == 200
+        assert len(response.json()["items"]) <= 2
+        assert transaction["memo"] in response.json()["items"]
+
+
 def test_transactions_endpoint_filters_by_account_with_status_counts(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("SESSION_SECRET", "test-secret")
     monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
