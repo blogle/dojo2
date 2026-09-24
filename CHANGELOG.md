@@ -2,23 +2,23 @@
 
 <!-- BEGIN GENERATED RELEASES -->
 
-## v0.0.10 - 2026-09-22
+## v0.0.10
 
 - feat: add reconciliation undo and attention by @blogle in https://github.com/blogle/dojo2/pull/10
 
-## v0.0.9 - 2026-09-21
+## v0.0.9
 
 - test: cover transaction edit SCD regression by @blogle in https://github.com/blogle/dojo2/pull/11
 
-## v0.0.8 - 2026-09-20
+## v0.0.8
 
 - fix: promote immutable release images by @blogle in https://github.com/blogle/dojo2/pull/9
 
-## v0.0.7 - 2026-09-20
+## v0.0.7
 
 - feat: make failed backups retryable by @blogle in https://github.com/blogle/dojo2/pull/8
 
-## v0.0.6 - 2026-09-18
+## v0.0.6
 
 - feat: explain Available to budget progressively by @blogle in https://github.com/blogle/dojo2/pull/7
 
