@@ -60,12 +60,15 @@ from dojo.investment import position_amount_minor, position_metrics
 from dojo.loan_projection import LoanProjectionTerms, PaymentFrequency, project_loan
 from dojo.operations import create_transaction_operation, link_transaction_operation
 from dojo.reconciliation import (
+    BudgetBalances,
     LocalRecord,
     NormalizedEvidence,
     ReconciliationRepository,
     SourceRecord,
     baseline_digest,
+    budget_balance_proof,
     compare_records,
+    normalize_budget_balances,
     resolve_effective_reconciliation,
     resolve_transaction_working_set,
     source_digest,
@@ -4191,6 +4194,63 @@ class DojoService:
         self, account_id: str, payload: dict[str, Any]
     ) -> dict[str, Any]:
         account = self._require_account(account_id)
+        if account["account_class"] == ACCOUNT_CLASS_BUDGET:
+            source = normalize_budget_balances(
+                cleared_minor=payload.get("source_cleared_minor"),
+                pending_minor=payload.get("source_pending_minor"),
+                actual_minor=payload.get("source_actual_minor"),
+            )
+            cutoff = payload["cutoff"]
+            if isinstance(cutoff, str):
+                cutoff = date.fromisoformat(cutoff)
+            current = self._reconciliation_local_records(account_id, date.min, cutoff)
+            multiplier = (
+                -1 if account.get("budget_account_type") == BUDGET_ACCOUNT_TYPE_CREDIT_CARD else 1
+            )
+            dojo_balances = BudgetBalances(
+                cleared_minor=sum(
+                    row.signed_amount_minor * multiplier
+                    for row in current
+                    if row.status == "CLEARED"
+                ),
+                pending_minor=sum(
+                    row.signed_amount_minor * multiplier
+                    for row in current
+                    if row.status == "PENDING"
+                ),
+                actual_minor=sum(row.signed_amount_minor * multiplier for row in current),
+            )
+            proof = budget_balance_proof(source, dojo_balances)
+            attempt_id = str(uuid4())
+            source_as_of = payload.get("source_as_of", self.clock.now())
+            if isinstance(source_as_of, str):
+                source_as_of = datetime.fromisoformat(source_as_of)
+            self._reconciliation_attempts[attempt_id] = {
+                "account_id": account_id,
+                "account_class": ACCOUNT_CLASS_BUDGET,
+                "source_kind": payload["source_kind"],
+                "source_adapter": "manual",
+                "source_as_of": source_as_of,
+                "period_start": payload.get("period_start") or date.min,
+                "cutoff": cutoff,
+                "source_balances": source,
+                "source_payload_records": payload.get("source_records", []),
+                "evidence_id": str(uuid4()),
+                "baseline_digest": None,
+            }
+            return {
+                "reconciliation_id": attempt_id,
+                "account_id": account_id,
+                "state": "READY",
+                "cutoff": str(cutoff),
+                "source": {
+                    "cleared_minor": source.cleared_minor,
+                    "pending_minor": source.pending_minor,
+                    "actual_minor": source.actual_minor,
+                    "derived": source.derived,
+                },
+                **proof,
+            }
         if account["account_class"] not in {ACCOUNT_CLASS_BUDGET, ACCOUNT_CLASS_INVESTMENT}:
             raise ValueError("Only budget and investment accounts can use the legacy attempt API")
         cutoff = payload["cutoff"]
@@ -4293,6 +4353,72 @@ class DojoService:
                 raise ValueError("Reconciliation attempt not found or has expired")
             account_id = str(attempt["account_id"])
             cutoff = attempt["cutoff"]
+            if attempt["account_class"] == ACCOUNT_CLASS_BUDGET:
+                source = cast(BudgetBalances, attempt["source_balances"])
+                current = self._reconciliation_local_records(account_id, date.min, cutoff)
+                account = self._require_account(account_id)
+                multiplier = (
+                    -1
+                    if account.get("budget_account_type") == BUDGET_ACCOUNT_TYPE_CREDIT_CARD
+                    else 1
+                )
+                dojo_balances = BudgetBalances(
+                    cleared_minor=sum(
+                        row.signed_amount_minor * multiplier
+                        for row in current
+                        if row.status == "CLEARED"
+                    ),
+                    pending_minor=sum(
+                        row.signed_amount_minor * multiplier
+                        for row in current
+                        if row.status == "PENDING"
+                    ),
+                    actual_minor=sum(row.signed_amount_minor * multiplier for row in current),
+                )
+                proof = budget_balance_proof(source, dojo_balances)
+                if not proof["certification_allowed"]:
+                    raise ValueError(
+                        "Budget reconciliation is not certified: cleared and pending balances must both match"
+                    )
+                evidence = NormalizedEvidence(
+                    entity_id=account_id,
+                    entity_class=ACCOUNT_CLASS_BUDGET,
+                    evidence_kind=str(attempt["source_kind"]),
+                    source_adapter="manual",
+                    source_as_of=attempt["source_as_of"],
+                    evidence_id=str(attempt["evidence_id"]),
+                    normalized_payload={
+                        "cleared_minor": source.cleared_minor,
+                        "pending_minor": source.pending_minor,
+                        "actual_minor": source.actual_minor,
+                        "derived": source.derived,
+                    },
+                    records=(),
+                )
+                complete_records, refs = self._capture_transaction_ledger_baseline(
+                    connection, account_id=account_id
+                )
+                digest = baseline_digest(
+                    complete_records,
+                    account_id=account_id,
+                    cutoff=cutoff,
+                    source_evidence_id=str(attempt["evidence_id"]),
+                    source_evidence_digest=sha256(
+                        json_dumps(dict(evidence.normalized_payload)).encode()
+                    ).hexdigest(),
+                    settings_versions=self._reconciliation_settings_versions(account_id, cutoff),
+                )
+                result = self.reconciliation_repository.create_commit(
+                    entity_id=account_id,
+                    entity_class=ACCOUNT_CLASS_BUDGET,
+                    evidence=evidence,
+                    committed_at=now,
+                    baseline_digest=digest,
+                    baseline_refs=refs,
+                    reconciliation_id=reconciliation_id,
+                    connection=connection,
+                )
+                return result | {"state": "SUCCESSFUL", "deltas": proof["deltas"]}
             local_records = self._reconciliation_local_records(account_id, date.min, cutoff)
             current_digest = baseline_digest(
                 local_records,
