@@ -8,12 +8,16 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from dojo.api.models import ReconciliationDraftPayload
 from dojo.constants import MAX_TS
 from dojo.operations import current_transaction_operation_legs
 from dojo.reconciliation import (
+    BudgetBalances,
     LocalRecord,
     SourceRecord,
+    budget_balance_proof,
     compare_records,
+    normalize_budget_balances,
     resolve_effective_reconciliation,
     resolve_transaction_working_set,
     transaction_digest,
@@ -46,6 +50,117 @@ def test_compare_records_classifies_explicit_identity_and_unmatched_rows() -> No
     assert transaction_digest(local) == transaction_digest(local)
 
 
+@pytest.mark.parametrize(
+    ("values", "expected", "derived"),
+    [
+        ({"cleared_minor": 700, "pending_minor": 300}, (700, 300, 1000), "actual"),
+        ({"cleared_minor": 700, "actual_minor": 1000}, (700, 300, 1000), "pending"),
+        ({"pending_minor": 300, "actual_minor": 1000}, (700, 300, 1000), "cleared"),
+    ],
+)
+def test_normalize_two_budget_balances(values, expected, derived) -> None:
+    result = normalize_budget_balances(
+        **values,
+        **{key: None for key in {"cleared_minor", "pending_minor", "actual_minor"} - values.keys()},
+    )
+    assert (result.cleared_minor, result.pending_minor, result.actual_minor) == expected
+    assert result.derived == derived
+
+
+def test_budget_balance_proof_requires_independent_gates() -> None:
+    proof = budget_balance_proof(BudgetBalances(1100, 400, 1500), BudgetBalances(1000, 500, 1500))
+    assert proof["deltas"] == {
+        "cleared_delta_minor": 100,
+        "pending_delta_minor": -100,
+        "actual_delta_minor": 0,
+    }
+    assert not proof["certification_allowed"]
+    with pytest.raises(ValueError, match="exactly two"):
+        normalize_budget_balances(cleared_minor=1, pending_minor=2, actual_minor=3)
+
+
+@pytest.mark.parametrize(
+    ("source", "expected_delta"),
+    [
+        (
+            BudgetBalances(1100, 500, 1600),
+            {"cleared_delta_minor": 100, "pending_delta_minor": 0, "actual_delta_minor": 100},
+        ),
+        (
+            BudgetBalances(1000, 600, 1600),
+            {"cleared_delta_minor": 0, "pending_delta_minor": 100, "actual_delta_minor": 100},
+        ),
+    ],
+)
+def test_budget_balance_proof_rejects_each_independent_mismatch(source, expected_delta) -> None:
+    proof = budget_balance_proof(source, BudgetBalances(1000, 500, 1500))
+    assert proof["deltas"] == expected_delta
+    assert proof["certification_allowed"] is False
+
+
+def test_reconciliation_api_requires_exactly_two_integer_source_values() -> None:
+    base = {"source_kind": "BANK_STATEMENT", "cutoff": "2026-08-31"}
+    with pytest.raises(ValueError, match="exactly two"):
+        ReconciliationDraftPayload(**base)
+    with pytest.raises(ValueError, match="only supported for investment"):
+        ReconciliationDraftPayload(**base, source_ending_value_minor=1)
+    with pytest.raises(ValueError, match="exactly two"):
+        ReconciliationDraftPayload(
+            **base, source_cleared_minor=1, source_pending_minor=2, source_actual_minor=3
+        )
+    with pytest.raises(ValueError):
+        ReconciliationDraftPayload(**base, source_cleared_minor=True, source_pending_minor=2)
+    legacy_investment = ReconciliationDraftPayload(
+        source_kind="INVESTMENT_STATEMENT", cutoff="2026-08-31", source_ending_value_minor=1
+    )
+    assert legacy_investment.source_ending_value_minor == 1
+
+
+def test_first_budget_reconciliation_commits_normalized_balances_and_full_baseline(service) -> None:
+    account_id = service.create_account(
+        {"name": "Checking", "account_class": "BUDGET", "budget_account_type": "DEPOSIT"}
+    )["account_id"]
+    for index in range(40):
+        service.create_transaction(
+            {
+                "date": date(2026, 8, 1),
+                "account_id": account_id,
+                "amount_minor": 100,
+                "system_category": "TX_AVAILABLE_TO_BUDGET",
+                "status": "CLEARED",
+                "memo": f"Imported {index}",
+            }
+        )
+    attempt = service.create_reconciliation_draft(
+        account_id,
+        {
+            "source_kind": "BANK_STATEMENT",
+            "cutoff": date(2026, 8, 31),
+            "source_cleared_minor": 4000,
+            "source_actual_minor": 4000,
+        },
+    )
+    assert attempt["certification_allowed"] is True
+    assert attempt["source"] == {
+        "cleared_minor": 4000,
+        "pending_minor": 0,
+        "actual_minor": 4000,
+        "derived": "pending",
+    }
+    committed = service.apply_reconciliation(
+        attempt["reconciliation_id"], {"client_operation_id": str(uuid4())}
+    )
+    assert committed["evidence"]["normalized_payload"] == attempt["source"]
+    assert (
+        service.db.fetch_one(
+            "SELECT COUNT(*) AS count FROM reconciliation_transaction_refs WHERE reconciliation_id = ?",
+            (attempt["reconciliation_id"],),
+        )["count"]
+        == 40
+    )
+    assert service.db.fetch_one("SELECT COUNT(*) AS count FROM current_transactions")["count"] == 40
+
+
 def test_reconciliation_attempt_is_not_canonical_until_successful_certification(service) -> None:
     account_id = service.create_account(
         {"name": "Checking", "account_class": "BUDGET", "budget_account_type": "DEPOSIT"}
@@ -67,7 +182,8 @@ def test_reconciliation_attempt_is_not_canonical_until_successful_certification(
             "source_kind": "BANK_STATEMENT",
             "period_start": date(2026, 8, 1),
             "cutoff": date(2026, 8, 20),
-            "source_ending_value_minor": 1_100,
+            "source_cleared_minor": 1_100,
+            "source_pending_minor": 0,
             "source_records": [
                 {
                     "source_record_id": "bank-1",
@@ -80,7 +196,8 @@ def test_reconciliation_attempt_is_not_canonical_until_successful_certification(
             ],
         },
     )
-    assert draft["difference_minor"] == 100
+    assert draft["deltas"]["cleared_delta_minor"] == 100
+    assert draft["certification_allowed"] is False
     assert service.db.fetch_one("SELECT COUNT(*) AS count FROM reconciliation_commits") == {
         "count": 0
     }
@@ -91,7 +208,8 @@ def test_reconciliation_attempt_is_not_canonical_until_successful_certification(
             "source_kind": "BANK_STATEMENT",
             "period_start": date(2026, 8, 1),
             "cutoff": date(2026, 8, 20),
-            "source_ending_value_minor": 1_000,
+            "source_cleared_minor": 1_000,
+            "source_pending_minor": 0,
             "source_records": [
                 {
                     "source_record_id": "bank-1",
@@ -104,7 +222,7 @@ def test_reconciliation_attempt_is_not_canonical_until_successful_certification(
         },
     )
     operation_id = str(uuid4())
-    with pytest.raises(ValueError, match="matching canonical balance"):
+    with pytest.raises(ValueError, match="cleared and pending"):
         service.apply_reconciliation(
             draft["reconciliation_id"],
             {"client_operation_id": operation_id},
@@ -285,7 +403,8 @@ def test_reconciliation_ending_value_includes_opening_history(service) -> None:
             "source_kind": "BANK_STATEMENT",
             "period_start": date(2026, 8, 1),
             "cutoff": date(2026, 8, 31),
-            "source_ending_value_minor": 1_100,
+            "source_cleared_minor": 1_100,
+            "source_pending_minor": 0,
             "source_records": [
                 {
                     "source_record_id": "period-1",
@@ -298,9 +417,8 @@ def test_reconciliation_ending_value_includes_opening_history(service) -> None:
         },
     )
 
-    assert draft["ledger_value_minor"] == 1_100
-    assert draft["difference_minor"] == 0
-    assert draft["classifications"]["local_only"] == []
+    assert draft["dojo"]["actual_minor"] == 1_100
+    assert draft["certification_allowed"] is True
     committed = service.apply_reconciliation(
         draft["reconciliation_id"], {"client_operation_id": str(uuid4())}
     )
