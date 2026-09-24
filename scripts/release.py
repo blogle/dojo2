@@ -95,10 +95,13 @@ def generated_versions(changelog: str) -> list[str]:
     )
 
 
-def introduced_release_version(parent: str, current: str) -> str | None:
+def introduced_release_version(
+    parent: str, current: str, published_tags: Iterable[str] = ()
+) -> str | None:
     """Return the one generated release heading introduced by a commit."""
+    published = set(published_tags)
     introduced = sorted(
-        set(generated_versions(current)) - set(generated_versions(parent)),
+        (set(generated_versions(current)) - set(generated_versions(parent))) - published,
         key=_version_key,
     )
     if len(introduced) > 1:
@@ -282,6 +285,7 @@ def main() -> int:
         version = introduced_release_version(
             args.parent.read_text(encoding="utf-8"),
             args.current.read_text(encoding="utf-8"),
+            repository_tags(),
         )
         if version:
             print(version.removeprefix("v"))
