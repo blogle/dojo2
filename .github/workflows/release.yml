@@ -73,6 +73,8 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install project dependencies
+        run: nix develop --command just setup
       - name: Build or reuse exact master image and update staging
         run: |
           source_image="ghcr.io/blogle/dojo2:git-${MASTER_COMMIT}"
