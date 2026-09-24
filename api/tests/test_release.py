@@ -104,6 +104,26 @@ def test_introduced_release_version_returns_one_added_version() -> None:
     assert release.introduced_release_version(parent, current) == "v0.0.11"
 
 
+def test_introduced_release_version_ignores_tagged_backfill_versions() -> None:
+    parent = "# Changelog\n\n<!-- BEGIN GENERATED RELEASES -->\n\n<!-- END GENERATED RELEASES -->\n"
+    current = parent.replace(
+        "<!-- END GENERATED RELEASES -->",
+        "## v0.0.11\n\n- one\n\n## v0.0.12\n\n- two\n\n<!-- END GENERATED RELEASES -->",
+    )
+
+    assert release.introduced_release_version(parent, current, ["v0.0.11", "v0.0.12"]) is None
+
+
+def test_introduced_release_version_ignores_tagged_backfill_with_new_version() -> None:
+    parent = "# Changelog\n\n<!-- BEGIN GENERATED RELEASES -->\n\n<!-- END GENERATED RELEASES -->\n"
+    current = parent.replace(
+        "<!-- END GENERATED RELEASES -->",
+        "## v0.0.11\n\n- old\n\n## v0.0.12\n\n- old\n\n## v0.0.13\n\n- new\n\n<!-- END GENERATED RELEASES -->",
+    )
+
+    assert release.introduced_release_version(parent, current, ["v0.0.11", "v0.0.12"]) == "v0.0.13"
+
+
 def test_introduced_release_version_rejects_multiple_added_versions() -> None:
     parent = "# Changelog\n\n<!-- BEGIN GENERATED RELEASES -->\n\n<!-- END GENERATED RELEASES -->\n"
     current = parent.replace(
