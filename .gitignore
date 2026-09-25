@@ -1,6 +1,7 @@
 .env
 .direnv/
 .local/
+.airship-state/
 .result
 result
 node_modules/

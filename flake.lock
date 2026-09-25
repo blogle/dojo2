@@ -1,5 +1,22 @@
 {
   "nodes": {
+    "airship": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1787013576,
+        "narHash": "sha256-SdaqQXsVC5SbgHmd5miF06HYOHsirsKIZ62ujvjSidY=",
+        "owner": "0xnyn",
+        "repo": "airship",
+        "rev": "1063ba0002e33b2e19de586f2330b4356e51e8f5",
+        "type": "github"
+      },
+      "original": {
+        "owner": "0xnyn",
+        "repo": "airship",
+        "rev": "1063ba0002e33b2e19de586f2330b4356e51e8f5",
+        "type": "github"
+      }
+    },
     "flake-utils": {
       "inputs": {
         "systems": "systems"
@@ -36,6 +53,7 @@
     },
     "root": {
       "inputs": {
+        "airship": "airship",
         "flake-utils": "flake-utils",
         "nixpkgs": "nixpkgs"
       }
