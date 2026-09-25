@@ -19,6 +19,16 @@ web:
 	@printf '==> starting web dev server\n'
 	cd web && pnpm dev --host 0.0.0.0 --port 5173
 
+airship:
+	@set -euo pipefail; \
+	cd web; \
+	args=(--host 0.0.0.0 --target 5173 --port 5174 --agent opencode --opencode-url http://127.0.0.1:4096 --safe); \
+	if [[ -n "$${DOJO_AIRSHIP_ALLOWED_HOSTS:-}" ]]; then \
+		read -r -a allowed_hosts <<< "$${DOJO_AIRSHIP_ALLOWED_HOSTS}"; \
+		for host in "$${allowed_hosts[@]}"; do args+=(--allowed-hosts "$$host"); done; \
+	fi; \
+	DOJO_AIRSHIP_STATE_DIR="$$PWD/../.airship-state" dojo-airship "$${args[@]}"
+
 dev-api:
 	just api
 
