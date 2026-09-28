@@ -27,7 +27,7 @@ airship:
 		read -r -a allowed_hosts <<< "$${DOJO_AIRSHIP_ALLOWED_HOSTS}"; \
 		for host in "$${allowed_hosts[@]}"; do args+=(--allowed-hosts "$$host"); done; \
 	fi; \
-	DOJO_AIRSHIP_STATE_DIR="$$PWD/../.airship-state" dojo-airship "$${args[@]}"
+	pnpm exec airship "$${args[@]}"
 
 dev-api:
 	just api
