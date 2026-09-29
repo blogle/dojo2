@@ -98,10 +98,12 @@ def generated_versions(changelog: str) -> list[str]:
 def introduced_release_version(
     parent: str, current: str, published_tags: Iterable[str] = ()
 ) -> str | None:
-    """Return the one generated release heading introduced by a commit."""
-    published = set(published_tags)
+    """Return the release heading introduced by a commit, independent of publication."""
+    # Publication state is deliberately irrelevant: a rerun must resolve the same
+    # source commit to the same changelog version after its tag has been created.
+    del published_tags
     introduced = sorted(
-        (set(generated_versions(current)) - set(generated_versions(parent))) - published,
+        set(generated_versions(current)) - set(generated_versions(parent)),
         key=_version_key,
     )
     if len(introduced) > 1:
@@ -110,6 +112,14 @@ def introduced_release_version(
             + ", ".join(introduced)
         )
     return introduced[0] if introduced else None
+
+
+def validate_tag_target(tag_commit: str, target_commit: str, version: str) -> None:
+    """Reject an existing release tag that does not identify its source commit."""
+    if tag_commit != target_commit:
+        raise ValueError(
+            f"Release tag v{version} points to {tag_commit}, expected {target_commit}"
+        )
 
 
 def next_version_from_state(
@@ -261,6 +271,10 @@ def main() -> int:
     delta_parser = subparsers.add_parser("changelog-delta")
     delta_parser.add_argument("parent", type=Path)
     delta_parser.add_argument("current", type=Path)
+    tag_parser = subparsers.add_parser("validate-tag-target")
+    tag_parser.add_argument("tag_commit")
+    tag_parser.add_argument("target_commit")
+    tag_parser.add_argument("version")
     validate_parser = subparsers.add_parser("validate-pr")
     validate_parser.add_argument("event", type=Path)
     args = parser.parse_args()
@@ -285,10 +299,11 @@ def main() -> int:
         version = introduced_release_version(
             args.parent.read_text(encoding="utf-8"),
             args.current.read_text(encoding="utf-8"),
-            repository_tags(),
         )
         if version:
             print(version.removeprefix("v"))
+    elif args.command == "validate-tag-target":
+        validate_tag_target(args.tag_commit, args.target_commit, args.version)
     else:
         import json
 

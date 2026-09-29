@@ -25,36 +25,58 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      packages: read
     outputs:
       commit: ${{ steps.version.outputs.commit }}
       created: ${{ steps.version.outputs.created }}
       version: ${{ steps.version.outputs.version }}
+      complete: ${{ steps.version.outputs.complete }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.commit || github.sha }}
           fetch-depth: 0
-      - uses: DeterminateSystems/nix-installer-action@main
       - name: Determine release introduced by this commit
         id: version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           test "$(git rev-parse HEAD)" = "$TARGET_COMMIT"
           git fetch origin master
           git merge-base --is-ancestor "$TARGET_COMMIT" origin/master
           parent="$(git rev-parse "${TARGET_COMMIT}^")"
           git show "${parent}:CHANGELOG.md" > /tmp/parent-CHANGELOG.md
-          version="$(nix develop --command python3 scripts/release.py changelog-delta /tmp/parent-CHANGELOG.md CHANGELOG.md)"
+          version="$(python3 scripts/release.py changelog-delta /tmp/parent-CHANGELOG.md CHANGELOG.md)"
           echo "commit=$TARGET_COMMIT" >> "$GITHUB_OUTPUT"
           if [[ -z "$version" ]]; then
             echo 'created=false' >> "$GITHUB_OUTPUT"
+            echo 'complete=false' >> "$GITHUB_OUTPUT"
             echo 'This master commit introduced no generated release; staging will still be updated.'
           else
             echo 'created=true' >> "$GITHUB_OUTPUT"
             echo "version=$version" >> "$GITHUB_OUTPUT"
+            tag="v${version}"
+            if git show-ref --tags --verify --quiet "refs/tags/${tag}"; then
+              python3 scripts/release.py validate-tag-target "$(git rev-parse "${tag}^{commit}")" "$TARGET_COMMIT" "$version"
+              release_body="$(gh release view "$tag" --json body --jq .body 2>/dev/null || true)"
+              python3 scripts/release.py changelog-entry CHANGELOG.md "$version" > /tmp/release-notes.md
+              source_digest="$(gh api --paginate /users/blogle/packages/container/dojo2/versions --jq ".[] | select(.metadata.container.tags | index(\"git-${TARGET_COMMIT}\")) | .name" 2>/dev/null | head -n 1 || true)"
+              release_digest="$(gh api --paginate /users/blogle/packages/container/dojo2/versions --jq ".[] | select(.metadata.container.tags | index(\"${tag}\")) | .name" 2>/dev/null | head -n 1 || true)"
+              expected_body="$(< /tmp/release-notes.md)"
+              if [[ "$release_body" == "$expected_body" && -n "$source_digest" && "$source_digest" == "$release_digest" ]]; then
+                echo 'complete=true' >> "$GITHUB_OUTPUT"
+                echo "Release $tag, notes, and promoted image digest are complete; release publication jobs will be skipped."
+              else
+                echo 'complete=false' >> "$GITHUB_OUTPUT"
+              fi
+            else
+              echo 'complete=false' >> "$GITHUB_OUTPUT"
+            fi
           fi
 
   publish-staging:
     needs: prepare-release
+    if: needs.prepare-release.outputs.complete != 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -99,7 +121,7 @@ jobs:
 
   tag-release:
     needs: prepare-release
-    if: needs.prepare-release.outputs.created == 'true'
+    if: needs.prepare-release.outputs.created == 'true' && needs.prepare-release.outputs.complete != 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -125,7 +147,7 @@ jobs:
 
   publish-release-image:
     needs: [prepare-release, publish-staging, tag-release]
-    if: needs.prepare-release.outputs.created == 'true'
+    if: needs.prepare-release.outputs.created == 'true' && needs.prepare-release.outputs.complete != 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -153,7 +175,7 @@ jobs:
 
   create-release:
     needs: [prepare-release, publish-release-image, tag-release]
-    if: needs.prepare-release.outputs.created == 'true'
+    if: needs.prepare-release.outputs.created == 'true' && needs.prepare-release.outputs.complete != 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write

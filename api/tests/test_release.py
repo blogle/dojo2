@@ -104,24 +104,45 @@ def test_introduced_release_version_returns_one_added_version() -> None:
     assert release.introduced_release_version(parent, current) == "v0.0.11"
 
 
-def test_introduced_release_version_ignores_tagged_backfill_versions() -> None:
+def test_introduced_release_version_is_stable_after_publication() -> None:
     parent = "# Changelog\n\n<!-- BEGIN GENERATED RELEASES -->\n\n<!-- END GENERATED RELEASES -->\n"
     current = parent.replace(
         "<!-- END GENERATED RELEASES -->",
-        "## v0.0.11\n\n- one\n\n## v0.0.12\n\n- two\n\n<!-- END GENERATED RELEASES -->",
+        "## v0.0.11\n\n- one\n\n<!-- END GENERATED RELEASES -->",
     )
 
-    assert release.introduced_release_version(parent, current, ["v0.0.11", "v0.0.12"]) is None
+    assert release.introduced_release_version(parent, current, ["v0.0.11", "v0.0.12"]) == "v0.0.11"
 
 
-def test_introduced_release_version_ignores_tagged_backfill_with_new_version() -> None:
+def test_introduced_release_version_preserves_new_version_after_old_tags_exist() -> None:
     parent = "# Changelog\n\n<!-- BEGIN GENERATED RELEASES -->\n\n<!-- END GENERATED RELEASES -->\n"
+    parent = parent.replace(
+        "<!-- END GENERATED RELEASES -->",
+        "## v0.0.11\n\n- old\n\n## v0.0.12\n\n- old\n\n<!-- END GENERATED RELEASES -->",
+    )
     current = parent.replace(
         "<!-- END GENERATED RELEASES -->",
-        "## v0.0.11\n\n- old\n\n## v0.0.12\n\n- old\n\n## v0.0.13\n\n- new\n\n<!-- END GENERATED RELEASES -->",
+        "## v0.0.13\n\n- new\n\n<!-- END GENERATED RELEASES -->",
     )
 
     assert release.introduced_release_version(parent, current, ["v0.0.11", "v0.0.12"]) == "v0.0.13"
+
+
+def test_no_release_commit_stays_no_release_when_tags_exist() -> None:
+    changelog = (
+        "# Changelog\n\n<!-- BEGIN GENERATED RELEASES -->\n\n<!-- END GENERATED RELEASES -->\n"
+    )
+
+    assert release.introduced_release_version(changelog, changelog, ["v0.0.11"]) is None
+
+
+def test_existing_tag_for_intended_version_and_commit_is_reused() -> None:
+    release.validate_tag_target("commit-x", "commit-x", "1.2.3")
+
+
+def test_existing_tag_for_intended_version_on_another_commit_fails() -> None:
+    with pytest.raises(ValueError, match="expected commit-x"):
+        release.validate_tag_target("commit-y", "commit-x", "1.2.3")
 
 
 def test_introduced_release_version_rejects_multiple_added_versions() -> None:
@@ -232,6 +253,12 @@ def test_release_workflow_is_publication_only() -> None:
     workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
 
     assert "changelog-delta" in workflow
+    assert "validate-tag-target" in workflow
+    assert "complete=true" in workflow
+    assert "notes, and promoted image digest are complete" in workflow
+    assert "packages: read" in workflow
+    assert "complete != 'true'" in workflow
+    assert "python3 scripts/release.py changelog-delta" in workflow
     assert "group: dojo-master-release" not in workflow
     assert (
         "group: dojo-release-${{ github.event_name == 'workflow_dispatch' && inputs.commit || github.sha }}"
