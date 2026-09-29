@@ -95,21 +95,74 @@ def generated_versions(changelog: str) -> list[str]:
     )
 
 
+def changelog_introduces_version(parent: str, current: str, version: str) -> bool:
+    """Check whether a particular generated heading first appears in a commit."""
+    tag = _version_tag(version)
+    return tag in set(generated_versions(current)) - set(generated_versions(parent))
+
+
 def introduced_release_version(
-    parent: str, current: str, published_tags: Iterable[str] = ()
+    parent: str,
+    current: str,
+    published_tags: Iterable[str] = (),
+    associated_release_tags: Iterable[str] = (),
+    conflicting_published_tags: Iterable[str] = (),
 ) -> str | None:
-    """Return the one generated release heading introduced by a commit."""
+    """Resolve a commit's release tag first, else apply the published-backfill filter."""
+    introduced = set(generated_versions(current)) - set(generated_versions(parent))
+    associated_tag_values = tuple(associated_release_tags)
+    conflicts = introduced & (set(conflicting_published_tags) - set(associated_tag_values))
+    if conflicts:
+        raise ValueError(
+            "Published release tags for introduced versions point to another source "
+            "commit: " + ", ".join(sorted(conflicts, key=_version_key))
+        )
+    associated = {
+        _version_tag(tag)
+        for tag in associated_tag_values
+        if TAG_PATTERN.fullmatch(tag if tag.startswith("v") else f"v{tag}")
+    }
+    matching_associations = introduced & associated
+    if associated and associated != matching_associations:
+        unexpected = sorted(associated - introduced, key=_version_key)
+        raise ValueError(
+            "Release tags on this source commit do not match its introduced changelog "
+            "versions: " + ", ".join(unexpected)
+        )
+    if len(matching_associations) > 1:
+        raise ValueError(
+            "A source commit has multiple release tags for introduced versions: "
+            + ", ".join(sorted(matching_associations, key=_version_key))
+        )
+    if matching_associations:
+        return next(iter(matching_associations))
+
     published = set(published_tags)
-    introduced = sorted(
-        (set(generated_versions(current)) - set(generated_versions(parent))) - published,
-        key=_version_key,
-    )
+    introduced = introduced - published
+    introduced = sorted(introduced, key=_version_key)
     if len(introduced) > 1:
         raise ValueError(
             "A master commit introduced multiple generated release versions: "
             + ", ".join(introduced)
         )
     return introduced[0] if introduced else None
+
+
+def validate_tag_target(tag_commit: str, target_commit: str, version: str) -> None:
+    """Reject an existing release tag that does not identify its source commit."""
+    if tag_commit != target_commit:
+        raise ValueError(
+            f"Release tag v{version} points to {tag_commit}, expected {target_commit}"
+        )
+
+
+def staging_update_needed(
+    target_is_current_master: bool, source_digest: str, staging_digest: str
+) -> bool:
+    """Update staging only for current master when its immutable image differs."""
+    return target_is_current_master and (
+        not source_digest or source_digest != staging_digest
+    )
 
 
 def next_version_from_state(
@@ -261,6 +314,21 @@ def main() -> int:
     delta_parser = subparsers.add_parser("changelog-delta")
     delta_parser.add_argument("parent", type=Path)
     delta_parser.add_argument("current", type=Path)
+    delta_parser.add_argument("--published-tag", action="append", default=[])
+    delta_parser.add_argument("--associated-tag", action="append", default=[])
+    delta_parser.add_argument("--conflicting-tag", action="append", default=[])
+    introduced_parser = subparsers.add_parser("changelog-introduces")
+    introduced_parser.add_argument("parent", type=Path)
+    introduced_parser.add_argument("current", type=Path)
+    introduced_parser.add_argument("version")
+    tag_parser = subparsers.add_parser("validate-tag-target")
+    tag_parser.add_argument("tag_commit")
+    tag_parser.add_argument("target_commit")
+    tag_parser.add_argument("version")
+    staging_parser = subparsers.add_parser("staging-needed")
+    staging_parser.add_argument("target_is_current_master", choices=("true", "false"))
+    staging_parser.add_argument("source_digest")
+    staging_parser.add_argument("staging_digest")
     validate_parser = subparsers.add_parser("validate-pr")
     validate_parser.add_argument("event", type=Path)
     args = parser.parse_args()
@@ -285,10 +353,34 @@ def main() -> int:
         version = introduced_release_version(
             args.parent.read_text(encoding="utf-8"),
             args.current.read_text(encoding="utf-8"),
-            repository_tags(),
+            args.published_tag,
+            args.associated_tag,
+            args.conflicting_tag,
         )
         if version:
             print(version.removeprefix("v"))
+    elif args.command == "changelog-introduces":
+        print(
+            str(
+                changelog_introduces_version(
+                    args.parent.read_text(encoding="utf-8"),
+                    args.current.read_text(encoding="utf-8"),
+                    args.version,
+                )
+            ).lower()
+        )
+    elif args.command == "validate-tag-target":
+        validate_tag_target(args.tag_commit, args.target_commit, args.version)
+    elif args.command == "staging-needed":
+        print(
+            str(
+                staging_update_needed(
+                    args.target_is_current_master == "true",
+                    args.source_digest,
+                    args.staging_digest,
+                )
+            ).lower()
+        )
     else:
         import json
 
