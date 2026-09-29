@@ -355,6 +355,11 @@ def test_release_workflow_is_publication_only() -> None:
     assert "package_query_succeeded=true" in workflow
     assert 'release_query_succeeded" == true' in workflow
     assert 'package_query_succeeded" == true' in workflow
+    assert "@json" not in workflow
+    assert "fromjson" not in workflow
+    assert ".metadata.container.tags // []" in workflow
+    assert "package_versions" not in workflow
+    assert "/users/blogle/packages/container/dojo2/versions" in workflow
     assert "group: dojo-master-release" not in workflow
     assert (
         "group: dojo-release-${{ github.event_name == 'workflow_dispatch' && inputs.commit || github.sha }}"
