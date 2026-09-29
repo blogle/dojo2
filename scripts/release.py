@@ -96,16 +96,36 @@ def generated_versions(changelog: str) -> list[str]:
 
 
 def introduced_release_version(
-    parent: str, current: str, published_tags: Iterable[str] = ()
+    parent: str,
+    current: str,
+    published_tags: Iterable[str] = (),
+    associated_release_tags: Iterable[str] = (),
 ) -> str | None:
-    """Return the release heading introduced by a commit, independent of publication."""
-    # Publication state is deliberately irrelevant: a rerun must resolve the same
-    # source commit to the same changelog version after its tag has been created.
-    del published_tags
-    introduced = sorted(
-        set(generated_versions(current)) - set(generated_versions(parent)),
-        key=_version_key,
-    )
+    """Resolve a commit's release tag first, else apply the published-backfill filter."""
+    introduced = set(generated_versions(current)) - set(generated_versions(parent))
+    associated = {
+        _version_tag(tag)
+        for tag in associated_release_tags
+        if TAG_PATTERN.fullmatch(tag if tag.startswith("v") else f"v{tag}")
+    }
+    matching_associations = introduced & associated
+    if associated and associated != matching_associations:
+        unexpected = sorted(associated - introduced, key=_version_key)
+        raise ValueError(
+            "Release tags on this source commit do not match its introduced changelog "
+            "versions: " + ", ".join(unexpected)
+        )
+    if len(matching_associations) > 1:
+        raise ValueError(
+            "A source commit has multiple release tags for introduced versions: "
+            + ", ".join(sorted(matching_associations, key=_version_key))
+        )
+    if matching_associations:
+        return next(iter(matching_associations))
+
+    published = set(published_tags)
+    introduced = introduced - published
+    introduced = sorted(introduced, key=_version_key)
     if len(introduced) > 1:
         raise ValueError(
             "A master commit introduced multiple generated release versions: "
@@ -271,6 +291,8 @@ def main() -> int:
     delta_parser = subparsers.add_parser("changelog-delta")
     delta_parser.add_argument("parent", type=Path)
     delta_parser.add_argument("current", type=Path)
+    delta_parser.add_argument("--published-tag", action="append", default=[])
+    delta_parser.add_argument("--associated-tag", action="append", default=[])
     tag_parser = subparsers.add_parser("validate-tag-target")
     tag_parser.add_argument("tag_commit")
     tag_parser.add_argument("target_commit")
@@ -299,6 +321,8 @@ def main() -> int:
         version = introduced_release_version(
             args.parent.read_text(encoding="utf-8"),
             args.current.read_text(encoding="utf-8"),
+            args.published_tag,
+            args.associated_tag,
         )
         if version:
             print(version.removeprefix("v"))

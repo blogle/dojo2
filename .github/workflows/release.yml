@@ -46,7 +46,19 @@ jobs:
           git merge-base --is-ancestor "$TARGET_COMMIT" origin/master
           parent="$(git rev-parse "${TARGET_COMMIT}^")"
           git show "${parent}:CHANGELOG.md" > /tmp/parent-CHANGELOG.md
-          version="$(python3 scripts/release.py changelog-delta /tmp/parent-CHANGELOG.md CHANGELOG.md)"
+          published_tags=()
+          associated_tags=()
+          while IFS= read -r tag; do
+            if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              continue
+            fi
+            published_tags+=(--published-tag "$tag")
+            tag_commit="$(git rev-parse "${tag}^{commit}")"
+            if [[ "$tag_commit" == "$TARGET_COMMIT" ]]; then
+              associated_tags+=(--associated-tag "$tag")
+            fi
+          done < <(git tag --list 'v*')
+          version="$(python3 scripts/release.py changelog-delta /tmp/parent-CHANGELOG.md CHANGELOG.md "${published_tags[@]}" "${associated_tags[@]}")"
           echo "commit=$TARGET_COMMIT" >> "$GITHUB_OUTPUT"
           if [[ -z "$version" ]]; then
             echo 'created=false' >> "$GITHUB_OUTPUT"
@@ -58,12 +70,28 @@ jobs:
             tag="v${version}"
             if git show-ref --tags --verify --quiet "refs/tags/${tag}"; then
               python3 scripts/release.py validate-tag-target "$(git rev-parse "${tag}^{commit}")" "$TARGET_COMMIT" "$version"
-              release_body="$(gh release view "$tag" --json body --jq .body 2>/dev/null || true)"
+              if release_body="$(gh release view "$tag" --json body --jq .body 2>/dev/null)"; then
+                release_query_succeeded=true
+              else
+                release_query_succeeded=false
+                release_body=""
+              fi
               python3 scripts/release.py changelog-entry CHANGELOG.md "$version" > /tmp/release-notes.md
-              source_digest="$(gh api --paginate /users/blogle/packages/container/dojo2/versions --jq ".[] | select(.metadata.container.tags | index(\"git-${TARGET_COMMIT}\")) | .name" 2>/dev/null | head -n 1 || true)"
-              release_digest="$(gh api --paginate /users/blogle/packages/container/dojo2/versions --jq ".[] | select(.metadata.container.tags | index(\"${tag}\")) | .name" 2>/dev/null | head -n 1 || true)"
+              if package_versions="$(gh api --paginate --jq '.[] | [.name, (.metadata.container.tags // [])] | @json' /users/blogle/packages/container/dojo2/versions 2>/dev/null)"; then
+                if source_digest="$(jq -ser --arg image_tag "git-${TARGET_COMMIT}" '[.[] | fromjson | select(.[1] | index($image_tag)) | .[0]][0] // ""' <<< "$package_versions")" && release_digest="$(jq -ser --arg image_tag "$tag" '[.[] | fromjson | select(.[1] | index($image_tag)) | .[0]][0] // ""' <<< "$package_versions")"; then
+                  package_query_succeeded=true
+                else
+                  package_query_succeeded=false
+                  source_digest=""
+                  release_digest=""
+                fi
+              else
+                package_query_succeeded=false
+                source_digest=""
+                release_digest=""
+              fi
               expected_body="$(< /tmp/release-notes.md)"
-              if [[ "$release_body" == "$expected_body" && -n "$source_digest" && "$source_digest" == "$release_digest" ]]; then
+              if [[ "$release_query_succeeded" == true && "$package_query_succeeded" == true && "$release_body" == "$expected_body" && -n "$source_digest" && "$source_digest" == "$release_digest" ]]; then
                 echo 'complete=true' >> "$GITHUB_OUTPUT"
                 echo "Release $tag, notes, and promoted image digest are complete; release publication jobs will be skipped."
               else

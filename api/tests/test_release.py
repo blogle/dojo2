@@ -111,21 +111,68 @@ def test_introduced_release_version_is_stable_after_publication() -> None:
         "## v0.0.11\n\n- one\n\n<!-- END GENERATED RELEASES -->",
     )
 
-    assert release.introduced_release_version(parent, current, ["v0.0.11", "v0.0.12"]) == "v0.0.11"
+    assert (
+        release.introduced_release_version(
+            parent,
+            current,
+            ["v0.0.11"],
+            associated_release_tags=["v0.0.11"],
+        )
+        == "v0.0.11"
+    )
 
 
-def test_introduced_release_version_preserves_new_version_after_old_tags_exist() -> None:
+def test_published_backfill_only_delta_is_not_a_new_release() -> None:
     parent = "# Changelog\n\n<!-- BEGIN GENERATED RELEASES -->\n\n<!-- END GENERATED RELEASES -->\n"
-    parent = parent.replace(
+    current = parent.replace(
         "<!-- END GENERATED RELEASES -->",
         "## v0.0.11\n\n- old\n\n## v0.0.12\n\n- old\n\n<!-- END GENERATED RELEASES -->",
     )
+
+    assert release.introduced_release_version(parent, current, ["v0.0.11", "v0.0.12"]) is None
+
+
+def test_published_backfills_and_one_new_release_select_only_new_version() -> None:
+    parent = "# Changelog\n\n<!-- BEGIN GENERATED RELEASES -->\n\n<!-- END GENERATED RELEASES -->\n"
     current = parent.replace(
         "<!-- END GENERATED RELEASES -->",
-        "## v0.0.13\n\n- new\n\n<!-- END GENERATED RELEASES -->",
+        "## v0.0.11\n\n- old\n\n## v0.0.12\n\n- old\n\n## v0.0.13\n\n- new\n\n<!-- END GENERATED RELEASES -->",
     )
 
     assert release.introduced_release_version(parent, current, ["v0.0.11", "v0.0.12"]) == "v0.0.13"
+
+
+def test_exact_source_tag_takes_precedence_over_published_backfill_filter() -> None:
+    parent = "# Changelog\n\n<!-- BEGIN GENERATED RELEASES -->\n\n<!-- END GENERATED RELEASES -->\n"
+    current = parent.replace(
+        "<!-- END GENERATED RELEASES -->",
+        "## v0.0.11\n\n- backfill\n\n## v0.0.12\n\n- introduced\n\n<!-- END GENERATED RELEASES -->",
+    )
+
+    assert (
+        release.introduced_release_version(
+            parent,
+            current,
+            ["v0.0.11", "v0.0.12"],
+            associated_release_tags=["v0.0.12"],
+        )
+        == "v0.0.12"
+    )
+
+
+def test_multiple_release_tags_for_source_commit_fail_deterministically() -> None:
+    parent = "# Changelog\n\n<!-- BEGIN GENERATED RELEASES -->\n\n<!-- END GENERATED RELEASES -->\n"
+    current = parent.replace(
+        "<!-- END GENERATED RELEASES -->",
+        "## v0.0.11\n\n- one\n\n## v0.0.12\n\n- two\n\n<!-- END GENERATED RELEASES -->",
+    )
+
+    with pytest.raises(ValueError, match="multiple release tags"):
+        release.introduced_release_version(
+            parent,
+            current,
+            associated_release_tags=["v0.0.11", "v0.0.12"],
+        )
 
 
 def test_no_release_commit_stays_no_release_when_tags_exist() -> None:
@@ -259,6 +306,13 @@ def test_release_workflow_is_publication_only() -> None:
     assert "packages: read" in workflow
     assert "complete != 'true'" in workflow
     assert "python3 scripts/release.py changelog-delta" in workflow
+    assert "--published-tag" in workflow
+    assert "--associated-tag" in workflow
+    assert 'git rev-parse "${tag}^{commit}"' in workflow
+    assert "release_query_succeeded=true" in workflow
+    assert "package_query_succeeded=true" in workflow
+    assert 'release_query_succeeded" == true' in workflow
+    assert 'package_query_succeeded" == true' in workflow
     assert "group: dojo-master-release" not in workflow
     assert (
         "group: dojo-release-${{ github.event_name == 'workflow_dispatch' && inputs.commit || github.sha }}"
