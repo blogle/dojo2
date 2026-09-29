@@ -24,10 +24,15 @@ allocate_port() {
 
 # Parse recording mode
 recording=false
+prepare_baselines=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --record)
       recording=true
+      shift
+      ;;
+    --prepare-baselines)
+      prepare_baselines=true
       shift
       ;;
     *)
@@ -50,6 +55,20 @@ if [[ "$recording" == "true" ]]; then
 else
   spec="${1:-}"
   spec="${spec#web/}"
+fi
+
+# Warm the fingerprinted fixture cache separately so CI measures the steady-state
+# baseline path that the reviewed generation budget was calibrated against.
+if [[ "$prepare_baselines" == "true" ]]; then
+  mkdir -p "$baseline_dir"
+  for scenario in "${scenarios[@]}"; do
+    baseline="${baseline_dir}/${scenario}.duckdb"
+    (
+      cd "$repo_root/api"
+      uv run python -m dojo.e2e "$scenario" "$baseline"
+    )
+  done
+  exit 0
 fi
 
 api_port="${DOJO_E2E_API_PORT:-$(allocate_port)}"

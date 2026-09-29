@@ -6,6 +6,9 @@ profile_dir="${XDG_CACHE_HOME:-$HOME/.cache}/dojo/e2e/profiles/$(date -u +%Y%m%d
 manifest="${profile_dir}/runs.txt"
 mkdir -p "$profile_dir"
 
+# Exclude one-time fixture generation from the steady-state profile samples.
+"$repo_root/web/scripts/run-e2e.sh" --prepare-baselines
+
 for run in 1 2 3; do
   printf '==> E2E profile run %s/3\n' "$run"
   DOJO_E2E_PROFILE_MANIFEST="$manifest" "$repo_root/web/scripts/run-e2e.sh"
