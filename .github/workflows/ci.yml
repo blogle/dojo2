@@ -26,11 +26,8 @@ permissions:
   contents: read
 
 jobs:
-  verify:
+  static:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      statuses: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -40,18 +37,99 @@ jobs:
         if: github.event_name == 'pull_request'
         run: python3 scripts/release.py validate-pr "$GITHUB_EVENT_PATH"
       - uses: DeterminateSystems/nix-installer-action@main
-
+      # Cache downloaded pnpm packages across independent runners; node_modules stays runner-local.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.local/share/pnpm/store
+          key: pnpm-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml') }}
       - name: Install project dependencies
         run: nix develop --command just setup
-      - name: Run canonical CI command
-        id: candidate-ci
-        continue-on-error: ${{ github.event_name == 'workflow_dispatch' }}
-        run: nix develop --command just ci
+      - name: Run static and architecture checks
+        run: nix develop --command just static-check
+
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.sha || github.event.pull_request.head.sha }}
+      - uses: DeterminateSystems/nix-installer-action@main
+      - name: Install API dependencies
+        run: nix develop --command just setup-api
+      - name: Run backend tests and package build
+        run: nix develop --command just backend-check
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.sha || github.event.pull_request.head.sha }}
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: actions/cache@v4
+        with:
+          path: ~/.local/share/pnpm/store
+          key: pnpm-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml') }}
+      - name: Install web dependencies
+        run: nix develop --command just setup-web
+      - name: Run web tests and build
+        run: nix develop --command just web-check
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.sha || github.event.pull_request.head.sha }}
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: actions/cache@v4
+        with:
+          path: ~/.local/share/pnpm/store
+          key: pnpm-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml') }}
+      - name: Install project dependencies
+        run: nix develop --command just setup
+      - name: Run E2E tests
+        run: nix develop --command just test-e2e
+
+  docs-container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.sha || github.event.pull_request.head.sha }}
+      - uses: DeterminateSystems/nix-installer-action@main
+      - name: Build docs and validate container
+        run: nix develop --command just docs-container-check
+
+  verify:
+    if: always()
+    needs: [static, backend, web, e2e, docs-container]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      statuses: write
+    steps:
+      - name: Compute aggregate validation result
+        id: aggregate
+        continue-on-error: true
+        env:
+          STATIC_RESULT: ${{ needs.static.result }}
+          BACKEND_RESULT: ${{ needs.backend.result }}
+          WEB_RESULT: ${{ needs.web.result }}
+          E2E_RESULT: ${{ needs.e2e.result }}
+          DOCS_CONTAINER_RESULT: ${{ needs.docs-container.result }}
+        run: |
+          for result in "$STATIC_RESULT" "$BACKEND_RESULT" "$WEB_RESULT" "$E2E_RESULT" "$DOCS_CONTAINER_RESULT"; do
+            if [[ "$result" != success ]]; then
+              printf 'Required validation job did not succeed: %s\n' "$result"
+              exit 1
+            fi
+          done
       - name: Publish candidate validation status
         if: always() && github.event_name == 'workflow_dispatch'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VALIDATION_STATE: ${{ steps.candidate-ci.outcome == 'success' && 'success' || 'failure' }}
+          VALIDATION_STATE: ${{ steps.aggregate.outcome == 'success' && 'success' || 'failure' }}
         run: |
           description='Candidate CI failed'
           if [[ "$VALIDATION_STATE" == "success" ]]; then
@@ -62,8 +140,8 @@ jobs:
             -f context='${{ inputs.context }}' \
             -f description="$description" \
             -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" >/dev/null
-      - name: Return candidate CI result
-        if: github.event_name == 'workflow_dispatch' && steps.candidate-ci.outcome != 'success'
+      - name: Fail aggregate gate when any validation job failed
+        if: steps.aggregate.outcome != 'success'
         run: exit 1
 
   publish-pr-image:
@@ -82,8 +160,6 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Install project dependencies
-        run: nix develop --command just setup
       - name: Build or reuse immutable container
         run: |
           build_sha="$GITHUB_SHA"
@@ -92,6 +168,7 @@ jobs:
             printf 'Reusing existing immutable image %s.\n' "$source_image"
             docker pull "$source_image"
           else
+            nix develop --command just setup-web
             nix develop --command just build-web
             DOJO_BUILD_SHA="$build_sha" nix build .#container --impure
             docker load < "$(readlink -f result)"

@@ -1,8 +1,14 @@
 set shell := ["bash", "-cu"]
 
 setup:
+	just setup-api
+	just setup-web
+
+setup-api:
 	@printf '==> syncing api dependencies\n'
 	cd api && uv sync
+
+setup-web:
 	@printf '==> installing web dependencies\n'
 	cd web && pnpm install
 
@@ -69,10 +75,19 @@ test-integration:
 	@printf '==> running backend integration tests\n'
 	cd api && uv run python -m pytest tests/test_health.py tests/test_api_endpoints.py tests/test_backup_access.py tests/test_budget_formulas.py tests/test_account_values.py tests/test_reconciliation.py tests/test_scd.py tests/test_migrations.py tests/test_e2e.py
 
-test-e2e:
+test-backend: test-unit test-property test-integration
+
+backend-check: test-backend build-api
+
+web-check: test-web build-web
+
+prepare-e2e:
+	web/scripts/run-e2e.sh --prepare-baselines
+
+test-e2e: prepare-e2e
 	web/scripts/run-e2e.sh
 
-test-e2e-spec spec:
+test-e2e-spec spec: prepare-e2e
 	web/scripts/run-e2e.sh "{{spec}}"
 
 record-flows:
@@ -138,9 +153,13 @@ migration-check:
 	@printf '==> verifying fresh database provisioning\n'
 	cd api && uv run python -m pytest tests/test_migrations.py
 
+static-check: format-check lint typecheck architecture-check migration-check k8s-render
+
 docs:
 	@printf '==> building docs\n'
 	cd docs && mdbook build
+
+docs-container-check: docs container
 
 release-directive:
 	python3 scripts/release.py directive
@@ -227,7 +246,7 @@ bench-web:
 clean:
 	rm -rf api/dist api/build web/dist docs/book .pytest_cache .mypy_cache .ruff_cache
 
-check: format-check lint typecheck architecture-check migration-check k8s-render test-unit test-property test-integration test-web build docs
+check: format-check lint typecheck architecture-check migration-check k8s-render test-backend test-web build docs
 
 ci: check test-e2e container
 
