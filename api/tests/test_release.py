@@ -142,6 +142,22 @@ def test_published_backfills_and_one_new_release_select_only_new_version() -> No
     assert release.introduced_release_version(parent, current, ["v0.0.11", "v0.0.12"]) == "v0.0.13"
 
 
+def test_introduced_release_with_conflicting_published_tag_fails_in_resolution() -> None:
+    parent = "# Changelog\n\n<!-- BEGIN GENERATED RELEASES -->\n\n<!-- END GENERATED RELEASES -->\n"
+    current = parent.replace(
+        "<!-- END GENERATED RELEASES -->",
+        "## v0.0.13\n\n- new\n\n<!-- END GENERATED RELEASES -->",
+    )
+
+    with pytest.raises(ValueError, match="point to another source commit"):
+        release.introduced_release_version(
+            parent,
+            current,
+            published_tags=["v0.0.13"],
+            conflicting_published_tags=["v0.0.13"],
+        )
+
+
 def test_exact_source_tag_takes_precedence_over_published_backfill_filter() -> None:
     parent = "# Changelog\n\n<!-- BEGIN GENERATED RELEASES -->\n\n<!-- END GENERATED RELEASES -->\n"
     current = parent.replace(
@@ -190,6 +206,26 @@ def test_existing_tag_for_intended_version_and_commit_is_reused() -> None:
 def test_existing_tag_for_intended_version_on_another_commit_fails() -> None:
     with pytest.raises(ValueError, match="expected commit-x"):
         release.validate_tag_target("commit-y", "commit-x", "1.2.3")
+
+
+@pytest.mark.parametrize(
+    ("master_state", "source_digest", "staging_digest", "expected_state"),
+    [
+        ("current", "sha256:source", "sha256:source", "skip"),
+        ("current", "sha256:source", "sha256:stale", "update"),
+        ("advanced", "sha256:source", "sha256:stale", "skip"),
+        ("current", "", "", "update"),
+    ],
+)
+def test_staging_update_is_only_needed_for_current_master_with_missing_or_stale_image(
+    master_state: str,
+    source_digest: str,
+    staging_digest: str,
+    expected_state: str,
+) -> None:
+    assert release.staging_update_needed(
+        master_state == "current", source_digest, staging_digest
+    ) is (expected_state == "update")
 
 
 def test_introduced_release_version_rejects_multiple_added_versions() -> None:
@@ -305,9 +341,15 @@ def test_release_workflow_is_publication_only() -> None:
     assert "notes, and promoted image digest are complete" in workflow
     assert "packages: read" in workflow
     assert "complete != 'true'" in workflow
+    assert "staging-needed" in workflow
+    publish_staging = workflow.split("publish-staging:", 1)[1].split("  tag-release:", 1)[0]
+    assert "if: needs.prepare-release.outputs.complete" not in publish_staging
+    assert "steps.staging.outputs.skip != 'true'" in publish_staging
     assert "python3 scripts/release.py changelog-delta" in workflow
     assert "--published-tag" in workflow
     assert "--associated-tag" in workflow
+    assert "--conflicting-tag" in workflow
+    assert "changelog-introduces" in workflow
     assert 'git rev-parse "${tag}^{commit}"' in workflow
     assert "release_query_succeeded=true" in workflow
     assert "package_query_succeeded=true" in workflow
