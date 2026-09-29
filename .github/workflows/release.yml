@@ -88,14 +88,8 @@ jobs:
                 release_body=""
               fi
               python3 scripts/release.py changelog-entry CHANGELOG.md "$version" > /tmp/release-notes.md
-              if package_versions="$(gh api --paginate --jq '.[] | [.name, (.metadata.container.tags // [])] | @json' /users/blogle/packages/container/dojo2/versions 2>/dev/null)"; then
-                if source_digest="$(jq -ser --arg image_tag "git-${TARGET_COMMIT}" '[.[] | fromjson | select(.[1] | index($image_tag)) | .[0]][0] // ""' <<< "$package_versions")" && release_digest="$(jq -ser --arg image_tag "$tag" '[.[] | fromjson | select(.[1] | index($image_tag)) | .[0]][0] // ""' <<< "$package_versions")"; then
-                  package_query_succeeded=true
-                else
-                  package_query_succeeded=false
-                  source_digest=""
-                  release_digest=""
-                fi
+              if source_digest="$(gh api --paginate --jq ".[] | select((.metadata.container.tags // []) | index(\"git-${TARGET_COMMIT}\")) | .name" /users/blogle/packages/container/dojo2/versions 2>/dev/null)" && release_digest="$(gh api --paginate --jq ".[] | select((.metadata.container.tags // []) | index(\"${tag}\")) | .name" /users/blogle/packages/container/dojo2/versions 2>/dev/null)"; then
+                package_query_succeeded=true
               else
                 package_query_succeeded=false
                 source_digest=""
@@ -139,37 +133,33 @@ jobs:
         run: |
           skip=false
           build=true
-          if package_versions="$(gh api --paginate --jq '.[] | [.name, (.metadata.container.tags // [])] | @json' /users/blogle/packages/container/dojo2/versions 2>/dev/null)"; then
-            if source_digest="$(jq -ser --arg image_tag "git-${MASTER_COMMIT}" '[.[] | fromjson | select(.[1] | index($image_tag)) | .[0]][0] // ""' <<< "$package_versions")" && staging_digest="$(jq -ser --arg image_tag staging '[.[] | fromjson | select(.[1] | index($image_tag)) | .[0]][0] // ""' <<< "$package_versions")"; then
-              if [[ -n "$source_digest" ]]; then
-                build=false
-                remote_master="$(git ls-remote origin refs/heads/master | cut -f1)"
-                if [[ -z "$remote_master" ]]; then
-                  echo 'Could not read master ref; proceeding with staging repair.'
-                else
-                  target_is_current_master=false
-                  if [[ "$remote_master" == "$MASTER_COMMIT" ]]; then
-                    target_is_current_master=true
-                  fi
-                  staging_needed="$(python3 scripts/release.py staging-needed "$target_is_current_master" "$source_digest" "$staging_digest")"
-                  if [[ "$staging_needed" == false ]]; then
-                    skip=true
-                    echo 'Staging update is unnecessary for the current master and image state.'
-                    if [[ "$target_is_current_master" == false ]]; then
-                      echo "Master advanced to $remote_master; staging remains unchanged."
-                    fi
-                  else
-                    echo 'Staging differs from the exact source image and will be repaired.'
-                  fi
-                fi
+          if source_digest="$(gh api --paginate --jq ".[] | select((.metadata.container.tags // []) | index(\"git-${MASTER_COMMIT}\")) | .name" /users/blogle/packages/container/dojo2/versions 2>/dev/null)" && staging_digest="$(gh api --paginate --jq '.[] | select((.metadata.container.tags // []) | index("staging")) | .name' /users/blogle/packages/container/dojo2/versions 2>/dev/null)"; then
+            if [[ -n "$source_digest" ]]; then
+              build=false
+              remote_master="$(git ls-remote origin refs/heads/master | cut -f1)"
+              if [[ -z "$remote_master" ]]; then
+                echo 'Could not read master ref; proceeding with staging repair.'
               else
-                echo 'The immutable source image is missing; it will be built.'
+                target_is_current_master=false
+                if [[ "$remote_master" == "$MASTER_COMMIT" ]]; then
+                  target_is_current_master=true
+                fi
+                staging_needed="$(python3 scripts/release.py staging-needed "$target_is_current_master" "$source_digest" "$staging_digest")"
+                if [[ "$staging_needed" == false ]]; then
+                  skip=true
+                  echo 'Staging update is unnecessary for the current master and image state.'
+                  if [[ "$target_is_current_master" == false ]]; then
+                    echo "Master advanced to $remote_master; staging remains unchanged."
+                  fi
+                else
+                  echo 'Staging differs from the exact source image and will be repaired.'
+                fi
               fi
             else
-              echo 'GHCR metadata could not be parsed; proceeding with staging repair.'
+              echo 'The immutable source image is missing; it will be built.'
             fi
           else
-            echo 'GHCR state is unavailable; proceeding with staging repair.'
+            echo 'GHCR state is unavailable or could not be queried; proceeding with staging repair.'
           fi
           echo "skip=$skip" >> "$GITHUB_OUTPUT"
           echo "build=$build" >> "$GITHUB_OUTPUT"
