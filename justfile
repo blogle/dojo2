@@ -81,10 +81,13 @@ backend-check: test-backend build-api
 
 web-check: test-web build-web
 
-test-e2e:
+prepare-e2e:
+	web/scripts/run-e2e.sh --prepare-baselines
+
+test-e2e: prepare-e2e
 	web/scripts/run-e2e.sh
 
-test-e2e-spec spec:
+test-e2e-spec spec: prepare-e2e
 	web/scripts/run-e2e.sh "{{spec}}"
 
 record-flows:
