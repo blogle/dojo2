@@ -342,7 +342,9 @@ describe("dojo app", () => {
       expect(runPollCount).toBe(2);
       expect(wrapper.text()).not.toContain("A backup retry was queued.");
       expect(
-        wrapper.findAll("button").some((button) => button.text() === "Retry backup"),
+        wrapper
+          .findAll("button")
+          .some((button) => button.text() === "Retry backup"),
       ).toBe(true);
     } finally {
       vi.useRealTimers();
