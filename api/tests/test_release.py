@@ -532,6 +532,18 @@ def test_container_content_is_neutral_and_commit_wrapper_sets_exact_provenance()
     assert "COPY" not in wrapper_dockerfile
 
 
+def test_image_provenance_validator_uses_valid_docker_label_template() -> None:
+    validator = (REPO_ROOT / "ops" / "container" / "validate-image-provenance.sh").read_text(
+        encoding="utf-8"
+    )
+
+    expected_template = (
+        """--format '{{ index .Config.Labels "org.opencontainers.image.revision" }}'"""
+    )
+
+    assert expected_template in validator
+
+
 def make_docker_archive(
     directory: str,
     *,
