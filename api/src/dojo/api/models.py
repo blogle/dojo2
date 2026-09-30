@@ -364,6 +364,20 @@ class TangibleAssetValuationPayload(BaseModel):
     notes: str = ""
 
 
+class InvestmentInstrumentPayload(BaseModel):
+    symbol: str | None = None
+    name: str | None = None
+    is_cash_equivalent: bool = False
+
+    @model_validator(mode="after")
+    def normalize_symbol(self) -> "InvestmentInstrumentPayload":
+        if self.symbol is not None:
+            self.symbol = self.symbol.strip().upper()
+            if not self.symbol:
+                raise ValueError("Symbol cannot be blank")
+        return self
+
+
 class InvestmentPositionPayload(BaseModel):
     effective_date: date
     instrument_id: UUID | None = None

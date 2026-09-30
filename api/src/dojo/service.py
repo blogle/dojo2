@@ -56,7 +56,7 @@ from dojo.importer import (
     fixture_bundle,
     parse_named_range_workbook,
 )
-from dojo.investment import position_amount_minor, position_metrics
+from dojo.investment import position_amount_minor, position_metrics, total_cost_basis_minor
 from dojo.loan_projection import LoanProjectionTerms, PaymentFrequency, project_loan
 from dojo.operations import create_transaction_operation, link_transaction_operation
 from dojo.reconciliation import (
@@ -3946,11 +3946,79 @@ class DojoService:
                     )
         return {"account_id": account_id}
 
+    def create_investment_instrument(self, payload: dict[str, Any]) -> dict[str, Any]:
+        symbol = payload.get("symbol")
+        normalized_symbol = symbol.strip().upper() if symbol is not None else None
+        if normalized_symbol == "":
+            raise ValueError("Symbol cannot be blank")
+        if normalized_symbol is not None:
+            existing = self.db.fetch_one(
+                load_sql("queries/investment_instrument_by_symbol"), (normalized_symbol,)
+            )
+            if existing is not None:
+                return existing
+        instrument_id = str(uuid4())
+        self.db.execute(
+            """INSERT INTO investment_instruments
+               (instrument_id, symbol, name, is_cash_equivalent, created_at, created_by_user_id)
+               VALUES (?, ?, ?, ?, ?, NULL)""",
+            (
+                instrument_id,
+                normalized_symbol,
+                payload.get("name"),
+                bool(payload.get("is_cash_equivalent", False)),
+                self.clock.now(),
+            ),
+        )
+        return self.db.fetch_one(
+            load_sql("queries/investment_instrument_by_id"), (instrument_id,)
+        )
+
+    def list_investment_instruments(self) -> list[dict[str, Any]]:
+        return self.db.fetch_all(
+            """SELECT instrument_id, symbol, name, is_cash_equivalent
+               FROM investment_instruments ORDER BY symbol NULLS LAST, instrument_id"""
+        )
+
+    def _resolve_investment_instrument(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        instrument_id = payload.get("instrument_id")
+        if instrument_id is not None:
+            instrument = self.db.fetch_one(
+                load_sql("queries/investment_instrument_by_id"), (str(instrument_id),)
+            )
+            if instrument is None:
+                raise ValueError(f"Unknown investment instrument {instrument_id}")
+            return instrument
+        symbol = payload.get("symbol") or payload.get("ticker")
+        if symbol is None or not str(symbol).strip():
+            raise ValueError("Provide instrument_id or nonblank symbol/ticker")
+        return self.create_investment_instrument({"symbol": str(symbol)})
+
+    @staticmethod
+    def _investment_position_basis(payload: Mapping[str, Any], quantity_micros: int) -> int:
+        total_basis = payload.get("total_cost_basis_minor")
+        average_cost = payload.get("average_cost_per_share_minor")
+        derived = (
+            total_cost_basis_minor(quantity_micros, int(average_cost))
+            if average_cost is not None
+            else None
+        )
+        if total_basis is not None and derived is not None and int(total_basis) != derived:
+            raise ValueError("Total and average cost basis inputs conflict")
+        if total_basis is None and derived is None:
+            raise ValueError("Provide total_cost_basis_minor or average_cost_per_share_minor")
+        return int(total_basis) if total_basis is not None else int(derived)
+
     def create_investment_position(
         self, account_id: str, payload: dict[str, Any]
     ) -> dict[str, Any]:
         self._require_account_class(account_id, ACCOUNT_CLASS_INVESTMENT)
         effective_date = self._non_future_date(payload["effective_date"])
+        quantity = payload.get("quantity_micros")
+        if quantity is None:
+            raise ValueError("quantity_micros is required")
+        basis = self._investment_position_basis(payload, int(quantity))
+        instrument = self._resolve_investment_instrument(payload)
         now = self.clock.now()
         position_id = str(uuid4())
         with self.db.transaction() as connection:
@@ -3960,14 +4028,62 @@ class DojoService:
                 {
                     "position_id": position_id,
                     "account_id": account_id,
-                    "ticker": payload["ticker"].strip().upper(),
+                    "instrument_id": str(instrument["instrument_id"]),
                     "effective_date": effective_date,
-                    "quantity_micros": payload["quantity_micros"],
-                    "average_basis_minor": payload["average_basis_minor"],
+                    "quantity_micros": int(quantity),
+                    "total_cost_basis_minor": basis,
                     "valid_from": now,
                     "valid_to": MAX_TS,
                     "created_at": now,
                     "created_by_user_id": None,
+                },
+            )
+        return {"position_id": position_id}
+
+    def correct_investment_position(
+        self, account_id: str, position_id: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        self._require_account_class(account_id, ACCOUNT_CLASS_INVESTMENT)
+        current = self.db.fetch_one(
+            load_sql("queries/current_investment_position_by_id"), (account_id, position_id)
+        )
+        if current is None:
+            raise ValueError(f"Investment position {position_id} was not found")
+        quantity = int(payload.get("quantity_micros", current["quantity_micros"]))
+        changed_quantity = quantity != int(current["quantity_micros"])
+        has_basis = (
+            payload.get("total_cost_basis_minor") is not None
+            or payload.get("average_cost_per_share_minor") is not None
+        )
+        if changed_quantity and not has_basis:
+            raise ValueError("A quantity-changing correction requires a resulting cost basis")
+        basis = (
+            self._investment_position_basis(payload, quantity)
+            if has_basis
+            else int(current["total_cost_basis_minor"])
+        )
+        effective_date = self._non_future_date(
+            payload.get("effective_date", current["effective_date"])
+        )
+        now = self.clock.now()
+        with self.db.transaction() as connection:
+            close_current_version(
+                connection, "investment_positions", "position_id", position_id, now=now
+            )
+            insert_version(
+                connection,
+                "investment_positions",
+                {
+                    "position_id": position_id,
+                    "account_id": account_id,
+                    "instrument_id": str(current["instrument_id"]),
+                    "effective_date": effective_date,
+                    "quantity_micros": quantity,
+                    "total_cost_basis_minor": basis,
+                    "valid_from": now,
+                    "valid_to": MAX_TS,
+                    "created_at": current["created_at"],
+                    "created_by_user_id": current["created_by_user_id"],
                 },
             )
         return {"position_id": position_id}
