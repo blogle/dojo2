@@ -271,6 +271,50 @@ def test_interrupted_investment_migration_resumes_from_staging_tables(tmp_path) 
         database.close()
 
 
+def test_pre_dojo35_backup_runs_schema_migrates_without_losing_rows(tmp_path) -> None:
+    duckdb_path = tmp_path / "pre-dojo35-backup-runs.duckdb"
+    connection = duckdb.connect(str(duckdb_path))
+    try:
+        connection.execute(
+            """
+            CREATE TABLE backup_runs (
+                backup_run_id UUID PRIMARY KEY, trigger_kind TEXT NOT NULL,
+                status TEXT NOT NULL, phase TEXT NOT NULL, started_at TIMESTAMPTZ NOT NULL,
+                completed_at TIMESTAMPTZ, updated_at TIMESTAMPTZ NOT NULL,
+                source_snapshot TEXT, image_digest TEXT, restic_snapshot_id TEXT,
+                database_sha256 TEXT, database_size_bytes BIGINT, error_message TEXT,
+                CHECK (trigger_kind IN ('SCHEDULED', 'MANUAL')),
+                CHECK (status IN ('RUNNING', 'SUCCEEDED', 'FAILED')),
+                CHECK (database_size_bytes IS NULL OR database_size_bytes >= 0)
+            )
+            """
+        )
+        connection.execute(
+            "INSERT INTO backup_runs VALUES (?, 'SCHEDULED', 'FAILED', 'SNAPSHOTTING', "
+            "TIMESTAMPTZ '2026-09-01 00:00:00+00', TIMESTAMPTZ '2026-09-01 00:01:00+00', "
+            "TIMESTAMPTZ '2026-09-01 00:01:00+00', NULL, NULL, NULL, NULL, NULL, 'preserved')",
+            ("00000000-0000-4000-8000-000000000035",),
+        )
+    finally:
+        connection.close()
+
+    provision_database(str(duckdb_path))
+    database = Database(str(duckdb_path))
+    try:
+        assert database.fetch_one(
+            "SELECT status, error_message FROM backup_runs WHERE backup_run_id = ?",
+            ("00000000-0000-4000-8000-000000000035",),
+        ) == {"status": "FAILED", "error_message": "preserved"}
+        database.execute(
+            "INSERT INTO backup_runs VALUES (?, 'SCHEDULED', 'SKIPPED', 'LOCKED', "
+            "TIMESTAMPTZ '2026-09-02 00:00:00+00', TIMESTAMPTZ '2026-09-02 00:00:00+00', "
+            "TIMESTAMPTZ '2026-09-02 00:00:00+00', NULL, NULL, NULL, NULL, NULL, 'held')",
+            ("00000000-0000-4000-8000-000000000036",),
+        )
+    finally:
+        database.close()
+
+
 def test_legacy_reconciliation_schema_is_migrated_deterministically(tmp_path) -> None:
     duckdb_path = tmp_path / "legacy-reconciliation.duckdb"
     connection = duckdb.connect(str(duckdb_path))

@@ -126,6 +126,35 @@ def test_manual_backup_run_rejects_a_second_retry_while_queued(monkeypatch, tmp_
     assert response.json()["detail"]["code"] == "backup_retry_not_available"
 
 
+def test_backup_run_endpoint_returns_exact_run_after_a_later_run_is_latest(
+    monkeypatch, tmp_path
+) -> None:
+    run_id = "00000000-0000-4000-8000-000000000040"
+    later_run_id = "00000000-0000-4000-8000-000000000041"
+    with provisioned_client(monkeypatch, tmp_path) as client:
+        service = main_module.app.state.dojo_service
+        service.report_backup_run(
+            run_id,
+            {"trigger_kind": "MANUAL", "status": "RUNNING", "phase": "UPLOADING"},
+        )
+        service.report_backup_run(
+            later_run_id,
+            {"trigger_kind": "SCHEDULED", "status": "FAILED", "phase": "VERIFYING"},
+        )
+
+        latest = service.get_latest_backup_run()
+        response = client.get(f"/api/settings/backup/runs/{run_id}")
+        missing = client.get("/api/settings/backup/runs/00000000-0000-4000-8000-000000000042")
+
+    assert latest is not None
+    assert latest["backup_run_id"] == later_run_id
+    assert response.status_code == 200
+    assert response.json()["backup_run_id"] == run_id
+    assert response.json()["status"] == "RUNNING"
+    assert response.json()["phase"] == "UPLOADING"
+    assert missing.status_code == 404
+
+
 def test_backup_access_rejects_missing_configuration(monkeypatch, tmp_path) -> None:
     with provisioned_client(monkeypatch, tmp_path) as client:
         response = client.post(
@@ -303,6 +332,48 @@ def test_configured_backup_with_failed_run_remains_ready_and_degraded(service) -
     assert status["mode"] == "ready"
     assert status["backup"]["state"] == "degraded"
     assert status["backup"]["action"] == "retry"
+
+
+def test_active_manual_run_survives_newer_skipped_scheduled_run(service) -> None:
+    key = b"0123456789abcdef0123456789abcdef"
+    service.store_backup_credential(
+        encrypt_refresh_token(
+            "opaque-refresh-value",
+            credential_id=SYSTEM_BACKUP_CREDENTIAL_ID,
+            key=key,
+        ),
+        "https://www.googleapis.com/auth/drive.file",
+    )
+    service.start_empty_onboarding()
+    service.configure_backup_folder("folder-id", "Backup folder", str(SYSTEM_BACKUP_CREDENTIAL_ID))
+
+    manual_run_id = "00000000-0000-4000-8000-000000000010"
+    scheduled_run_id = "00000000-0000-4000-8000-000000000099"
+    service.report_backup_run(
+        manual_run_id,
+        {
+            "trigger_kind": "MANUAL",
+            "status": "RUNNING",
+            "phase": "UPLOADING",
+            "error_message": None,
+        },
+    )
+    service.report_backup_run(
+        scheduled_run_id,
+        {
+            "trigger_kind": "SCHEDULED",
+            "status": "SKIPPED",
+            "phase": "LOCKED",
+            "error_message": "A manual backup owns the backup lock.",
+        },
+    )
+
+    status = service.get_app_status()
+
+    assert status["backup"]["state"] == "degraded"
+    assert status["backup"]["action"] == "in_progress"
+    assert status["backup"]["active_manual_run_id"] == manual_run_id
+    assert status["latest_backup_run"]["backup_run_id"] == scheduled_run_id
 
 
 def test_legacy_configured_folder_is_not_usable_after_backup_credential_repair(service) -> None:

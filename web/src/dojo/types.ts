@@ -7,6 +7,7 @@ export type AppStatus = {
   backup: {
     state: "required" | "configured" | "degraded";
     action: "repair" | "retry" | "queued" | "in_progress";
+    active_manual_run_id: string | null;
     message: string | null;
   };
   latest_backup_run: Record<string, unknown> | null;
@@ -26,6 +27,14 @@ export type BackupSettings = {
     verified_at: string | null;
   } | null;
   latest_run: Record<string, unknown> | null;
+};
+
+export type BackupRun = {
+  backup_run_id: string;
+  trigger_kind: "SCHEDULED" | "MANUAL";
+  status: "RUNNING" | "SUCCEEDED" | "FAILED" | "SKIPPED";
+  phase: string;
+  error_message: string | null;
 };
 
 export type Transaction = {
