@@ -3985,9 +3985,7 @@ class DojoService:
                 return existing
         instrument_id = str(uuid4())
         self.db.execute(
-            """INSERT INTO investment_instruments
-               (instrument_id, symbol, name, is_cash_equivalent, created_at, created_by_user_id)
-               VALUES (?, ?, ?, ?, ?, NULL)""",
+            load_sql("queries/insert_investment_instrument"),
             (
                 instrument_id,
                 normalized_symbol,
@@ -3996,13 +3994,15 @@ class DojoService:
                 self.clock.now(),
             ),
         )
-        return self.db.fetch_one(load_sql("queries/investment_instrument_by_id"), (instrument_id,))
+        instrument = self.db.fetch_one(
+            load_sql("queries/investment_instrument_by_id"), (instrument_id,)
+        )
+        if instrument is None:
+            raise RuntimeError("Created investment instrument could not be read back")
+        return instrument
 
     def list_investment_instruments(self) -> list[dict[str, Any]]:
-        return self.db.fetch_all(
-            """SELECT instrument_id, symbol, name, is_cash_equivalent
-               FROM investment_instruments ORDER BY symbol NULLS LAST, instrument_id"""
-        )
+        return self.db.fetch_all(load_sql("queries/list_investment_instruments"))
 
     def _resolve_investment_instrument(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         instrument_id = payload.get("instrument_id")
@@ -4033,7 +4033,11 @@ class DojoService:
             raise ValueError("Total and average cost basis inputs conflict")
         if total_basis is None and derived is None:
             raise ValueError("Provide total_cost_basis_minor or average_cost_per_share_minor")
-        return int(total_basis) if total_basis is not None else int(derived)
+        if total_basis is not None:
+            return int(total_basis)
+        if derived is None:
+            raise ValueError("Provide total_cost_basis_minor or average_cost_per_share_minor")
+        return derived
 
     def create_investment_position(
         self, account_id: str, payload: dict[str, Any]
