@@ -426,6 +426,54 @@ def test_ci_validates_pr_body_and_supports_explicit_candidate_validation() -> No
     assert "statuses: write" in workflow
 
 
+def test_explicit_candidate_publishes_image_before_validation_status() -> None:
+    workflow = CI_WORKFLOW.read_text(encoding="utf-8")
+    verify = workflow.split("  verify:", 1)[1].split("  candidate-image:", 1)[0]
+    candidate_image = workflow.split("  candidate-image:", 1)[1].split(
+        "  candidate-validation-status:", 1
+    )[0]
+    candidate_status = workflow.split("  candidate-validation-status:", 1)[1]
+
+    assert "Publish candidate validation status" not in verify
+    assert "needs: verify" in candidate_image
+    assert (
+        "if: needs.verify.result == 'success' && (github.event_name == 'workflow_dispatch' || "
+        "(github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))"
+        in candidate_image
+    )
+
+    dispatch_checkout = candidate_image.split("if: github.event_name == 'workflow_dispatch'", 1)[1]
+    dispatch_checkout = dispatch_checkout.split("- uses: actions/checkout@v4", 1)[0]
+    assert "ref: ${{ inputs.sha }}" in dispatch_checkout
+    assert "fetch-depth: 0" in dispatch_checkout
+    assert "github.event.pull_request" not in dispatch_checkout
+
+    dispatch_publish = candidate_image.split(
+        "- name: Publish workflow-dispatch candidate image", 1
+    )[1].split("- name: Publish pull request candidate image", 1)[0]
+    assert "if: github.event_name == 'workflow_dispatch'" in dispatch_publish
+    assert "CANDIDATE_SHA: ${{ inputs.sha }}" in dispatch_publish
+    assert 'ops/container/publish-image.sh "$CANDIDATE_SHA"' in dispatch_publish
+    assert "github.event.pull_request" not in dispatch_publish
+
+    pr_publish = candidate_image.split("- name: Publish pull request candidate image", 1)[1]
+    assert "CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}" in pr_publish
+    assert 'ops/container/publish-image.sh "$CANDIDATE_SHA"' in pr_publish
+    pr_tag = pr_publish.split("- name: Publish pull request image", 1)[1]
+    assert "if: github.event_name == 'pull_request'" in pr_tag
+    assert '"ghcr.io/blogle/dojo2:pr-${{ github.event.pull_request.number }}"' in pr_tag
+
+    assert "needs: [verify, candidate-image]" in candidate_status
+    assert "if: always() && github.event_name == 'workflow_dispatch'" in candidate_status
+    assert (
+        "VALIDATION_STATE: ${{ needs.verify.result == 'success' && "
+        "needs.candidate-image.result == 'success' && 'success' || 'failure' }}" in candidate_status
+    )
+    assert "statuses/${{ inputs.sha }}" in candidate_status
+    assert "context='${{ inputs.context }}'" in candidate_status
+    assert "if: env.VALIDATION_STATE != 'success'" in candidate_status
+
+
 def run_image_publisher(mode: str, commit: str, *, revision: str | None = None) -> str:
     with tempfile.TemporaryDirectory() as directory:
         bin_dir = Path(directory) / "bin"
@@ -631,12 +679,16 @@ def test_content_image_validator_rejects_commit_specific_provenance(
 def test_pr_publisher_uses_pr_head_and_staging_rechecks_master_before_move() -> None:
     ci = CI_WORKFLOW.read_text(encoding="utf-8")
     release_workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
-    publish_pr = ci.split("publish-pr-image:", 1)[1]
+    publish_pr = ci.split("candidate-image:", 1)[1]
     staging = release_workflow.split("publish-staging:", 1)[1].split("  tag-release:", 1)[0]
     move_staging = staging.split("- name: Move staging", 1)[1]
 
-    assert 'ops/container/publish-image.sh "$PR_HEAD_SHA"' in publish_pr
-    assert 'docker tag "ghcr.io/blogle/dojo2:git-${PR_HEAD_SHA}"' in publish_pr
+    assert 'ops/container/publish-image.sh "$CANDIDATE_SHA"' in publish_pr
+    assert "CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}" in publish_pr
+    assert (
+        'docker tag "ghcr.io/blogle/dojo2:git-${{ github.event.pull_request.head.sha }}"'
+        in publish_pr
+    )
     assert move_staging.index("git ls-remote origin refs/heads/master") > move_staging.index(
         'docker pull "$source_image"'
     )
