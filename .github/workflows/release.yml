@@ -173,6 +173,7 @@ jobs:
         run: |
           source_image="ghcr.io/blogle/dojo2:git-${MASTER_COMMIT}"
           docker pull "$source_image"
+          ops/container/validate-image-provenance.sh "$source_image" "$MASTER_COMMIT"
           # An older delayed publication may build its exact image, but it must
           # not move staging behind the current master ref.
           remote_master="$(git ls-remote origin refs/heads/master | cut -f1)"
@@ -234,6 +235,7 @@ jobs:
           source_image="ghcr.io/blogle/dojo2:git-${MASTER_COMMIT}"
           release_image="ghcr.io/blogle/dojo2:v${VERSION}"
           docker pull "$source_image"
+          ops/container/validate-image-provenance.sh "$source_image" "$MASTER_COMMIT"
           docker tag "$source_image" "$release_image"
           docker push "$release_image"
 
