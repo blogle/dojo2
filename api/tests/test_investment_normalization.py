@@ -265,3 +265,295 @@ def test_quantity_preserving_correction_without_basis_retains_basis(service) -> 
 
     assert len(history) == 2
     assert [row["total_cost_basis_minor"] for row in history] == [1234, 1234]
+
+
+def test_price_updates_do_not_mutate_position_facts(service, clock) -> None:
+    account_id = _investment_account(service, "Price independence account")
+    instrument = service.create_investment_instrument({"symbol": "PRICE"})
+    created = service.create_investment_position(
+        account_id,
+        _position_payload(
+            instrument_id=instrument["instrument_id"],
+            ticker=None,
+            quantity_micros=500_000,
+            total_cost_basis_minor=7,
+        ),
+    )
+    position_id = created["position_id"]
+    before = service.db.fetch_all(
+        "SELECT row_id, quantity_micros, total_cost_basis_minor "
+        "FROM investment_positions WHERE position_id = ? ORDER BY valid_from",
+        (position_id,),
+    )
+
+    for price in (10, 20):
+        clock.advance(seconds=1)
+        service.create_investment_price_snapshot(
+            {
+                "instrument_id": instrument["instrument_id"],
+                "effective_date": date(2026, 1, 1),
+                "price_minor": price,
+            }
+        )
+    after = service.db.fetch_all(
+        "SELECT row_id, quantity_micros, total_cost_basis_minor "
+        "FROM investment_positions WHERE position_id = ? ORDER BY valid_from",
+        (position_id,),
+    )
+
+    assert after == before
+    assert len(after) == 1
+    prices = service.list_investment_price_snapshots_by_instrument(instrument["instrument_id"])
+    assert len(prices) == 2
+    assert all(row["instrument_id"] == instrument["instrument_id"] for row in prices)
+
+
+def test_statement_direct_total_basis_persists_and_reads_canonically(service) -> None:
+    account_id = _investment_account(service, "Statement basis account")
+    service.reconcile_investment_statement(
+        account_id,
+        {
+            "effective_date": date(2026, 2, 1),
+            "cash_balance_minor": 5_000,
+            "holdings": [
+                {
+                    "ticker": "VTI",
+                    "quantity_micros": 2_500_000,
+                    "price_minor": 10_000,
+                    "total_cost_basis_minor": 20_000,
+                }
+            ],
+        },
+    )
+
+    persisted = service.db.fetch_one(
+        "SELECT instrument_id, total_cost_basis_minor FROM current_investment_positions "
+        "WHERE account_id = ?",
+        (account_id,),
+    )
+    statement = service.latest_investment_statement(account_id)
+    assert persisted["total_cost_basis_minor"] == 20_000
+    assert statement["current_value_minor"] == 30_000
+    assert statement["holdings_cost_basis_minor"] == 20_000
+    assert statement["unrealized_gain_minor"] == 5_000
+    assert statement["holdings"][0]["instrument_id"] == persisted["instrument_id"]
+
+
+def test_statement_persists_direct_and_half_even_basis(service) -> None:
+    account_id = _investment_account(service, "Combined statement basis account")
+    service.reconcile_investment_statement(
+        account_id,
+        {
+            "effective_date": date(2026, 2, 1),
+            "cash_balance_minor": 0,
+            "holdings": [
+                {
+                    "ticker": "DIRECT",
+                    "quantity_micros": 1_000_000,
+                    "price_minor": 1_500,
+                    "total_cost_basis_minor": 1234,
+                },
+                {
+                    "ticker": "EVEN",
+                    "quantity_micros": 500_000,
+                    "price_minor": 10,
+                    "average_basis_minor": 5,
+                },
+            ],
+        },
+    )
+    persisted = service.db.fetch_all(
+        "SELECT i.symbol, p.total_cost_basis_minor FROM current_investment_positions p "
+        "JOIN investment_instruments i USING (instrument_id) WHERE p.account_id = ? "
+        "ORDER BY i.symbol",
+        (account_id,),
+    )
+    latest = service.latest_investment_statement(account_id)
+
+    assert [(row["symbol"], row["total_cost_basis_minor"]) for row in persisted] == [
+        ("DIRECT", 1234),
+        ("EVEN", 2),
+    ]
+    assert latest["holdings_cost_basis_minor"] == 1236
+
+
+def test_statement_legacy_average_basis_uses_half_even(service) -> None:
+    account_id = _investment_account(service, "Statement half-even account")
+    service.reconcile_investment_statement(
+        account_id,
+        {
+            "effective_date": date(2026, 2, 1),
+            "cash_balance_minor": 0,
+            "holdings": [
+                {
+                    "ticker": "EVEN",
+                    "quantity_micros": 500_000,
+                    "price_minor": 10,
+                    "average_basis_minor": 5,
+                },
+                {
+                    "ticker": "ODD",
+                    "quantity_micros": 500_000,
+                    "price_minor": 10,
+                    "average_basis_minor": 7,
+                },
+            ],
+        },
+    )
+    persisted = service.db.fetch_all(
+        "SELECT i.symbol, p.total_cost_basis_minor FROM current_investment_positions p "
+        "JOIN investment_instruments i USING (instrument_id) WHERE p.account_id = ? "
+        "ORDER BY i.symbol",
+        (account_id,),
+    )
+
+    assert [(row["symbol"], row["total_cost_basis_minor"]) for row in persisted] == [
+        ("EVEN", 2),
+        ("ODD", 4),
+    ]
+
+
+def test_no_symbol_instrument_statement_round_trips_identity(service) -> None:
+    account_id = _investment_account(service, "No-symbol statement account")
+    instrument = service.create_investment_instrument({"symbol": None, "name": "Private Fund"})
+    service.reconcile_investment_statement(
+        account_id,
+        {
+            "effective_date": date(2026, 2, 1),
+            "cash_balance_minor": 0,
+            "holdings": [
+                {
+                    "instrument_id": instrument["instrument_id"],
+                    "quantity_micros": 1_000_000,
+                    "price_minor": 4_000,
+                    "total_cost_basis_minor": 3_500,
+                }
+            ],
+        },
+    )
+    holding = service.latest_investment_statement(account_id)["holdings"][0]
+
+    assert holding["instrument_id"] == instrument["instrument_id"]
+    assert holding["symbol"] is None
+    assert holding["total_cost_basis_minor"] == 3_500
+
+
+def test_statement_rejects_duplicate_resolved_instrument_before_writing(service) -> None:
+    account_id = _investment_account(service, "Duplicate statement account")
+    instrument = service.create_investment_instrument({"symbol": "DUP"})
+
+    with pytest.raises(ValueError, match="unique instruments"):
+        service.reconcile_investment_statement(
+            account_id,
+            {
+                "effective_date": date(2026, 2, 1),
+                "cash_balance_minor": 500,
+                "holdings": [
+                    {
+                        "instrument_id": instrument["instrument_id"],
+                        "quantity_micros": 1_000_000,
+                        "price_minor": 100,
+                        "total_cost_basis_minor": 90,
+                    },
+                    {
+                        "ticker": "dup",
+                        "quantity_micros": 2_000_000,
+                        "price_minor": 100,
+                        "total_cost_basis_minor": 180,
+                    },
+                ],
+            },
+        )
+
+    assert service.db.fetch_one(
+        "SELECT COUNT(*) AS count FROM investment_positions WHERE account_id = ?",
+        (account_id,),
+    )["count"] == 0
+    assert service.db.fetch_one(
+        "SELECT COUNT(*) AS count FROM investment_cash_snapshots WHERE account_id = ?",
+        (account_id,),
+    )["count"] == 0
+
+
+def test_price_changes_market_gain_without_reconstructing_basis(service, clock) -> None:
+    account_id = _investment_account(service, "Price valuation account")
+    instrument = service.create_investment_instrument({"symbol": "GAIN"})
+    service.create_investment_position(
+        account_id,
+        _position_payload(
+            instrument_id=instrument["instrument_id"],
+            ticker=None,
+            effective_date=date(2026, 2, 1),
+            quantity_micros=1_000_000,
+            total_cost_basis_minor=700,
+        ),
+    )
+    service.create_investment_cash_snapshot(
+        account_id, {"effective_date": date(2026, 2, 1), "cash_balance_minor": 0}
+    )
+    service.create_investment_price_snapshot(
+        {
+            "instrument_id": instrument["instrument_id"],
+            "effective_date": date(2026, 2, 1),
+            "price_minor": 1_000,
+        }
+    )
+    first = service.latest_investment_statement(account_id)
+    clock.advance(seconds=1)
+    service.create_investment_price_snapshot(
+        {
+            "instrument_id": instrument["instrument_id"],
+            "effective_date": date(2026, 2, 1),
+            "price_minor": 1_500,
+        }
+    )
+    second = service.latest_investment_statement(account_id)
+
+    assert first["current_value_minor"] == 1_000
+    assert first["holdings_cost_basis_minor"] == 700
+    assert first["unrealized_gain_minor"] == 300
+    assert second["current_value_minor"] == 1_500
+    assert second["holdings_cost_basis_minor"] == 700
+    assert second["unrealized_gain_minor"] == 800
+
+
+def test_cash_equivalent_position_and_literal_cash_are_counted_once(service) -> None:
+    account_id = _investment_account(service, "Cash equivalent account")
+    sweep = service.create_investment_instrument(
+        {"symbol": "SWEEP", "name": "Sweep", "is_cash_equivalent": True}
+    )
+    stock = service.create_investment_instrument({"symbol": "STOCK"})
+    service.reconcile_investment_statement(
+        account_id,
+        {
+            "effective_date": date(2026, 2, 1),
+            "cash_balance_minor": 5_000,
+            "holdings": [
+                {
+                    "instrument_id": sweep["instrument_id"],
+                    "quantity_micros": 1_000_000,
+                    "price_minor": 10_000,
+                    "total_cost_basis_minor": 9_000,
+                },
+                {
+                    "instrument_id": stock["instrument_id"],
+                    "quantity_micros": 1_000_000,
+                    "price_minor": 20_000,
+                    "total_cost_basis_minor": 15_000,
+                },
+            ],
+        },
+    )
+
+    statement = service.latest_investment_statement(account_id)
+    sweep_holding = next(
+        holding for holding in statement["holdings"] if holding["instrument_id"] == sweep["instrument_id"]
+    )
+    assert statement["current_value_minor"] == 35_000
+    assert statement["holdings_cost_basis_minor"] == 24_000
+    assert sweep_holding["is_cash_equivalent"] is True
+    assert sweep_holding["value_minor"] == 10_000
+    account_value = next(
+        item for item in service.get_net_worth()["items"] if item["account_id"] == account_id
+    )
+    assert account_value["net_worth_minor"] == 35_000
