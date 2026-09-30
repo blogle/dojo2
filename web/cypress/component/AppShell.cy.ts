@@ -24,7 +24,12 @@ describe("AppShell", () => {
       mode: "local",
       needs_onboarding: false,
       needs_backup_setup: false,
-      backup: { state: "degraded", action: "retry", message: "Backup failed." },
+      backup: {
+        state: "degraded",
+        action: "retry",
+        active_manual_run_id: null,
+        message: "Backup failed.",
+      },
       latest_backup_run: null,
       latest_import_batch: null,
       latest_import_run: null,
@@ -89,6 +94,201 @@ describe("AppShell", () => {
         "have.class",
         "navigation-rail--expanded",
       );
+    });
+  });
+
+  it("polls and completes the exact manual backup run", () => {
+    const runId = "00000000-0000-4000-8000-000000000040";
+    cy.clock();
+    cy.intercept("POST", "/api/settings/backup/run", {
+      statusCode: 202,
+      body: {
+        status: "QUEUED",
+        job_name: "dojo-backup-manual-test",
+        run_id: runId,
+      },
+    }).as("queueBackup");
+    cy.intercept(
+      {
+        method: "GET",
+        url: `/api/settings/backup/runs/${runId}`,
+        middleware: true,
+        times: 1,
+      },
+      (request) =>
+        request.reply({
+          statusCode: 200,
+          body: {
+            backup_run_id: runId,
+            trigger_kind: "MANUAL",
+            status: "RUNNING",
+            phase: "UPLOADING",
+            error_message: null,
+          },
+        }),
+    ).as("backupRunRunning");
+    cy.intercept("GET", `/api/settings/backup/runs/${runId}`, {
+      statusCode: 200,
+      body: {
+        backup_run_id: runId,
+        trigger_kind: "MANUAL",
+        status: "SUCCEEDED",
+        phase: "COMPLETE",
+        error_message: null,
+      },
+    }).as("backupRunTerminal");
+    cy.intercept("GET", "/api/app/status", {
+      statusCode: 200,
+      body: {
+        app: "dojo",
+        ready: true,
+        mode: "ready",
+        needs_onboarding: false,
+        needs_backup_setup: false,
+        backup: {
+          state: "degraded",
+          action: "retry",
+          active_manual_run_id: null,
+          message: "Backup failed.",
+        },
+        latest_backup_run: {
+          backup_run_id: "00000000-0000-4000-8000-000000000099",
+          trigger_kind: "SCHEDULED",
+          status: "FAILED",
+          phase: "VERIFYING",
+        },
+        latest_import_batch: null,
+        latest_import_run: null,
+      },
+    }).as("appStatus");
+
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        {
+          path: "/transactions",
+          component: {
+            template: '<div data-cy="shell-page">Transactions</div>',
+          },
+        },
+      ],
+    });
+    const { state } = useAppState();
+    state.appStatus = {
+      app: "dojo",
+      ready: true,
+      mode: "ready",
+      needs_onboarding: false,
+      needs_backup_setup: false,
+      backup: {
+        state: "degraded",
+        action: "retry",
+        active_manual_run_id: null,
+        message: "Backup failed.",
+      },
+      latest_backup_run: null,
+      latest_import_batch: null,
+      latest_import_run: null,
+    };
+    router.push("/transactions");
+    cy.wrap(router.isReady()).then(() => {
+      mount(AppShell, { global: { plugins: [router] } });
+      cy.contains("button", "Retry backup").click();
+      cy.wait("@queueBackup");
+      cy.get("[data-cy=persistent-warning-banner-root]").should(
+        "contain.text",
+        "A backup retry was queued.",
+      );
+
+      cy.tick(2000);
+      cy.wait("@backupRunRunning");
+      cy.wait("@appStatus");
+      cy.get("[data-cy=persistent-warning-banner-root]").should(
+        "contain.text",
+        "A backup retry is in progress.",
+      );
+
+      cy.tick(2000);
+      cy.wait("@backupRunTerminal");
+      cy.wait("@appStatus");
+      cy.contains("button", "Retry backup").should("be.visible");
+      cy.get("@backupRunRunning.all").should("have.length", 1);
+      cy.get("@backupRunTerminal.all").should("have.length", 1);
+    });
+  });
+
+  it("hydrates the active manual retry when a newer scheduled run is skipped", () => {
+    const manualRunId = "00000000-0000-4000-8000-000000000041";
+    cy.clock();
+    cy.intercept("GET", `/api/settings/backup/runs/${manualRunId}`, {
+      statusCode: 200,
+      body: {
+        backup_run_id: manualRunId,
+        trigger_kind: "MANUAL",
+        status: "SUCCEEDED",
+        phase: "COMPLETE",
+        error_message: null,
+      },
+    }).as("hydratedManualRun");
+    cy.intercept("GET", "/api/app/status", {
+      statusCode: 200,
+      body: {
+        app: "dojo",
+        ready: true,
+        mode: "ready",
+        needs_onboarding: false,
+        needs_backup_setup: false,
+        backup: {
+          state: "configured",
+          action: "repair",
+          active_manual_run_id: null,
+          message: null,
+        },
+        latest_backup_run: {
+          backup_run_id: "00000000-0000-4000-8000-000000000099",
+          trigger_kind: "SCHEDULED",
+          status: "SKIPPED",
+          phase: "LOCKED",
+        },
+        latest_import_batch: null,
+        latest_import_run: null,
+      },
+    }).as("hydratedAppStatus");
+
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: "/transactions", component: { template: "Transactions" } },
+      ],
+    });
+    const { state } = useAppState();
+    state.appStatus = {
+      app: "dojo",
+      ready: true,
+      mode: "ready",
+      needs_onboarding: false,
+      needs_backup_setup: false,
+      backup: {
+        state: "degraded",
+        action: "in_progress",
+        active_manual_run_id: manualRunId,
+        message: "A backup retry is in progress.",
+      },
+      latest_backup_run: {
+        backup_run_id: "00000000-0000-4000-8000-000000000099",
+        trigger_kind: "SCHEDULED",
+        status: "SKIPPED",
+        phase: "LOCKED",
+      },
+      latest_import_batch: null,
+      latest_import_run: null,
+    };
+    router.push("/transactions");
+    cy.wrap(router.isReady()).then(() => {
+      mount(AppShell, { global: { plugins: [router] } });
+      cy.tick(2000);
+      cy.wait("@hydratedManualRun");
+      cy.wait("@hydratedAppStatus");
     });
   });
 });

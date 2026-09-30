@@ -20,6 +20,10 @@ spec:
             imagePullPolicy: Always
             command: [/bin/dojo-snapshot-backup]
             env:
+            - name: DOJO_BACKUP_JOB_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.labels['batch.kubernetes.io/job-name']
             - name: DOJO_BACKUP_STATUS_URL
               value: http://dojo/api/internal/backup-runs
             - name: DOJO_BACKUP_STATUS_TOKEN_FILE

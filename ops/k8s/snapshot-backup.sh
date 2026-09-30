@@ -24,6 +24,7 @@ render_job() {
   : "${DOJO_BACKUP_SNAPSHOT:?Set DOJO_BACKUP_SNAPSHOT}"
   : "${DOJO_BACKUP_IMAGE:?Set DOJO_BACKUP_IMAGE}"
   : "${DOJO_BACKUP_CLONE:?Set DOJO_BACKUP_CLONE}"
+  : "${DOJO_BACKUP_LOCK_HOLDER:?Set DOJO_BACKUP_LOCK_HOLDER}"
   cat <<EOF
 apiVersion: batch/v1
 kind: Job
@@ -33,6 +34,7 @@ spec:
   backoffLimit: 0
   template:
     spec:
+      serviceAccountName: dojo-backup
       restartPolicy: Never
       containers:
       - name: backup
@@ -42,6 +44,32 @@ spec:
         args:
         - |
           set -euo pipefail
+          # BEGIN shared backup Lease guard
+          child_lock_holder='${DOJO_BACKUP_LOCK_HOLDER}'
+          child_lock_command="\${DOJO_BACKUP_LOCK_COMMAND:-/bin/dojo-backup-lock}"
+          child_pid=\$\$
+          child_lock_renewer=""
+          child_lock_cleanup() {
+            result=\$?
+            set +e
+            if [[ -n "\$child_lock_renewer" ]]; then
+              kill "\$child_lock_renewer" 2>/dev/null
+              wait "\$child_lock_renewer" 2>/dev/null
+            fi
+            exit "\$result"
+          }
+          trap child_lock_cleanup EXIT
+          "\$child_lock_command" renew --holder "\$child_lock_holder" --namespace '${namespace}'
+          (
+            while sleep "\${DOJO_BACKUP_LOCK_RENEW_INTERVAL_SECONDS:-30}"; do
+              if ! "\$child_lock_command" renew --holder "\$child_lock_holder" --namespace '${namespace}'; then
+                kill -TERM "\$child_pid"
+                exit 1
+              fi
+            done
+          ) &
+          child_lock_renewer=\$!
+          # END shared backup Lease guard
           /bin/dojo-backup-status --url '${DOJO_BACKUP_STATUS_URL:-http://dojo}' --token-file /backup-status/token --run-id '${DOJO_BACKUP_RUN_ID}' --trigger-kind '${trigger_kind}' --status RUNNING --phase PREPARING --source-snapshot '${DOJO_BACKUP_SNAPSHOT}' --image-digest '${DOJO_BACKUP_IMAGE}' || true
           /bin/dojo-backup prepare /data/dojo.duckdb /stage/dojo.duckdb --image-digest '${DOJO_BACKUP_IMAGE}' --source-snapshot '${DOJO_BACKUP_SNAPSHOT}'
           snapshot_id="\$(/bin/dojo-backup-upload upload --staging-directory /stage --internal-api-url http://dojo --internal-token-file /backup-status/token --restic-password-file /restic/restic-password --repository-path dojo/restic --tag dojo --tag '${backup_kind}' --tag '${DOJO_BACKUP_SNAPSHOT}' --retain)"
@@ -49,6 +77,8 @@ spec:
           database_size="\$(python -c 'import json; print(json.load(open("/stage/dojo.duckdb.manifest.json"))["database_size"])')"
           /bin/dojo-backup-status --url '${DOJO_BACKUP_STATUS_URL:-http://dojo}' --token-file /backup-status/token --run-id '${DOJO_BACKUP_RUN_ID}' --trigger-kind '${trigger_kind}' --status SUCCEEDED --phase COMPLETE --source-snapshot '${DOJO_BACKUP_SNAPSHOT}' --image-digest '${DOJO_BACKUP_IMAGE}' --restic-snapshot-id "\$snapshot_id" --database-sha256 "\$database_sha256" --database-size-bytes "\$database_size" || true
         env:
+        - name: DOJO_BACKUP_LOCK_RENEW_INTERVAL_SECONDS
+          value: '${DOJO_BACKUP_LOCK_RENEW_INTERVAL_SECONDS:-30}'
         - name: RESTIC_REPOSITORY
           value: rclone:gdrive:dojo/restic
         - name: RESTIC_PASSWORD_FILE
@@ -97,6 +127,11 @@ job=""
 image=""
 failure_message=""
 status_command="${DOJO_BACKUP_STATUS_COMMAND:-/bin/dojo-backup-status}"
+lock_command="${DOJO_BACKUP_LOCK_COMMAND:-/bin/dojo-backup-lock}"
+lock_holder="$(printf '%s' "$trigger_kind" | tr '[:lower:]' '[:upper:]'):${run_id}:job=${DOJO_BACKUP_JOB_NAME:-unknown}:pod=${HOSTNAME:-unknown}"
+lock_acquired=false
+lock_renewer=""
+orchestrator_pid=$$
 
 report_status() {
   [[ -f "${DOJO_BACKUP_STATUS_TOKEN_FILE:-}" ]] || return 0
@@ -120,13 +155,41 @@ cleanup() {
   if [[ "$result" -ne 0 ]]; then
     report_status FAILED "$phase" "${failure_message:-Backup failed during ${phase}.}"
   fi
+  if [[ -n "$lock_renewer" ]]; then
+    kill "$lock_renewer" 2>/dev/null
+    wait "$lock_renewer" 2>/dev/null
+  fi
   [[ -n "$job" ]] && kubectl -n "$namespace" delete job "$job" --ignore-not-found --wait=true
   [[ -n "$clone" ]] && kubectl -n "$namespace" delete pvc "$clone" --ignore-not-found --wait=true
+  if [[ "$lock_acquired" == true ]]; then
+    "$lock_command" release --holder "$lock_holder" --namespace "$namespace" || true
+  fi
   exit "$result"
 }
 trap cleanup EXIT
 
 report_status RUNNING STARTING ""
+if lock_diagnostic="$("$lock_command" acquire --holder "$lock_holder" --namespace "$namespace" 2>&1)"; then
+  lock_acquired=true
+  (
+    while sleep "${DOJO_BACKUP_LOCK_RENEW_INTERVAL_SECONDS:-30}"; do
+      if ! "$lock_command" renew --holder "$lock_holder" --namespace "$namespace"; then
+        kill -TERM "$orchestrator_pid"
+        exit 1
+      fi
+    done
+  ) &
+  lock_renewer=$!
+else
+  lock_result=$?
+  if [[ "$lock_result" -eq 3 ]]; then
+    phase="LOCKED"
+    report_status SKIPPED LOCKED "$lock_diagnostic"
+    exit 0
+  fi
+  failure_message="Unable to acquire backup lock: $lock_diagnostic"
+  exit 1
+fi
 backup_image_for_build
 if [[ -z "$snapshot_class" ]]; then
   mapfile -t snapshot_classes < <(
@@ -214,6 +277,7 @@ DOJO_BACKUP_RUN_ID="$run_id" \
 DOJO_BACKUP_SNAPSHOT="$snapshot" \
 DOJO_BACKUP_IMAGE="$image" \
 DOJO_BACKUP_CLONE="$clone" \
+DOJO_BACKUP_LOCK_HOLDER="$lock_holder" \
 DOJO_BACKUP_STATUS_URL="${DOJO_BACKUP_STATUS_URL:-http://dojo}" \
   render_job | kubectl -n "$namespace" apply -f -
 

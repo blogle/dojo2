@@ -14,6 +14,7 @@ def apply_migrations(connection: duckdb.DuckDBPyConnection) -> None:
     legacy_prices = _rename_legacy_investment_table(connection, "investment_price_snapshots")
     connection.execute(load_sql("schema/current"))
     _migrate_legacy_investments(connection, legacy_positions, legacy_prices)
+    _migrate_backup_run_skipped_status(connection)
     _migrate_reconciliation_foundation(connection)
     _migrate_legacy_transaction_constraint(connection)
     _migrate_transaction_entry_order(connection)
@@ -162,6 +163,18 @@ def _migrate_legacy_investments(
             )
     if legacy_positions or legacy_prices:
         connection.execute(load_sql("schema/migrations/dojo15_finalize_investment_normalization"))
+
+
+def _migrate_backup_run_skipped_status(connection: duckdb.DuckDBPyConnection) -> None:
+    table = connection.execute(
+        load_sql("queries/duckdb_table_sql_by_name"), ("backup_runs",)
+    ).fetchone()
+    if table is None:
+        return
+    normalized_sql = " ".join(str(table[0] or "").split()).casefold()
+    if "'skipped'" in normalized_sql:
+        return
+    connection.execute(load_sql("schema/migrations/backup_runs_skipped_status"))
 
 
 def _migrate_reconciliation_foundation(connection: duckdb.DuckDBPyConnection) -> None:
