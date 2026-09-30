@@ -280,6 +280,13 @@ def test_configured_backup_with_failed_run_remains_ready_and_degraded(service) -
     )
     service.start_empty_onboarding()
     service.configure_backup_folder("folder-id", "Backup folder", str(SYSTEM_BACKUP_CREDENTIAL_ID))
+
+    configured_status = service.get_app_status()
+
+    assert configured_status["ready"] is True
+    assert configured_status["mode"] == "ready"
+    assert configured_status["backup"]["state"] == "configured"
+
     service.report_backup_run(
         "00000000-0000-4000-8000-000000000001",
         {
