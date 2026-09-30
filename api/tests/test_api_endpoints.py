@@ -122,6 +122,98 @@ def test_app_bootstrap_and_import_flow(monkeypatch, tmp_path) -> None:
         assert len(transactions.json()["items"]) == 12
 
 
+def test_normalized_investment_instrument_and_position_mutations(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("SESSION_SECRET", "test-secret")
+    monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
+    monkeypatch.setenv(
+        "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
+    )
+    provisioned_main_module(monkeypatch, tmp_path, "normalized-investments.duckdb")
+
+    with TestClient(main_module.app) as client:
+        account_ids = []
+        for name in ("Private fund one", "Private fund two"):
+            response = client.post(
+                "/api/accounts",
+                json={
+                    "name": name,
+                    "account_class": "INVESTMENT",
+                    "self_managed": False,
+                    "tax_treatment": "TAXABLE_BROKERAGE",
+                },
+            )
+            assert response.status_code == 200
+            account_ids.append(response.json()["account_id"])
+
+        created_instrument = client.post(
+            "/api/investment-instruments",
+            json={"symbol": None, "name": "Private Fund", "is_cash_equivalent": False},
+        )
+        assert created_instrument.status_code == 200
+        instrument = created_instrument.json()
+        assert instrument["instrument_id"]
+        assert instrument["symbol"] is None
+
+        instruments = client.get("/api/investment-instruments")
+        assert instruments.status_code == 200
+        assert any(
+            item["instrument_id"] == instrument["instrument_id"]
+            for item in instruments.json()["items"]
+        )
+
+        created_price = client.post(
+            "/api/price-snapshots",
+            json={
+                "instrument_id": instrument["instrument_id"],
+                "effective_date": "2026-02-01",
+                "price_minor": 5_000,
+                "source": "manual",
+            },
+        )
+        assert created_price.status_code == 200
+        if "instrument_id" in created_price.json():
+            assert created_price.json()["instrument_id"] == instrument["instrument_id"]
+        price_history = client.get(
+            f"/api/investment-instruments/{instrument['instrument_id']}/price-snapshots"
+        )
+        assert price_history.status_code == 200
+        assert len(price_history.json()["items"]) == 1
+        assert price_history.json()["items"][0]["instrument_id"] == instrument["instrument_id"]
+        assert price_history.json()["items"][0]["price_minor"] == 5_000
+
+        created_position = client.post(
+            f"/api/accounts/{account_ids[0]}/positions",
+            json={
+                "effective_date": "2026-02-01",
+                "instrument_id": instrument["instrument_id"],
+                "quantity_micros": 1_000_000,
+                "total_cost_basis_minor": 100,
+            },
+        )
+        assert created_position.status_code == 200
+        position_id = created_position.json()["position_id"]
+
+        rejected = client.put(
+            f"/api/accounts/{account_ids[0]}/positions/{position_id}",
+            json={"quantity_micros": 2_000_000},
+        )
+        assert rejected.status_code == 400
+
+        corrected = client.put(
+            f"/api/accounts/{account_ids[0]}/positions/{position_id}",
+            json={"quantity_micros": 2_000_000, "total_cost_basis_minor": 250},
+        )
+        assert corrected.status_code == 200
+
+        positions = client.get(f"/api/accounts/{account_ids[0]}/positions")
+        assert positions.status_code == 200
+        position = positions.json()["items"][0]
+        assert position["position_id"] == position_id
+        assert position["instrument_id"] == instrument["instrument_id"]
+        assert position["quantity_micros"] == 2_000_000
+        assert position["total_cost_basis_minor"] == 250
+
+
 def test_budget_accounts_and_net_worth_endpoints_return_validated_aggregates(
     monkeypatch, tmp_path
 ) -> None:

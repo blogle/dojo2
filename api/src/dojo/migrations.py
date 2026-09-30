@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
+from uuid import NAMESPACE_URL, uuid5
 
 import duckdb
 
@@ -8,13 +10,159 @@ from dojo.sql import load_sql
 
 
 def apply_migrations(connection: duckdb.DuckDBPyConnection) -> None:
+    legacy_positions = _rename_legacy_investment_table(connection, "investment_positions")
+    legacy_prices = _rename_legacy_investment_table(connection, "investment_price_snapshots")
     connection.execute(load_sql("schema/current"))
+    _migrate_legacy_investments(connection, legacy_positions, legacy_prices)
     _migrate_backup_run_skipped_status(connection)
     _migrate_reconciliation_foundation(connection)
     _migrate_legacy_transaction_constraint(connection)
     _migrate_transaction_entry_order(connection)
     connection.execute(load_sql("schema/migrations/add_rich_account_fields"))
     connection.execute(load_sql("schema/migrations/add_backup_oauth_token"))
+
+
+def _rename_legacy_investment_table(
+    connection: duckdb.DuckDBPyConnection, table_name: str
+) -> str | None:
+    legacy_name = f"{table_name}_dojo15_legacy"
+    existing_tables = {
+        row[0] for row in connection.execute(load_sql("queries/duckdb_table_names")).fetchall()
+    }
+    if legacy_name in existing_tables:
+        return legacy_name
+    columns = {
+        row[0]
+        for row in connection.execute(
+            load_sql("queries/duckdb_columns_by_table"), (table_name,)
+        ).fetchall()
+    }
+    canonical_column = "instrument_id"
+    if not columns or canonical_column in columns:
+        return None
+    connection.execute(f"ALTER TABLE {table_name} RENAME TO {legacy_name}")
+    return legacy_name
+
+
+def _legacy_instrument_id(symbol: str) -> str:
+    return str(uuid5(NAMESPACE_URL, f"dojo:investment-instrument:{symbol.strip().upper()}"))
+
+
+def _migrate_legacy_investments(
+    connection: duckdb.DuckDBPyConnection,
+    legacy_positions: str | None,
+    legacy_prices: str | None,
+) -> None:
+    legacy_symbols: set[str] = set()
+    if legacy_positions:
+        legacy_symbols.update(
+            row[0]
+            for row in connection.execute(
+                f"SELECT DISTINCT ticker FROM {legacy_positions}"
+            ).fetchall()
+        )
+    if legacy_prices:
+        legacy_symbols.update(
+            row[0]
+            for row in connection.execute(f"SELECT DISTINCT ticker FROM {legacy_prices}").fetchall()
+        )
+    for normalized in sorted({symbol.strip().upper() for symbol in legacy_symbols}):
+        source_timestamps: list[datetime] = []
+        for legacy_table in (legacy_positions, legacy_prices):
+            if legacy_table:
+                source_timestamps.extend(
+                    row[0]
+                    for row in connection.execute(
+                        f"SELECT created_at FROM {legacy_table} WHERE UPPER(TRIM(ticker)) = ?",
+                        (normalized,),
+                    ).fetchall()
+                    if row[0] is not None
+                )
+        created_at = min(source_timestamps) if source_timestamps else None
+        connection.execute(
+            """INSERT INTO investment_instruments
+               (instrument_id, symbol, name, is_cash_equivalent, created_at, created_by_user_id)
+               VALUES (?, ?, NULL, FALSE, COALESCE(?, CURRENT_TIMESTAMP), NULL)
+               ON CONFLICT (instrument_id) DO NOTHING""",
+            (_legacy_instrument_id(normalized), normalized, created_at),
+        )
+    if legacy_positions:
+        for row in connection.execute(f"SELECT * FROM {legacy_positions}").fetchall():
+            (
+                row_id,
+                position_id,
+                account_id,
+                ticker,
+                effective_date,
+                quantity,
+                average_basis,
+                valid_from,
+                valid_to,
+                created_at,
+                created_by,
+            ) = row
+            product = int(quantity) * int(average_basis)
+            total_basis = product // 1_000_000
+            remainder = product % 1_000_000
+            if remainder > 500_000 or (remainder == 500_000 and total_basis % 2):
+                total_basis += 1
+            connection.execute(
+                """INSERT INTO investment_positions
+                   (row_id, position_id, account_id, instrument_id, effective_date,
+                    quantity_micros, total_cost_basis_minor, valid_from, valid_to,
+                    created_at, created_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT (row_id) DO NOTHING""",
+                (
+                    row_id,
+                    position_id,
+                    account_id,
+                    _legacy_instrument_id(ticker),
+                    effective_date,
+                    quantity,
+                    total_basis,
+                    valid_from,
+                    valid_to,
+                    created_at,
+                    created_by,
+                ),
+            )
+    if legacy_prices:
+        for row in connection.execute(f"SELECT * FROM {legacy_prices}").fetchall():
+            (
+                row_id,
+                snapshot_id,
+                account_id,
+                ticker,
+                effective_date,
+                price,
+                source,
+                valid_from,
+                valid_to,
+                created_at,
+                created_by,
+            ) = row
+            connection.execute(
+                """INSERT INTO investment_price_snapshots
+                   (row_id, snapshot_id, account_id, instrument_id, effective_date,
+                    price_minor, source, valid_from, valid_to, created_at, created_by_user_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT (row_id) DO NOTHING""",
+                (
+                    row_id,
+                    snapshot_id,
+                    account_id,
+                    _legacy_instrument_id(ticker),
+                    effective_date,
+                    price,
+                    source,
+                    valid_from,
+                    valid_to,
+                    created_at,
+                    created_by,
+                ),
+            )
+    if legacy_positions or legacy_prices:
+        connection.execute(load_sql("schema/migrations/dojo15_finalize_investment_normalization"))
 
 
 def _migrate_backup_run_skipped_status(connection: duckdb.DuckDBPyConnection) -> None:
