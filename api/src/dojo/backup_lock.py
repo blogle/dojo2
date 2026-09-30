@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import ssl
 import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -69,8 +70,11 @@ class KubernetesLease:
             method=method,
             headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
         )
+        context = ssl.create_default_context(
+            cafile="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+        )
         try:
-            with urlopen(request, timeout=10) as response:
+            with urlopen(request, timeout=10, context=context) as response:
                 return response.status, json.load(response)
         except HTTPError as error:
             response_body = json.loads(error.read() or b"{}")
