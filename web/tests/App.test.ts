@@ -110,6 +110,7 @@ describe("dojo app", () => {
       backup: {
         state: "degraded",
         action: "repair",
+        active_manual_run_id: null,
         message: "Google Drive authorization must be renewed.",
       },
       latest_backup_run: null,
@@ -153,6 +154,7 @@ describe("dojo app", () => {
       backup: {
         state: "configured",
         action: "repair",
+        active_manual_run_id: null,
         message: null,
       },
       latest_backup_run: null,
@@ -189,6 +191,7 @@ describe("dojo app", () => {
       backup: {
         state: "degraded",
         action: "retry",
+        active_manual_run_id: null,
         message: "Scheduled backup failed during SNAPSHOTTING.",
       },
       latest_backup_run: {
@@ -252,6 +255,7 @@ describe("dojo app", () => {
         backup: {
           state: "degraded",
           action: "retry",
+          active_manual_run_id: null,
           message: "Scheduled backup failed during SNAPSHOTTING.",
         },
         latest_backup_run: {
@@ -294,6 +298,7 @@ describe("dojo app", () => {
               backup: {
                 state: "degraded",
                 action: "retry",
+                active_manual_run_id: null,
                 message: "Scheduled backup failed.",
               },
               latest_backup_run: {
@@ -364,13 +369,14 @@ describe("dojo app", () => {
         backup: {
           state: "degraded",
           action: "queued",
+          active_manual_run_id: "hydrated-run",
           message: "A backup retry is queued.",
         },
         latest_backup_run: {
-          backup_run_id: "hydrated-run",
-          trigger_kind: "MANUAL",
-          status: "RUNNING",
-          phase: "QUEUED",
+          backup_run_id: "newer-scheduled-run",
+          trigger_kind: "SCHEDULED",
+          status: "SKIPPED",
+          phase: "LOCKED",
         },
         latest_import_batch: null,
         latest_import_run: null,
@@ -396,11 +402,11 @@ describe("dojo app", () => {
               ...state.appStatus!.backup,
               state: "configured",
               action: "repair",
+              active_manual_run_id: null,
               message: null,
             },
             latest_backup_run: {
               ...state.appStatus!.latest_backup_run,
-              status: "SUCCEEDED",
             },
           }),
         } as Response;

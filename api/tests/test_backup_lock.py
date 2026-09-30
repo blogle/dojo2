@@ -94,6 +94,29 @@ def test_stale_lease_takeover_put_uses_observed_resource_version() -> None:
     assert put[2]["metadata"]["resourceVersion"] == "rv-stale"
 
 
+def test_released_lease_is_immediately_acquirable() -> None:
+    released = lease("", version="rv-released")
+    acquired = lease("MANUAL:run-b", version="rv-acquired")
+    lock = FakeKubernetesLease(
+        [
+            (200, lease("MANUAL:run-a")),
+            (200, lease("MANUAL:run-a", version="rv-a-renewed")),
+            (200, lease("MANUAL:run-a", version="rv-a-renewed")),
+            (200, released),
+            (200, released),
+            (200, acquired),
+        ]
+    )
+
+    assert lock.acquire_or_renew("MANUAL:run-a", NOW).acquired
+    lock.release("MANUAL:run-a", NOW)
+    decision = lock.acquire_or_renew("MANUAL:run-b", NOW)
+
+    assert decision.acquired
+    assert [call[0] for call in lock.calls] == ["GET", "PUT", "GET", "PUT", "GET", "PUT"]
+    assert lock.calls[5][2]["metadata"]["resourceVersion"] == "rv-released"
+
+
 def test_stale_takeover_conflict_rereads_renewed_foreign_holder() -> None:
     expired = lease("MANUAL:owner", version="rv-stale", renewed_at=NOW - timedelta(seconds=301))
     renewed = lease("MANUAL:owner", version="rv-renewed", renewed_at=NOW)

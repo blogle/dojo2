@@ -177,26 +177,19 @@ async function refreshRetryStatus(): Promise<void> {
 }
 
 function hydrateRetryState(): void {
-  const latestRun = state.appStatus?.latest_backup_run;
-  if (
-    !retryActive.value ||
-    latestRun?.trigger_kind !== "MANUAL" ||
-    latestRun.status !== "RUNNING" ||
-    typeof latestRun.backup_run_id !== "string"
-  ) {
+  const activeManualRunId = state.appStatus?.backup.active_manual_run_id;
+  if (!retryActive.value || typeof activeManualRunId !== "string") {
     return;
   }
   retryQueued.value = true;
-  retryRunId.value = latestRun.backup_run_id;
+  retryRunId.value = activeManualRunId;
   scheduleRetryStatusRefresh();
 }
 
 watch(
   () => [
     state.appStatus?.backup?.action,
-    state.appStatus?.latest_backup_run?.backup_run_id,
-    state.appStatus?.latest_backup_run?.status,
-    state.appStatus?.latest_backup_run?.phase,
+    state.appStatus?.backup?.active_manual_run_id,
   ],
   hydrateRetryState,
   { immediate: true },
