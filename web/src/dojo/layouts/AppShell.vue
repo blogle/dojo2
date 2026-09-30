@@ -5,7 +5,12 @@ import { useRoute, useRouter } from "vue-router";
 import NavigationRail from "../components/navigation/NavigationRail.vue";
 import type { NavigationRailItem } from "../components/navigation/NavigationRail.vue";
 import PersistentWarningBanner from "../components/feedback/PersistentWarningBanner.vue";
-import { ApiError, fetchAppStatus, requestBackupRun } from "../api/client";
+import {
+  ApiError,
+  fetchAppStatus,
+  fetchBackupRun,
+  requestBackupRun,
+} from "../api/client";
 import {
   readNavigationExpanded,
   writeNavigationExpanded,
@@ -18,6 +23,8 @@ const { state, ready } = useAppState();
 const railExpanded = ref(readNavigationExpanded());
 const retryQueued = ref(false);
 const retryRunId = ref<string | null>(null);
+const retryRunStatus = ref<string | null>(null);
+const retryRunPhase = ref<string | null>(null);
 const retryError = ref("");
 let retryStatusTimer: number | undefined;
 
@@ -67,13 +74,11 @@ const retryActive = computed(
   () => backupAction.value === "queued" || backupAction.value === "in_progress",
 );
 const retryInProgress = computed(() => {
-  const latestRun = state.appStatus?.latest_backup_run;
   return (
     retryQueued.value &&
     retryRunId.value !== null &&
-    latestRun?.backup_run_id === retryRunId.value &&
-    latestRun.status === "RUNNING" &&
-    latestRun.phase !== "QUEUED"
+    retryRunStatus.value === "RUNNING" &&
+    retryRunPhase.value !== "QUEUED"
   );
 });
 const backupDescription = computed(() => {
@@ -114,10 +119,14 @@ async function retryBackups(): Promise<void> {
   try {
     const response = await requestBackupRun();
     retryRunId.value = response.run_id;
+    retryRunStatus.value = "RUNNING";
+    retryRunPhase.value = "QUEUED";
     scheduleRetryStatusRefresh();
   } catch (error) {
     retryQueued.value = false;
     retryRunId.value = null;
+    retryRunStatus.value = null;
+    retryRunPhase.value = null;
     if (
       error instanceof ApiError &&
       error.code === "google_drive_reauthorization_required"
@@ -144,15 +153,21 @@ function scheduleRetryStatusRefresh(): void {
 async function refreshRetryStatus(): Promise<void> {
   if (!retryQueued.value) return;
   try {
+    const runId = retryRunId.value;
+    if (runId === null) return;
+    const run = await fetchBackupRun(runId);
+    retryRunStatus.value = run.status;
+    retryRunPhase.value = run.phase;
     state.appStatus = await fetchAppStatus();
-    const latestRun = state.appStatus.latest_backup_run;
     if (
-      retryRunId.value !== null &&
-      latestRun?.backup_run_id === retryRunId.value &&
-      (latestRun.status === "SUCCEEDED" || latestRun.status === "FAILED")
+      run.status === "SUCCEEDED" ||
+      run.status === "FAILED" ||
+      run.status === "SKIPPED"
     ) {
       retryQueued.value = false;
       retryRunId.value = null;
+      retryRunStatus.value = null;
+      retryRunPhase.value = null;
       return;
     }
   } catch {

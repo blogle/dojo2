@@ -5,6 +5,7 @@ import type {
   Account,
   Allocation,
   AppStatus,
+  BackupRun,
   BackupSettings,
   AssetsLiabilitiesResponse,
   BootstrapResponse,
@@ -110,6 +111,12 @@ export async function requestBackupRun(): Promise<{
     {
       method: "POST",
     },
+  );
+}
+
+export async function fetchBackupRun(runId: string): Promise<BackupRun> {
+  return request<BackupRun>(
+    `/api/settings/backup/runs/${encodeURIComponent(runId)}`,
   );
 }
 

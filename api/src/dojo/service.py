@@ -224,6 +224,7 @@ class DojoService:
         latest_run = self.get_import_status()
         backup_configuration = self.get_backup_configuration()
         latest_backup_run = self.get_latest_backup_run()
+        substantive_backup_run = self.get_latest_substantive_backup_run()
         has_usable_backup_configuration = self.has_usable_backup_configuration()
         if backup_configuration and backup_configuration["status"] == "PENDING":
             ready = False
@@ -235,7 +236,10 @@ class DojoService:
             backup_state = (
                 "configured"
                 if has_usable_backup_configuration
-                and (latest_backup_run is None or latest_backup_run["status"] == "SUCCEEDED")
+                and (
+                    substantive_backup_run is None
+                    or substantive_backup_run["status"] == "SUCCEEDED"
+                )
                 else "degraded"
             )
         elif latest_batch is not None:
@@ -249,15 +253,17 @@ class DojoService:
         backup_action = "repair"
         if (
             backup_state == "degraded"
-            and latest_backup_run is not None
-            and latest_backup_run["status"] == "RUNNING"
-            and latest_backup_run["trigger_kind"] == "MANUAL"
+            and substantive_backup_run is not None
+            and substantive_backup_run["status"] == "RUNNING"
+            and substantive_backup_run["trigger_kind"] == "MANUAL"
         ):
-            backup_action = "queued" if latest_backup_run["phase"] == "QUEUED" else "in_progress"
+            backup_action = (
+                "queued" if substantive_backup_run["phase"] == "QUEUED" else "in_progress"
+            )
         elif (
             backup_state == "degraded"
-            and latest_backup_run is not None
-            and latest_backup_run["status"] == "FAILED"
+            and substantive_backup_run is not None
+            and substantive_backup_run["status"] == "FAILED"
             and has_usable_backup_configuration
         ):
             backup_action = "retry"
@@ -277,8 +283,8 @@ class DojoService:
                         "A backup retry is in progress. This warning will clear after it succeeds."
                         if backup_action == "in_progress"
                         else (
-                            latest_backup_run.get("error_message")
-                            if backup_state == "degraded" and latest_backup_run
+                            substantive_backup_run.get("error_message")
+                            if backup_state == "degraded" and substantive_backup_run
                             else (
                                 "No successful off-site backup has been recorded yet."
                                 if backup_state == "degraded"
@@ -299,11 +305,19 @@ class DojoService:
     def get_latest_backup_run(self) -> dict[str, Any] | None:
         return self.db.fetch_one(load_sql("queries/latest_backup_run"))
 
+    def get_latest_substantive_backup_run(self) -> dict[str, Any] | None:
+        return self.db.fetch_one(load_sql("queries/latest_substantive_backup_run"))
+
+    def get_backup_run(self, run_id: str) -> dict[str, Any] | None:
+        return self.db.fetch_one(load_sql("queries/backup_run_by_id"), (run_id,))
+
     def reserve_backup_retry(self) -> str:
         run_id = str(uuid4())
         now = self.clock.now()
         with self.db.transaction() as connection:
-            latest = connection.execute(load_sql("queries/latest_backup_run")).fetchone()
+            latest = connection.execute(
+                load_sql("queries/latest_substantive_backup_run")
+            ).fetchone()
             if latest is None or latest[2] != "FAILED":
                 raise ValueError("A failed backup is required before retrying.")
             connection.execute(load_sql("queries/reserve_backup_run"), (run_id, now, now))
@@ -439,12 +453,12 @@ class DojoService:
     def report_backup_run(self, run_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         now = self.clock.now()
         current = self.db.fetch_one(load_sql("queries/backup_run_by_id"), (run_id,))
-        if current and current["status"] in {"SUCCEEDED", "FAILED"}:
+        if current and current["status"] in {"SUCCEEDED", "FAILED", "SKIPPED"}:
             if current["status"] == payload["status"] and current["phase"] == payload["phase"]:
                 return current
             raise ValueError("Backup run is already complete")
         started_at = current["started_at"] if current else now
-        completed_at = now if payload["status"] in {"SUCCEEDED", "FAILED"} else None
+        completed_at = now if payload["status"] in {"SUCCEEDED", "FAILED", "SKIPPED"} else None
         self.db.execute(
             load_sql("queries/upsert_backup_run"),
             (

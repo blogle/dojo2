@@ -78,7 +78,7 @@ CREATE TABLE IF NOT EXISTS backup_runs (
     database_size_bytes BIGINT,
     error_message TEXT,
     CHECK (trigger_kind IN ('SCHEDULED', 'MANUAL')),
-    CHECK (status IN ('RUNNING', 'SUCCEEDED', 'FAILED')),
+    CHECK (status IN ('RUNNING', 'SUCCEEDED', 'FAILED', 'SKIPPED')),
     CHECK (database_size_bytes IS NULL OR database_size_bytes >= 0)
 );
 

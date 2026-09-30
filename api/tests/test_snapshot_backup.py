@@ -51,6 +51,9 @@ def test_missing_build_sha_fails_before_kubernetes_calls(tmp_path: Path) -> None
         encoding="utf-8",
     )
     status_command.chmod(0o755)
+    lock_command = command_dir / "lock"
+    lock_command.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    lock_command.chmod(0o755)
     kubectl_command = command_dir / "kubectl"
     kubectl_command.write_text(
         f"#!/usr/bin/env bash\ntouch {kubectl_marker}\nexit 99\n",
@@ -65,6 +68,7 @@ def test_missing_build_sha_fails_before_kubernetes_calls(tmp_path: Path) -> None
             "DOJO_BACKUP_RUN_ID": "00000000-0000-4000-8000-000000000002",
             "DOJO_BACKUP_STATUS_TOKEN_FILE": str(token_file),
             "DOJO_BACKUP_STATUS_COMMAND": str(status_command),
+            "DOJO_BACKUP_LOCK_COMMAND": str(lock_command),
             "STATUS_LOG": str(status_log),
         }
     )

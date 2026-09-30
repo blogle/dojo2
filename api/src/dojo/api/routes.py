@@ -268,6 +268,14 @@ def run_backup(request: Request) -> dict[str, str]:
     return {"status": "QUEUED", "job_name": job_name, "run_id": run_id}
 
 
+@router.get("/settings/backup/runs/{run_id}")
+def backup_run(request: Request, run_id: UUID) -> dict[str, Any]:
+    result = get_service(request).get_backup_run(str(run_id))
+    if result is None:
+        raise HTTPException(status_code=404, detail="Backup run not found")
+    return result
+
+
 def _reauthorization_required() -> HTTPException:
     return HTTPException(
         status_code=401,
