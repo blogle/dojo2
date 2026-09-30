@@ -4,7 +4,6 @@ import os
 import pathlib
 import subprocess
 
-
 REPO_ROOT = pathlib.Path(__file__).parents[2]
 VALIDATE_IMAGE_PROVENANCE = REPO_ROOT / "ops" / "container" / "validate-image-provenance.sh"
 
