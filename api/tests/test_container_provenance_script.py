@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 import os
+import pathlib
 import subprocess
-from pathlib import Path
 
 
-REPO_ROOT = Path(__file__).parents[2]
+REPO_ROOT = pathlib.Path(__file__).parents[2]
 VALIDATE_IMAGE_PROVENANCE = REPO_ROOT / "ops" / "container" / "validate-image-provenance.sh"
 
 
-def test_live_image_validator_passes_valid_docker_inspect_templates(tmp_path: Path) -> None:
+def test_live_image_validator_passes_valid_docker_inspect_templates(
+    tmp_path: pathlib.Path,
+) -> None:
     expected_sha = "a" * 40
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
