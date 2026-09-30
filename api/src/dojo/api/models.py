@@ -425,6 +425,7 @@ class InvestmentStatementHoldingPayload(BaseModel):
     price_minor: int = Field(gt=0)
     total_cost_basis_minor: int | None = Field(default=None, ge=0)
     average_basis_minor: int | None = Field(default=None, ge=0)
+    average_cost_per_share_minor: int | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def validate_holding_identity_and_basis(self) -> "InvestmentStatementHoldingPayload":
@@ -432,8 +433,24 @@ class InvestmentStatementHoldingPayload(BaseModel):
             value is not None and value.strip() for value in (self.symbol, self.ticker)
         ):
             raise ValueError("Provide instrument_id or a nonblank symbol/ticker")
-        if self.total_cost_basis_minor is None and self.average_basis_minor is None:
+        if self.symbol is not None and self.ticker is not None:
+            if self.symbol.strip().upper() != self.ticker.strip().upper():
+                raise ValueError("symbol and ticker compatibility inputs conflict")
+        if self.symbol is not None:
+            self.symbol = self.symbol.strip().upper() or None
+        if self.ticker is not None:
+            self.ticker = self.ticker.strip().upper() or None
+        average_cost = (
+            self.average_cost_per_share_minor
+            if self.average_cost_per_share_minor is not None
+            else self.average_basis_minor
+        )
+        if self.total_cost_basis_minor is None and average_cost is None:
             raise ValueError("Provide total_cost_basis_minor or average_basis_minor")
+        if self.total_cost_basis_minor is not None and average_cost is not None:
+            derived = total_cost_basis_minor(self.quantity_micros, average_cost)
+            if derived != self.total_cost_basis_minor:
+                raise ValueError("Total and average cost basis inputs conflict")
         return self
 
 
@@ -464,9 +481,27 @@ class InvestmentCashSnapshotPayload(BaseModel):
 
 class InvestmentPriceSnapshotPayload(BaseModel):
     account_id: str | None = None
+    instrument_id: UUID | None = None
+    symbol: str | None = None
+    ticker: str | None = None
     effective_date: date
     price_minor: int = Field(gt=0)
     source: str = "manual"
+
+    @model_validator(mode="after")
+    def validate_instrument(self) -> "InvestmentPriceSnapshotPayload":
+        if self.instrument_id is None and not any(
+            value is not None and value.strip() for value in (self.symbol, self.ticker)
+        ):
+            raise ValueError("Provide instrument_id or a nonblank symbol/ticker")
+        if self.symbol is not None and self.ticker is not None:
+            if self.symbol.strip().upper() != self.ticker.strip().upper():
+                raise ValueError("symbol and ticker compatibility inputs conflict")
+        if self.symbol is not None:
+            self.symbol = self.symbol.strip().upper() or None
+        if self.ticker is not None:
+            self.ticker = self.ticker.strip().upper() or None
+        return self
 
 
 class InvestmentCutoverSuccessorPayload(BaseModel):

@@ -858,7 +858,10 @@ def correct_position(
 def reconcile_investment_statement(
     request: Request, account_id: str, payload: InvestmentStatementPayload
 ) -> dict[str, Any]:
-    return get_service(request).reconcile_investment_statement(account_id, payload.model_dump())
+    try:
+        return get_service(request).reconcile_investment_statement(account_id, payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/accounts/{account_id}/investment-statements/latest")
@@ -981,12 +984,22 @@ def list_cash_snapshots(request: Request, account_id: str) -> dict[str, Any]:
 def create_price_snapshot(
     request: Request, payload: "InvestmentPriceSnapshotPayload"
 ) -> dict[str, Any]:
-    return get_service(request).create_investment_price_snapshot(payload.model_dump())
+    try:
+        return get_service(request).create_investment_price_snapshot(payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/tickers/{ticker}/price-snapshots")
 def list_price_snapshots(request: Request, ticker: str) -> dict[str, Any]:
     return {"items": get_service(request).list_investment_price_snapshots(ticker)}
+
+
+@router.get("/investment-instruments/{instrument_id}/price-snapshots")
+def list_instrument_price_snapshots(request: Request, instrument_id: str) -> dict[str, Any]:
+    return {
+        "items": get_service(request).list_investment_price_snapshots_by_instrument(instrument_id)
+    }
 
 
 @router.post("/accounts/{account_id}/tracking-snapshots")

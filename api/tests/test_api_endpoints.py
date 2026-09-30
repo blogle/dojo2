@@ -161,6 +161,26 @@ def test_normalized_investment_instrument_and_position_mutations(monkeypatch, tm
             for item in instruments.json()["items"]
         )
 
+        created_price = client.post(
+            "/api/price-snapshots",
+            json={
+                "instrument_id": instrument["instrument_id"],
+                "effective_date": "2026-02-01",
+                "price_minor": 5_000,
+                "source": "manual",
+            },
+        )
+        assert created_price.status_code == 200
+        if "instrument_id" in created_price.json():
+            assert created_price.json()["instrument_id"] == instrument["instrument_id"]
+        price_history = client.get(
+            f"/api/investment-instruments/{instrument['instrument_id']}/price-snapshots"
+        )
+        assert price_history.status_code == 200
+        assert len(price_history.json()["items"]) == 1
+        assert price_history.json()["items"][0]["instrument_id"] == instrument["instrument_id"]
+        assert price_history.json()["items"][0]["price_minor"] == 5_000
+
         created_position = client.post(
             f"/api/accounts/{account_ids[0]}/positions",
             json={
