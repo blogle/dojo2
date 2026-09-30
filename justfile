@@ -254,5 +254,15 @@ container:
 	env -u LD_LIBRARY_PATH DOJO_BUILD_SHA="$(git rev-parse HEAD)" nix build .#container --impure
 
 container-validate-provenance build_sha:
-	env -u LD_LIBRARY_PATH DOJO_BUILD_SHA="{{build_sha}}" nix build .#container --impure
-	ops/container/validate-build-metadata.sh "$(readlink -f result)" "{{build_sha}}"
+	just setup-web
+	just build-web
+	env -u LD_LIBRARY_PATH nix build .#container
+	docker load < "$(readlink -f result)"
+	docker build --file ops/container/Dockerfile.content --tag dojo:content-validation .
+	docker build --file Dockerfile --build-arg CONTENT_IMAGE=dojo:content-validation --build-arg DOJO_BUILD_SHA="{{build_sha}}" --tag dojo:provenance-validation .
+	docker save dojo:provenance-validation --output /tmp/dojo-provenance-validation.tar
+	ops/container/validate-build-metadata.sh /tmp/dojo-provenance-validation.tar "{{build_sha}}"
+
+container-validate-content:
+	env -u LD_LIBRARY_PATH nix build .#container
+	ops/container/validate-content-metadata.sh "$(readlink -f result)"
