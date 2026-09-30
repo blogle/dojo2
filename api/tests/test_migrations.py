@@ -158,6 +158,119 @@ def test_legacy_investments_migrate_to_shared_deterministic_instruments(tmp_path
         database.close()
 
 
+def test_interrupted_investment_migration_resumes_from_staging_tables(tmp_path) -> None:
+    duckdb_path = tmp_path / "interrupted-investment-migration.duckdb"
+    connection = duckdb.connect(str(duckdb_path))
+    try:
+        connection.execute("""
+            CREATE TABLE investment_positions (
+                row_id UUID, position_id UUID, account_id UUID, ticker TEXT,
+                effective_date DATE, quantity_micros BIGINT, average_basis_minor BIGINT,
+                valid_from TIMESTAMPTZ, valid_to TIMESTAMPTZ, created_at TIMESTAMPTZ,
+                created_by_user_id UUID
+            )
+        """)
+        connection.execute("""
+            CREATE TABLE investment_price_snapshots (
+                row_id UUID, snapshot_id UUID, account_id UUID, ticker TEXT,
+                effective_date DATE, price_minor BIGINT, source TEXT,
+                valid_from TIMESTAMPTZ, valid_to TIMESTAMPTZ, created_at TIMESTAMPTZ,
+                created_by_user_id UUID
+            )
+        """)
+        connection.execute("""
+            INSERT INTO investment_positions VALUES
+            ('00000000-0000-0000-0000-000000000101', '00000000-0000-0000-0000-000000000111',
+             '00000000-0000-0000-0000-000000000121', 'vti', DATE '2026-01-01', 1000000, 8000,
+             TIMESTAMPTZ '2026-01-01 00:00:00+00', TIMESTAMPTZ '2026-02-01 00:00:00+00',
+             TIMESTAMPTZ '2026-01-01 00:00:00+00', NULL),
+            ('00000000-0000-0000-0000-000000000102', '00000000-0000-0000-0000-000000000111',
+             '00000000-0000-0000-0000-000000000121', 'VTI', DATE '2026-02-01', 1500000, 8000,
+             TIMESTAMPTZ '2026-02-01 00:00:00+00', TIMESTAMPTZ '9999-12-31 23:59:59+00',
+             TIMESTAMPTZ '2026-01-01 00:00:00+00', NULL),
+            ('00000000-0000-0000-0000-000000000103', '00000000-0000-0000-0000-000000000112',
+             '00000000-0000-0000-0000-000000000122', 'VTI', DATE '2026-02-01', 2000000, 9000,
+             TIMESTAMPTZ '2026-02-01 00:00:00+00', TIMESTAMPTZ '9999-12-31 23:59:59+00',
+             TIMESTAMPTZ '2026-01-01 00:00:00+00', NULL)
+        """)
+        connection.execute("""
+            INSERT INTO investment_price_snapshots VALUES
+            ('00000000-0000-0000-0000-000000000201', '00000000-0000-0000-0000-000000000211',
+             NULL, 'vti', DATE '2026-01-01', 10000, 'statement',
+             TIMESTAMPTZ '2026-01-01 00:00:00+00', TIMESTAMPTZ '2026-02-01 00:00:00+00',
+             TIMESTAMPTZ '2026-01-01 00:00:00+00', NULL),
+            ('00000000-0000-0000-0000-000000000202', '00000000-0000-0000-0000-000000000212',
+             NULL, 'VTI', DATE '2026-02-01', 12000, 'statement',
+             TIMESTAMPTZ '2026-02-01 00:00:00+00', TIMESTAMPTZ '9999-12-31 23:59:59+00',
+             TIMESTAMPTZ '2026-02-01 00:00:00+00', NULL)
+        """)
+        connection.execute(
+            "ALTER TABLE investment_positions RENAME TO investment_positions_dojo15_legacy"
+        )
+        connection.execute(
+            "ALTER TABLE investment_price_snapshots RENAME TO investment_price_snapshots_dojo15_legacy"
+        )
+        connection.execute(load_sql("schema/current"))
+    finally:
+        connection.close()
+
+    provision_database(str(duckdb_path))
+    database = Database(str(duckdb_path))
+    try:
+        migrated_positions = database.fetch_all(
+            "SELECT row_id, position_id, account_id, instrument_id, total_cost_basis_minor "
+            "FROM investment_positions ORDER BY row_id"
+        )
+        migrated_prices = database.fetch_all(
+            "SELECT row_id, instrument_id FROM investment_price_snapshots ORDER BY row_id"
+        )
+        assert len(migrated_positions) == 3
+        assert {row["row_id"] for row in migrated_positions} == {
+            "00000000-0000-0000-0000-000000000101",
+            "00000000-0000-0000-0000-000000000102",
+            "00000000-0000-0000-0000-000000000103",
+        }
+        assert [row["total_cost_basis_minor"] for row in migrated_positions] == [
+            8000,
+            12000,
+            18000,
+        ]
+        assert len({row["instrument_id"] for row in migrated_positions}) == 1
+        assert len(migrated_prices) == 2
+        assert len({row["instrument_id"] for row in migrated_prices}) == 1
+        assert database.fetch_one("SELECT COUNT(*) AS count FROM investment_instruments") == {
+            "count": 1
+        }
+        tables = {
+            row["table_name"] for row in database.fetch_all(load_sql("queries/duckdb_table_names"))
+        }
+        assert "investment_positions_dojo15_legacy" not in tables
+        assert "investment_price_snapshots_dojo15_legacy" not in tables
+        persisted_positions_before_retry = database.fetch_all(
+            "SELECT * FROM investment_positions ORDER BY row_id"
+        )
+        persisted_prices_before_retry = database.fetch_all(
+            "SELECT * FROM investment_price_snapshots ORDER BY row_id"
+        )
+    finally:
+        database.close()
+
+    provision_database(str(duckdb_path))
+    database = Database(str(duckdb_path))
+    try:
+        assert database.fetch_all("SELECT * FROM investment_positions ORDER BY row_id") == (
+            persisted_positions_before_retry
+        )
+        assert database.fetch_all("SELECT * FROM investment_price_snapshots ORDER BY row_id") == (
+            persisted_prices_before_retry
+        )
+        assert database.fetch_one("SELECT COUNT(*) AS count FROM investment_instruments") == {
+            "count": 1
+        }
+    finally:
+        database.close()
+
+
 def test_legacy_reconciliation_schema_is_migrated_deterministically(tmp_path) -> None:
     duckdb_path = tmp_path / "legacy-reconciliation.duckdb"
     connection = duckdb.connect(str(duckdb_path))
