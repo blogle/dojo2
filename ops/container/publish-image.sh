@@ -21,7 +21,7 @@ validate_git_image() {
   local image="$1"
   local image_env image_revision
   image_env="$(docker image inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$image")"
-  image_revision="$(docker image inspect --format '{{ index .Config.Labels \"org.opencontainers.image.revision\" }}' "$image")"
+  image_revision="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$image")"
   if ! printf '%s\n' "$image_env" | grep -Fqx -- "DOJO_BUILD_SHA=$commit" \
     || [[ "$image_revision" != "$commit" ]]; then
     printf 'Image %s does not contain exact commit provenance for %s.\n' "$image" "$commit" >&2
