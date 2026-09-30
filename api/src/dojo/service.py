@@ -56,7 +56,7 @@ from dojo.importer import (
     fixture_bundle,
     parse_named_range_workbook,
 )
-from dojo.investment import position_amount_minor, position_metrics
+from dojo.investment import position_amount_minor, position_metrics, total_cost_basis_minor
 from dojo.loan_projection import LoanProjectionTerms, PaymentFrequency, project_loan
 from dojo.operations import create_transaction_operation, link_transaction_operation
 from dojo.reconciliation import (
@@ -615,9 +615,10 @@ class DojoService:
             "budget_buckets",
             "categories",
             "category_groups",
+            "investment_price_snapshots",
             "investment_positions",
             "investment_cash_snapshots",
-            "investment_price_snapshots",
+            "investment_instruments",
             "account_budget_links",
             "tangible_asset_valuations",
             "loan_balance_snapshots",
@@ -3704,9 +3705,34 @@ class DojoService:
             ):
                 raise ValueError("Loan successor requires a payment category")
             if successor["account_class"] == ACCOUNT_CLASS_INVESTMENT:
-                tickers = [holding["ticker"].strip().upper() for holding in successor["holdings"]]
-                if len(tickers) != len(set(tickers)):
-                    raise ValueError("Cutover investment holdings must use unique tickers")
+                instrument_ids = set()
+                for holding in successor["holdings"]:
+                    instrument_id = holding.get("instrument_id")
+                    if instrument_id is not None:
+                        instrument = self.db.fetch_one(
+                            load_sql("queries/investment_instrument_by_id"),
+                            (str(instrument_id),),
+                        )
+                        if instrument is None:
+                            raise ValueError(f"Unknown investment instrument {instrument_id}")
+                        resolved_id = str(instrument["instrument_id"])
+                    else:
+                        symbol = str(holding.get("symbol") or holding.get("ticker") or "")
+                        normalized_symbol = symbol.strip().upper()
+                        if not normalized_symbol:
+                            raise ValueError("Cutover holding requires an instrument identity")
+                        instrument = self.db.fetch_one(
+                            load_sql("queries/investment_instrument_by_symbol"),
+                            (normalized_symbol,),
+                        )
+                        resolved_id = (
+                            str(instrument["instrument_id"])
+                            if instrument is not None
+                            else f"symbol:{normalized_symbol}"
+                        )
+                    if resolved_id in instrument_ids:
+                        raise ValueError("Cutover investment holdings must use unique instruments")
+                    instrument_ids.add(resolved_id)
             category_id = successor.get("contribution_category_id") or successor.get(
                 "payment_category_id"
             )
@@ -3960,11 +3986,83 @@ class DojoService:
                     )
         return {"account_id": account_id}
 
+    def create_investment_instrument(self, payload: dict[str, Any]) -> dict[str, Any]:
+        symbol = payload.get("symbol")
+        normalized_symbol = symbol.strip().upper() if symbol is not None else None
+        if normalized_symbol == "":
+            raise ValueError("Symbol cannot be blank")
+        if normalized_symbol is not None:
+            existing = self.db.fetch_one(
+                load_sql("queries/investment_instrument_by_symbol"), (normalized_symbol,)
+            )
+            if existing is not None:
+                return existing
+        instrument_id = str(uuid4())
+        self.db.execute(
+            load_sql("queries/insert_investment_instrument"),
+            (
+                instrument_id,
+                normalized_symbol,
+                payload.get("name"),
+                bool(payload.get("is_cash_equivalent", False)),
+                self.clock.now(),
+            ),
+        )
+        instrument = self.db.fetch_one(
+            load_sql("queries/investment_instrument_by_id"), (instrument_id,)
+        )
+        if instrument is None:
+            raise RuntimeError("Created investment instrument could not be read back")
+        return instrument
+
+    def list_investment_instruments(self) -> list[dict[str, Any]]:
+        return self.db.fetch_all(load_sql("queries/list_investment_instruments"))
+
+    def _resolve_investment_instrument(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        instrument_id = payload.get("instrument_id")
+        if instrument_id is not None:
+            instrument = self.db.fetch_one(
+                load_sql("queries/investment_instrument_by_id"), (str(instrument_id),)
+            )
+            if instrument is None:
+                raise ValueError(f"Unknown investment instrument {instrument_id}")
+            return instrument
+        symbol = payload.get("symbol") or payload.get("ticker")
+        if symbol is None or not str(symbol).strip():
+            raise ValueError("Provide instrument_id or nonblank symbol/ticker")
+        return self.create_investment_instrument({"symbol": str(symbol)})
+
+    @staticmethod
+    def _investment_position_basis(payload: Mapping[str, Any], quantity_micros: int) -> int:
+        total_basis = payload.get("total_cost_basis_minor")
+        average_cost = payload.get("average_cost_per_share_minor")
+        if average_cost is None:
+            average_cost = payload.get("average_basis_minor")
+        derived = (
+            total_cost_basis_minor(quantity_micros, int(average_cost))
+            if average_cost is not None
+            else None
+        )
+        if total_basis is not None and derived is not None and int(total_basis) != derived:
+            raise ValueError("Total and average cost basis inputs conflict")
+        if total_basis is None and derived is None:
+            raise ValueError("Provide total_cost_basis_minor or average_cost_per_share_minor")
+        if total_basis is not None:
+            return int(total_basis)
+        if derived is None:
+            raise ValueError("Provide total_cost_basis_minor or average_cost_per_share_minor")
+        return derived
+
     def create_investment_position(
         self, account_id: str, payload: dict[str, Any]
     ) -> dict[str, Any]:
         self._require_account_class(account_id, ACCOUNT_CLASS_INVESTMENT)
         effective_date = self._non_future_date(payload["effective_date"])
+        quantity = payload.get("quantity_micros")
+        if quantity is None:
+            raise ValueError("quantity_micros is required")
+        basis = self._investment_position_basis(payload, int(quantity))
+        instrument = self._resolve_investment_instrument(payload)
         now = self.clock.now()
         position_id = str(uuid4())
         with self.db.transaction() as connection:
@@ -3974,14 +4072,62 @@ class DojoService:
                 {
                     "position_id": position_id,
                     "account_id": account_id,
-                    "ticker": payload["ticker"].strip().upper(),
+                    "instrument_id": str(instrument["instrument_id"]),
                     "effective_date": effective_date,
-                    "quantity_micros": payload["quantity_micros"],
-                    "average_basis_minor": payload["average_basis_minor"],
+                    "quantity_micros": int(quantity),
+                    "total_cost_basis_minor": basis,
                     "valid_from": now,
                     "valid_to": MAX_TS,
                     "created_at": now,
                     "created_by_user_id": None,
+                },
+            )
+        return {"position_id": position_id}
+
+    def correct_investment_position(
+        self, account_id: str, position_id: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        self._require_account_class(account_id, ACCOUNT_CLASS_INVESTMENT)
+        current = self.db.fetch_one(
+            load_sql("queries/current_investment_position_by_id"), (account_id, position_id)
+        )
+        if current is None:
+            raise ValueError(f"Investment position {position_id} was not found")
+        quantity = int(payload.get("quantity_micros", current["quantity_micros"]))
+        changed_quantity = quantity != int(current["quantity_micros"])
+        has_basis = (
+            payload.get("total_cost_basis_minor") is not None
+            or payload.get("average_cost_per_share_minor") is not None
+        )
+        if changed_quantity and not has_basis:
+            raise ValueError("A quantity-changing correction requires a resulting cost basis")
+        basis = (
+            self._investment_position_basis(payload, quantity)
+            if has_basis
+            else int(current["total_cost_basis_minor"])
+        )
+        effective_date = self._non_future_date(
+            payload.get("effective_date", current["effective_date"])
+        )
+        now = self.clock.now()
+        with self.db.transaction() as connection:
+            close_current_version(
+                connection, "investment_positions", "position_id", position_id, now=now
+            )
+            insert_version(
+                connection,
+                "investment_positions",
+                {
+                    "position_id": position_id,
+                    "account_id": account_id,
+                    "instrument_id": str(current["instrument_id"]),
+                    "effective_date": effective_date,
+                    "quantity_micros": quantity,
+                    "total_cost_basis_minor": basis,
+                    "valid_from": now,
+                    "valid_to": MAX_TS,
+                    "created_at": current["created_at"],
+                    "created_by_user_id": current["created_by_user_id"],
                 },
             )
         return {"position_id": position_id}
@@ -4027,6 +4173,7 @@ class DojoService:
 
     def create_investment_price_snapshot(self, payload: dict[str, Any]) -> dict[str, Any]:
         effective_date = self._non_future_date(payload["effective_date"])
+        instrument = self._resolve_investment_instrument(payload)
         now = self.clock.now()
         snapshot_id = str(uuid4())
         with self.db.transaction() as connection:
@@ -4036,7 +4183,7 @@ class DojoService:
                 {
                     "snapshot_id": snapshot_id,
                     "account_id": payload.get("account_id"),
-                    "ticker": payload["ticker"].strip().upper(),
+                    "instrument_id": str(instrument["instrument_id"]),
                     "effective_date": effective_date,
                     "price_minor": payload["price_minor"],
                     "source": payload.get("source", "manual"),
@@ -4049,9 +4196,19 @@ class DojoService:
         return {"snapshot_id": snapshot_id}
 
     def list_investment_price_snapshots(self, ticker: str) -> list[dict[str, Any]]:
+        instrument = self.db.fetch_one(
+            load_sql("queries/investment_instrument_by_symbol"), (ticker.strip().upper(),)
+        )
+        if instrument is None:
+            return []
+        return self.list_investment_price_snapshots_by_instrument(str(instrument["instrument_id"]))
+
+    def list_investment_price_snapshots_by_instrument(
+        self, instrument_id: str
+    ) -> list[dict[str, Any]]:
         return self.db.fetch_all(
-            load_sql("queries/current_investment_price_snapshots_by_ticker"),
-            (ticker.strip().upper(),),
+            load_sql("queries/current_investment_price_snapshots_by_instrument"),
+            (instrument_id,),
         )
 
     def reconcile_investment_statement(
@@ -4064,7 +4221,19 @@ class DojoService:
             load_sql("queries/current_investment_positions_by_account_date"),
             (account_id, effective_date),
         )
-        existing_positions_by_ticker = {row["ticker"]: row for row in existing_positions}
+        existing_positions_by_instrument = {
+            str(row["instrument_id"]): row for row in existing_positions
+        }
+        resolved_holdings = []
+        seen_instruments: set[str] = set()
+        for holding in payload["holdings"]:
+            instrument = self._resolve_investment_instrument(holding)
+            instrument_id = str(instrument["instrument_id"])
+            if instrument_id in seen_instruments:
+                raise ValueError("Statement holdings must use unique instruments")
+            seen_instruments.add(instrument_id)
+            basis = self._investment_position_basis(holding, int(holding["quantity_micros"]))
+            resolved_holdings.append((holding, instrument, basis))
         existing_cash = self.db.fetch_one(
             load_sql("queries/current_investment_cash_by_account_date"),
             (account_id, effective_date),
@@ -4080,9 +4249,9 @@ class DojoService:
                     str(existing_position["position_id"]),
                     now=now,
                 )
-            for holding in payload["holdings"]:
-                ticker = holding["ticker"].strip().upper()
-                matched_position = existing_positions_by_ticker.get(ticker)
+            for holding, instrument, basis in resolved_holdings:
+                instrument_id = str(instrument["instrument_id"])
+                matched_position = existing_positions_by_instrument.get(instrument_id)
                 insert_version(
                     connection,
                     "investment_positions",
@@ -4093,10 +4262,10 @@ class DojoService:
                             else str(uuid4())
                         ),
                         "account_id": account_id,
-                        "ticker": ticker,
+                        "instrument_id": instrument_id,
                         "effective_date": effective_date,
                         "quantity_micros": holding["quantity_micros"],
-                        "average_basis_minor": holding["average_basis_minor"],
+                        "total_cost_basis_minor": basis,
                         "valid_from": now,
                         "valid_to": MAX_TS,
                         "created_at": (matched_position["created_at"] if matched_position else now),
@@ -4106,7 +4275,7 @@ class DojoService:
                 self._replace_statement_price(
                     connection,
                     account_id=account_id,
-                    ticker=ticker,
+                    instrument_id=instrument_id,
                     effective_date=effective_date,
                     price_minor=holding["price_minor"],
                     now=now,
@@ -4165,17 +4334,17 @@ class DojoService:
             (account_id, effective_date),
         ):
             price = self.db.fetch_one(
-                load_sql("queries/current_investment_price_by_ticker_date"),
-                (account_id, position["ticker"], effective_date, account_id),
+                load_sql("queries/current_investment_price_by_instrument_date"),
+                (account_id, position["instrument_id"], effective_date, account_id),
             )
             if price is None:
-                raise ValueError(f"Missing statement price for {position['ticker']}")
-            if position["average_basis_minor"] is None:
-                raise ValueError(f"Missing average cost for {position['ticker']}")
+                raise ValueError(
+                    f"Missing statement price for {position.get('symbol') or position['instrument_id']}"
+                )
             metrics = position_metrics(
                 quantity_micros=int(position["quantity_micros"]),
                 price_minor=int(price["price_minor"]),
-                average_basis_minor=int(position["average_basis_minor"]),
+                total_cost_basis_minor=int(position["total_cost_basis_minor"]),
             )
             holdings_value += metrics.value_minor
             holdings_cost_basis += metrics.cost_basis_minor
@@ -6168,8 +6337,8 @@ class DojoService:
             complete = True
             for position in positions:
                 price = self.db.fetch_one(
-                    load_sql("queries/current_investment_price_by_ticker_date"),
-                    (account_id, position["ticker"], statement_date, account_id),
+                    load_sql("queries/current_investment_price_by_instrument_date"),
+                    (account_id, position["instrument_id"], statement_date, account_id),
                 )
                 if price is None:
                     complete = False
@@ -6193,14 +6362,14 @@ class DojoService:
         connection: Any,
         *,
         account_id: str,
-        ticker: str,
+        instrument_id: str,
         effective_date: date,
         price_minor: int,
         now: datetime,
     ) -> None:
         existing = self.db.fetch_one(
-            load_sql("queries/current_investment_price_by_ticker_date"),
-            (account_id, ticker, effective_date, account_id),
+            load_sql("queries/current_investment_price_by_instrument_date"),
+            (account_id, instrument_id, effective_date, account_id),
         )
         snapshot_id = str(existing["snapshot_id"]) if existing else str(uuid4())
         if existing and existing.get("account_id") == account_id:
@@ -6219,7 +6388,7 @@ class DojoService:
             {
                 "snapshot_id": snapshot_id,
                 "account_id": account_id,
-                "ticker": ticker,
+                "instrument_id": instrument_id,
                 "effective_date": effective_date,
                 "price_minor": price_minor,
                 "source": "statement",
@@ -6376,7 +6545,11 @@ class DojoService:
                 },
             )
             for holding_index, holding in enumerate(successor["holdings"]):
-                ticker = holding["ticker"].strip().upper()
+                instrument = self._resolve_investment_instrument(holding)
+                instrument_id = str(instrument["instrument_id"])
+                total_basis = self._investment_position_basis(
+                    holding, int(holding["quantity_micros"])
+                )
                 insert_version(
                     connection,
                     "investment_positions",
@@ -6388,10 +6561,10 @@ class DojoService:
                             )
                         ),
                         "account_id": successor_id,
-                        "ticker": ticker,
+                        "instrument_id": instrument_id,
                         "effective_date": cutover_date,
                         "quantity_micros": holding["quantity_micros"],
-                        "average_basis_minor": holding["average_basis_minor"],
+                        "total_cost_basis_minor": total_basis,
                         "valid_from": now,
                         "valid_to": MAX_TS,
                         "created_at": now,
@@ -6409,7 +6582,7 @@ class DojoService:
                             )
                         ),
                         "account_id": successor_id,
-                        "ticker": ticker,
+                        "instrument_id": instrument_id,
                         "effective_date": cutover_date,
                         "price_minor": holding["price_minor"],
                         "source": "cutover",
