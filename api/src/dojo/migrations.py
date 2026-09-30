@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 from uuid import NAMESPACE_URL, uuid5
 
@@ -64,7 +65,7 @@ def _migrate_legacy_investments(
             for row in connection.execute(f"SELECT DISTINCT ticker FROM {legacy_prices}").fetchall()
         )
     for normalized in sorted({symbol.strip().upper() for symbol in legacy_symbols}):
-        source_timestamps = []
+        source_timestamps: list[datetime] = []
         for legacy_table in (legacy_positions, legacy_prices):
             if legacy_table:
                 source_timestamps.extend(
