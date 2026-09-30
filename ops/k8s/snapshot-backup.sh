@@ -97,6 +97,11 @@ job=""
 image=""
 failure_message=""
 status_command="${DOJO_BACKUP_STATUS_COMMAND:-/bin/dojo-backup-status}"
+lock_command="${DOJO_BACKUP_LOCK_COMMAND:-/bin/dojo-backup-lock}"
+lock_holder="$(printf '%s' "$trigger_kind" | tr '[:lower:]' '[:upper:]'):${run_id}:job=${DOJO_BACKUP_JOB_NAME:-unknown}:pod=${HOSTNAME:-unknown}"
+lock_acquired=false
+lock_renewer=""
+orchestrator_pid=$$
 
 report_status() {
   [[ -f "${DOJO_BACKUP_STATUS_TOKEN_FILE:-}" ]] || return 0
@@ -120,6 +125,13 @@ cleanup() {
   if [[ "$result" -ne 0 ]]; then
     report_status FAILED "$phase" "${failure_message:-Backup failed during ${phase}.}"
   fi
+  if [[ -n "$lock_renewer" ]]; then
+    kill "$lock_renewer" 2>/dev/null
+    wait "$lock_renewer" 2>/dev/null
+  fi
+  if [[ "$lock_acquired" == true ]]; then
+    "$lock_command" release --holder "$lock_holder" --namespace "$namespace" || true
+  fi
   [[ -n "$job" ]] && kubectl -n "$namespace" delete job "$job" --ignore-not-found --wait=true
   [[ -n "$clone" ]] && kubectl -n "$namespace" delete pvc "$clone" --ignore-not-found --wait=true
   exit "$result"
@@ -127,6 +139,27 @@ cleanup() {
 trap cleanup EXIT
 
 report_status RUNNING STARTING ""
+if lock_diagnostic="$("$lock_command" acquire --holder "$lock_holder" --namespace "$namespace" 2>&1)"; then
+  lock_acquired=true
+  (
+    while sleep 30; do
+      if ! "$lock_command" renew --holder "$lock_holder" --namespace "$namespace"; then
+        kill -TERM "$orchestrator_pid"
+        exit 1
+      fi
+    done
+  ) &
+  lock_renewer=$!
+else
+  lock_result=$?
+  if [[ "$lock_result" -eq 3 ]]; then
+    phase="LOCKED"
+    report_status SKIPPED LOCKED "$lock_diagnostic"
+    exit 0
+  fi
+  failure_message="Unable to acquire backup lock: $lock_diagnostic"
+  exit 1
+fi
 backup_image_for_build
 if [[ -z "$snapshot_class" ]]; then
   mapfile -t snapshot_classes < <(

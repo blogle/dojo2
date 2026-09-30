@@ -57,9 +57,10 @@ class BackupRunEventPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     trigger_kind: Literal["SCHEDULED", "MANUAL"]
-    status: Literal["RUNNING", "SUCCEEDED", "FAILED"]
+    status: Literal["RUNNING", "SUCCEEDED", "FAILED", "SKIPPED"]
     phase: Literal[
         "STARTING",
+        "LOCKED",
         "SNAPSHOTTING",
         "CLONING",
         "PREPARING",
