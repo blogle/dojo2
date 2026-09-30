@@ -231,14 +231,23 @@ CREATE TABLE IF NOT EXISTS account_budget_links (
     created_by_user_id UUID
 );
 
+CREATE TABLE IF NOT EXISTS investment_instruments (
+    instrument_id UUID PRIMARY KEY,
+    symbol TEXT,
+    name TEXT,
+    is_cash_equivalent BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL,
+    created_by_user_id UUID
+);
+
 CREATE TABLE IF NOT EXISTS investment_positions (
     row_id UUID PRIMARY KEY,
     position_id UUID NOT NULL,
     account_id UUID NOT NULL,
-    ticker TEXT NOT NULL,
+    instrument_id UUID NOT NULL,
     effective_date DATE NOT NULL,
     quantity_micros BIGINT NOT NULL,
-    average_basis_minor BIGINT NOT NULL,
+    total_cost_basis_minor BIGINT NOT NULL,
     valid_from TIMESTAMPTZ NOT NULL,
     valid_to TIMESTAMPTZ NOT NULL DEFAULT TIMESTAMPTZ '9999-12-31 23:59:59+00',
     created_at TIMESTAMPTZ NOT NULL,
@@ -263,7 +272,7 @@ CREATE TABLE IF NOT EXISTS investment_price_snapshots (
     row_id UUID PRIMARY KEY,
     snapshot_id UUID NOT NULL,
     account_id UUID,
-    ticker TEXT NOT NULL,
+    instrument_id UUID NOT NULL,
     effective_date DATE NOT NULL,
     price_minor BIGINT NOT NULL,
     source TEXT,
