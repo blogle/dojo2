@@ -7,9 +7,9 @@ if [[ ! "$expected_sha" =~ ^[0-9a-f]{40}$ ]]; then
   printf 'Invalid expected Git SHA: %s\n' "$expected_sha" >&2
   exit 2
 fi
-manifest="$(tar -xOzf "$archive" manifest.json)"
+manifest="$(tar -xOf "$archive" manifest.json)"
 config="$(printf '%s' "$manifest" | jq -r '.[0].Config')"
-metadata="$(tar -xOzf "$archive" "$config")"
+metadata="$(tar -xOf "$archive" "$config")"
 
 jq -e --arg expected_sha "$expected_sha" \
   '.config.Env | index("DOJO_BUILD_SHA=" + $expected_sha) != null' \
