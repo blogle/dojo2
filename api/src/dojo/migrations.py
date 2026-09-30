@@ -9,11 +9,24 @@ from dojo.sql import load_sql
 
 def apply_migrations(connection: duckdb.DuckDBPyConnection) -> None:
     connection.execute(load_sql("schema/current"))
+    _migrate_backup_run_skipped_status(connection)
     _migrate_reconciliation_foundation(connection)
     _migrate_legacy_transaction_constraint(connection)
     _migrate_transaction_entry_order(connection)
     connection.execute(load_sql("schema/migrations/add_rich_account_fields"))
     connection.execute(load_sql("schema/migrations/add_backup_oauth_token"))
+
+
+def _migrate_backup_run_skipped_status(connection: duckdb.DuckDBPyConnection) -> None:
+    table = connection.execute(
+        load_sql("queries/duckdb_table_sql_by_name"), ("backup_runs",)
+    ).fetchone()
+    if table is None:
+        return
+    normalized_sql = " ".join(str(table[0] or "").split()).casefold()
+    if "'skipped'" in normalized_sql:
+        return
+    connection.execute(load_sql("schema/migrations/backup_runs_skipped_status"))
 
 
 def _migrate_reconciliation_foundation(connection: duckdb.DuckDBPyConnection) -> None:

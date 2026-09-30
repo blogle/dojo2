@@ -47,7 +47,9 @@ def main() -> int:
     parser.add_argument("--token-file", required=True, type=Path)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--trigger-kind", choices=["SCHEDULED", "MANUAL"], required=True)
-    parser.add_argument("--status", choices=["RUNNING", "SUCCEEDED", "FAILED"], required=True)
+    parser.add_argument(
+        "--status", choices=["RUNNING", "SUCCEEDED", "FAILED", "SKIPPED"], required=True
+    )
     parser.add_argument("--phase", required=True)
     parser.add_argument("--source-snapshot")
     parser.add_argument("--image-digest")

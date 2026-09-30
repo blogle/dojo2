@@ -129,11 +129,11 @@ cleanup() {
     kill "$lock_renewer" 2>/dev/null
     wait "$lock_renewer" 2>/dev/null
   fi
+  [[ -n "$job" ]] && kubectl -n "$namespace" delete job "$job" --ignore-not-found --wait=true
+  [[ -n "$clone" ]] && kubectl -n "$namespace" delete pvc "$clone" --ignore-not-found --wait=true
   if [[ "$lock_acquired" == true ]]; then
     "$lock_command" release --holder "$lock_holder" --namespace "$namespace" || true
   fi
-  [[ -n "$job" ]] && kubectl -n "$namespace" delete job "$job" --ignore-not-found --wait=true
-  [[ -n "$clone" ]] && kubectl -n "$namespace" delete pvc "$clone" --ignore-not-found --wait=true
   exit "$result"
 }
 trap cleanup EXIT
@@ -142,7 +142,7 @@ report_status RUNNING STARTING ""
 if lock_diagnostic="$("$lock_command" acquire --holder "$lock_holder" --namespace "$namespace" 2>&1)"; then
   lock_acquired=true
   (
-    while sleep 30; do
+    while sleep "${DOJO_BACKUP_LOCK_RENEW_INTERVAL_SECONDS:-30}"; do
       if ! "$lock_command" renew --holder "$lock_holder" --namespace "$namespace"; then
         kill -TERM "$orchestrator_pid"
         exit 1

@@ -8,10 +8,12 @@ import os
 import ssl
 import sys
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Any
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
+
+from dojo.clock import Clock, SystemClock
 
 LEASE_NAME = "dojo-backup-global"
 LEASE_DURATION_SECONDS = 300
@@ -51,8 +53,9 @@ def lease_expiry(lease: dict[str, Any]) -> datetime | None:
 
 
 class KubernetesLease:
-    def __init__(self, namespace: str) -> None:
+    def __init__(self, namespace: str, clock: Clock | None = None) -> None:
         self.namespace = namespace
+        self.clock = clock or SystemClock()
         self.base_url = os.environ.get("KUBERNETES_SERVICE_HOST", "")
         port = os.environ.get("KUBERNETES_SERVICE_PORT_HTTPS", "443")
         self.base_url = f"https://{self.base_url}:{port}"
@@ -85,7 +88,7 @@ class KubernetesLease:
         return API_PATH.format(namespace=self.namespace)
 
     def acquire_or_renew(self, holder: str, now: datetime | None = None) -> LeaseDecision:
-        now = now or datetime.now(UTC)
+        now = now or self.clock.now()
         timestamp = now.isoformat(timespec="seconds").replace("+00:00", "Z")
         lease_path = f"{self.collection}/{LEASE_NAME}"
         for _ in range(5):
@@ -117,7 +120,8 @@ class KubernetesLease:
                 raise RuntimeError(f"Could not update backup Lease: {updated}")
         raise RuntimeError("Backup Lease changed repeatedly during acquisition; retry this backup.")
 
-    def release(self, holder: str) -> None:
+    def release(self, holder: str, now: datetime | None = None) -> None:
+        now = now or self.clock.now()
         path = f"{self.collection}/{LEASE_NAME}"
         for _ in range(5):
             status, lease = self._request("GET", path)
@@ -131,9 +135,7 @@ class KubernetesLease:
             spec.update(
                 {
                     "holderIdentity": "",
-                    "renewTime": datetime.now(UTC)
-                    .isoformat(timespec="seconds")
-                    .replace("+00:00", "Z"),
+                    "renewTime": now.isoformat(timespec="seconds").replace("+00:00", "Z"),
                 }
             )
             status, response = self._request("PUT", path, lease)
