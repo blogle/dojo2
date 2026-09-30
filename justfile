@@ -251,7 +251,7 @@ check: format-check lint typecheck architecture-check migration-check k8s-render
 ci: check test-e2e container
 
 container:
-	env -u LD_LIBRARY_PATH DOJO_BUILD_SHA="$(git rev-parse HEAD)" nix build .#container --impure
+	env -u LD_LIBRARY_PATH nix build .#container
 
 container-validate-provenance build_sha:
 	just setup-web

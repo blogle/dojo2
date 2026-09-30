@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import importlib.util
+import io
+import json
 import os
-from pathlib import Path
 import subprocess
+import tarfile
 import tempfile
+from pathlib import Path
 
 import pytest
 
@@ -15,6 +18,8 @@ RELEASE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "release.yml"
 MERGE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "merge.yml"
 PR_TEMPLATE = REPO_ROOT / ".github" / "pull_request_template.md"
 PUBLISH_IMAGE = REPO_ROOT / "ops" / "container" / "publish-image.sh"
+VALIDATE_BUILD_METADATA = REPO_ROOT / "ops" / "container" / "validate-build-metadata.sh"
+VALIDATE_CONTENT_METADATA = REPO_ROOT / "ops" / "container" / "validate-content-metadata.sh"
 SPEC = importlib.util.spec_from_file_location("dojo_release", RELEASE_SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
 release = importlib.util.module_from_spec(SPEC)
@@ -386,10 +391,10 @@ def test_release_workflow_is_publication_only() -> None:
     assert "leaving staging unchanged" in workflow
     publish_staging = workflow.split("publish-staging:", 1)[1].split("  tag-release:", 1)[0]
     assert 'ops/container/publish-image.sh "$MASTER_COMMIT"' in publish_staging
-    assert "docker pull \"$source_image\"" in publish_staging
-    assert 'ghcr.io/blogle/dojo2:v${VERSION}' in workflow
+    assert 'docker pull "$source_image"' in publish_staging
+    assert "ghcr.io/blogle/dojo2:v${VERSION}" in workflow
     assert 'docker pull "$source_image"' in workflow
-    assert "docker tag \"$source_image\" \"$release_image\"" in workflow
+    assert 'docker tag "$source_image" "$release_image"' in workflow
     assert 'git show "${parent}:CHANGELOG.md"' in workflow
     assert "git log -1" not in workflow
     assert "changelog-version" not in workflow
@@ -420,29 +425,32 @@ def test_ci_validates_pr_body_and_supports_explicit_candidate_validation() -> No
     assert "statuses: write" in workflow
 
 
-def run_image_publisher(mode: str, commit: str) -> str:
+def run_image_publisher(mode: str, commit: str, *, revision: str | None = None) -> str:
     with tempfile.TemporaryDirectory() as directory:
         bin_dir = Path(directory) / "bin"
         bin_dir.mkdir()
         log = Path(directory) / "commands.log"
         git = bin_dir / "git"
         git.write_text(
-            "#!/usr/bin/env bash\nprintf 'git %s\\n' \"$*\" >> \"$COMMAND_LOG\"\n"
+            '#!/usr/bin/env bash\nprintf \'git %s\\n\' "$*" >> "$COMMAND_LOG"\n'
             "printf '%s\\n' 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'\n",
             encoding="utf-8",
         )
         docker = bin_dir / "docker"
         docker.write_text(
-            "#!/usr/bin/env bash\nprintf 'docker %s\\n' \"$*\" >> \"$COMMAND_LOG\"\n"
+            '#!/usr/bin/env bash\nprintf \'docker %s\\n\' "$*" >> "$COMMAND_LOG"\n'
             "if [[ \"$1 $2\" == 'manifest inspect' ]]; then "
-            "case \"$3\" in *git-*) [[ \"$IMAGE_MODE\" == git-hit ]] && exit 0;; "
-            "*content-*) [[ \"$IMAGE_MODE\" == git-hit || \"$IMAGE_MODE\" == content-hit ]] && exit 0;; esac; exit 1; fi\n"
-            "if [[ \"$1\" == load ]]; then while IFS= read -r _; do :; done; fi\n",
+            'case "$3" in *git-*) [[ "$IMAGE_MODE" == git-hit ]] && exit 0;; '
+            '*content-*) [[ "$IMAGE_MODE" == git-hit || "$IMAGE_MODE" == content-hit ]] && exit 0;; esac; exit 1; fi\n'
+            'if [[ "$1 $2" == "image inspect" ]]; then '
+            'if [[ "$4" == *Labels* ]]; then printf "%s\\n" "$REVISION"; '
+            'else printf "%s\\n" "DOJO_BUILD_SHA=$BUILD_SHA"; fi; fi\n'
+            'if [[ "$1" == load ]]; then while IFS= read -r _; do :; done; fi\n',
             encoding="utf-8",
         )
         nix = bin_dir / "nix"
         nix.write_text(
-            "#!/usr/bin/env bash\nprintf 'nix %s\\n' \"$*\" >> \"$COMMAND_LOG\"\n",
+            '#!/usr/bin/env bash\nprintf \'nix %s\\n\' "$*" >> "$COMMAND_LOG"\n',
             encoding="utf-8",
         )
         readlink = bin_dir / "readlink"
@@ -457,6 +465,8 @@ def run_image_publisher(mode: str, commit: str) -> str:
             "PATH": f"{bin_dir}:{os.environ['PATH']}",
             "COMMAND_LOG": str(log),
             "IMAGE_MODE": mode,
+            "REVISION": revision or commit,
+            "BUILD_SHA": commit,
         }
         completed = subprocess.run(
             [str(PUBLISH_IMAGE), commit],
@@ -472,7 +482,7 @@ def run_image_publisher(mode: str, commit: str) -> str:
 def test_publisher_reuses_same_tree_content_without_expensive_builds() -> None:
     commands = run_image_publisher("content-hit", "a" * 40)
 
-    assert "mode=content-image-hit" in commands or "content-" in commands
+    assert "mode=content-image-hit" in commands
     assert "docker pull ghcr.io/blogle/dojo2:content-" in commands
     assert "docker build --file Dockerfile" in commands
     assert "just build-web" not in commands
@@ -496,6 +506,12 @@ def test_publisher_exact_git_hit_does_not_build() -> None:
     assert "docker pull ghcr.io/blogle/dojo2:git-" in commands
     assert "just build-web" not in commands
     assert "docker build" not in commands
+    assert "docker image inspect" in commands
+
+
+def test_publisher_rejects_existing_git_image_with_wrong_provenance() -> None:
+    with pytest.raises(subprocess.CalledProcessError):
+        run_image_publisher("git-hit", "a" * 40, revision="b" * 40)
 
 
 def test_container_content_is_neutral_and_commit_wrapper_sets_exact_provenance() -> None:
@@ -511,8 +527,71 @@ def test_container_content_is_neutral_and_commit_wrapper_sets_exact_provenance()
     assert "COPY web/dist/ /share/dojo/" in content_dockerfile
     assert "FROM ${CONTENT_IMAGE}" in wrapper_dockerfile
     assert "ENV DOJO_BUILD_SHA=${DOJO_BUILD_SHA}" in wrapper_dockerfile
-    assert 'LABEL org.opencontainers.image.revision=${DOJO_BUILD_SHA}' in wrapper_dockerfile
+    assert "LABEL org.opencontainers.image.revision=${DOJO_BUILD_SHA}" in wrapper_dockerfile
     assert "COPY" not in wrapper_dockerfile
+
+
+def make_docker_archive(directory: str, *, env: list[str], revision: str | None) -> Path:
+    archive = Path(directory) / "image.tar.gz"
+    config_path = "config.json"
+    labels = {} if revision is None else {"org.opencontainers.image.revision": revision}
+    config = json.dumps({"config": {"Env": env, "Labels": labels}}).encode()
+    manifest = json.dumps([{"Config": config_path, "RepoTags": [], "Layers": []}]).encode()
+    with tarfile.open(archive, "w:gz") as container:
+        for name, content in (("manifest.json", manifest), (config_path, config)):
+            info = tarfile.TarInfo(name)
+            info.size = len(content)
+            container.addfile(info, io.BytesIO(content))
+    return archive
+
+
+def test_final_master_image_validator_requires_exact_build_sha_and_oci_revision() -> None:
+    master_commit = "a" * 40
+    with tempfile.TemporaryDirectory() as directory:
+        valid_image = make_docker_archive(
+            directory,
+            env=[f"DOJO_BUILD_SHA={master_commit}"],
+            revision=master_commit,
+        )
+        subprocess.run(
+            [str(VALIDATE_BUILD_METADATA), str(valid_image), master_commit],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        invalid_image = make_docker_archive(
+            directory,
+            env=[f"DOJO_BUILD_SHA={'b' * 40}"],
+            revision="b" * 40,
+        )
+        result = subprocess.run(
+            [str(VALIDATE_BUILD_METADATA), str(invalid_image), master_commit],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode != 0
+
+
+def test_content_image_validator_rejects_commit_specific_provenance() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        neutral_content = make_docker_archive(directory, env=[], revision=None)
+        subprocess.run(
+            [str(VALIDATE_CONTENT_METADATA), str(neutral_content)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        misleading_content = make_docker_archive(
+            directory, env=[f"DOJO_BUILD_SHA={'a' * 40}"], revision="a" * 40
+        )
+        result = subprocess.run(
+            [str(VALIDATE_CONTENT_METADATA), str(misleading_content)],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode != 0
 
 
 def test_pr_publisher_uses_pr_head_and_staging_rechecks_master_before_move() -> None:
@@ -524,7 +603,7 @@ def test_pr_publisher_uses_pr_head_and_staging_rechecks_master_before_move() -> 
 
     assert 'ops/container/publish-image.sh "$PR_HEAD_SHA"' in publish_pr
     assert 'docker tag "ghcr.io/blogle/dojo2:git-${PR_HEAD_SHA}"' in publish_pr
-    assert move_staging.index('git ls-remote origin refs/heads/master') > move_staging.index(
+    assert move_staging.index("git ls-remote origin refs/heads/master") > move_staging.index(
         'docker pull "$source_image"'
     )
     assert 'if [[ "$remote_master" != "$MASTER_COMMIT" ]]' in move_staging
