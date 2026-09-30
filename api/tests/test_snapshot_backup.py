@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -21,6 +22,7 @@ def render_job(*, build_sha: str) -> subprocess.CompletedProcess[str]:
             "DOJO_BACKUP_RUN_ID": "00000000-0000-4000-8000-000000000001",
             "DOJO_BACKUP_SNAPSHOT": "dojo-data-test",
             "DOJO_BACKUP_CLONE": "dojo-backup-test",
+            "DOJO_BACKUP_LOCK_HOLDER": "MANUAL:run-test:job=dojo-backup-test:pod=pod-test",
         }
     )
     return subprocess.run(
@@ -38,6 +40,53 @@ def test_rendered_backup_job_uses_its_build_sha() -> None:
     assert result.returncode == 0, result.stderr
     assert f"image: ghcr.io/blogle/dojo2:git-{BUILD_SHA}" in result.stdout
     assert "imagePullPolicy: Always" in result.stdout
+    assert "serviceAccountName: dojo-backup" in result.stdout
+    assert "child_lock_holder='MANUAL:run-test:job=dojo-backup-test:pod=pod-test'" in result.stdout
+    assert '"$child_lock_command" renew --holder "$child_lock_holder" --namespace' in result.stdout
+    assert "kill -TERM \"$child_pid\"" in result.stdout
+
+
+def test_rendered_child_lock_guard_terminates_on_renewal_loss(tmp_path: Path) -> None:
+    rendered = render_job(build_sha=BUILD_SHA)
+    assert rendered.returncode == 0, rendered.stderr
+    guard = rendered.stdout.split("          # BEGIN shared backup Lease guard\n", 1)[1].split(
+        "          # END shared backup Lease guard\n", 1
+    )[0]
+    guard_script = textwrap.dedent(guard) + "sleep 0.25\n"
+    command = tmp_path / "lock"
+    counter = tmp_path / "renew-count"
+    command.write_text(
+        "#!/usr/bin/env bash\n"
+        "if [[ \"$1\" == renew ]]; then\n"
+        f"  count=0; [[ -f '{counter}' ]] && count=\"$(< '{counter}')\"\n"
+        "  count=$((count + 1))\n"
+        f"  printf '%s' \"$count\" > '{counter}'\n"
+        "  [[ \"$count\" -eq 1 ]] && exit 0\n"
+        "  exit 9\n"
+        "fi\n"
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    command.chmod(0o755)
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "DOJO_BACKUP_LOCK_COMMAND": str(command),
+            "DOJO_BACKUP_LOCK_RENEW_INTERVAL_SECONDS": "0.05",
+        }
+    )
+
+    result = subprocess.run(
+        ["bash", "-c", guard_script],
+        capture_output=True,
+        text=True,
+        env=environment,
+        check=False,
+        timeout=3,
+    )
+
+    assert result.returncode != 0
+    assert int(counter.read_text(encoding="utf-8")) >= 2
 
 
 def test_missing_build_sha_fails_before_kubernetes_calls(tmp_path: Path) -> None:
