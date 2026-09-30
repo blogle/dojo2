@@ -6,6 +6,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
 
+from dojo.investment import total_cost_basis_minor
+
 Date = date
 
 AccountClass = Literal["BUDGET", "TRACKING", "INVESTMENT", "LOAN", "TANGIBLE_ASSET"]
@@ -364,16 +366,61 @@ class TangibleAssetValuationPayload(BaseModel):
 
 class InvestmentPositionPayload(BaseModel):
     effective_date: date
-    ticker: str = Field(min_length=1)
+    instrument_id: UUID | None = None
+    symbol: str | None = None
+    ticker: str | None = Field(default=None, min_length=1)
     quantity_micros: int = Field(ge=0)
-    average_basis_minor: int = Field(ge=0)
+    total_cost_basis_minor: int | None = Field(default=None, ge=0)
+    average_cost_per_share_minor: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def validate_instrument_and_basis(self) -> "InvestmentPositionPayload":
+        compatibility_symbol = self.symbol if self.symbol is not None else self.ticker
+        if self.instrument_id is None and (compatibility_symbol is None or not compatibility_symbol.strip()):
+            raise ValueError("Provide instrument_id or a nonblank symbol/ticker")
+        if self.symbol is not None and self.ticker is not None:
+            if self.symbol.strip().upper() != self.ticker.strip().upper():
+                raise ValueError("symbol and ticker compatibility inputs conflict")
+        if self.symbol is not None:
+            self.symbol = self.symbol.strip().upper() or None
+        if self.ticker is not None:
+            self.ticker = self.ticker.strip().upper() or None
+        if self.total_cost_basis_minor is None and self.average_cost_per_share_minor is None:
+            raise ValueError("Provide total_cost_basis_minor or average_cost_per_share_minor")
+        if self.total_cost_basis_minor is not None and self.average_cost_per_share_minor is not None:
+            derived = total_cost_basis_minor(
+                self.quantity_micros, self.average_cost_per_share_minor
+            )
+            if derived != self.total_cost_basis_minor:
+                raise ValueError("Total and average cost basis inputs conflict")
+        return self
+
+
+class InvestmentPositionUpdatePayload(BaseModel):
+    effective_date: date | None = None
+    quantity_micros: int | None = Field(default=None, ge=0)
+    total_cost_basis_minor: int | None = Field(default=None, ge=0)
+    average_cost_per_share_minor: int | None = Field(default=None, ge=0)
 
 
 class InvestmentStatementHoldingPayload(BaseModel):
-    ticker: str = Field(min_length=1)
+    instrument_id: UUID | None = None
+    symbol: str | None = None
+    ticker: str | None = Field(default=None, min_length=1)
     quantity_micros: int = Field(ge=0)
     price_minor: int = Field(gt=0)
-    average_basis_minor: int = Field(ge=0)
+    total_cost_basis_minor: int | None = Field(default=None, ge=0)
+    average_basis_minor: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def validate_holding_identity_and_basis(self) -> "InvestmentStatementHoldingPayload":
+        if self.instrument_id is None and not any(
+            value is not None and value.strip() for value in (self.symbol, self.ticker)
+        ):
+            raise ValueError("Provide instrument_id or a nonblank symbol/ticker")
+        if self.total_cost_basis_minor is None and self.average_basis_minor is None:
+            raise ValueError("Provide total_cost_basis_minor or average_basis_minor")
+        return self
 
 
 class InvestmentStatementPayload(BaseModel):
@@ -384,9 +431,14 @@ class InvestmentStatementPayload(BaseModel):
 
     @model_validator(mode="after")
     def validate_unique_tickers(self) -> "InvestmentStatementPayload":
-        tickers = [holding.ticker.strip().upper() for holding in self.holdings]
-        if len(tickers) != len(set(tickers)):
-            raise ValueError("Statement holdings must use unique tickers")
+        identities = [
+            str(holding.instrument_id)
+            if holding.instrument_id is not None
+            else (holding.symbol or holding.ticker or "").strip().upper()
+            for holding in self.holdings
+        ]
+        if len(identities) != len(set(identities)):
+            raise ValueError("Statement holdings must use unique instruments")
         return self
 
 
