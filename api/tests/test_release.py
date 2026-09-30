@@ -394,6 +394,7 @@ def test_release_workflow_is_publication_only() -> None:
     assert 'docker pull "$source_image"' in publish_staging
     assert "ghcr.io/blogle/dojo2:v${VERSION}" in workflow
     assert 'docker pull "$source_image"' in workflow
+    assert 'ops/container/validate-image-provenance.sh "$source_image" "$MASTER_COMMIT"' in workflow
     assert 'docker tag "$source_image" "$release_image"' in workflow
     assert 'git show "${parent}:CHANGELOG.md"' in workflow
     assert "git log -1" not in workflow
@@ -607,6 +608,15 @@ def test_pr_publisher_uses_pr_head_and_staging_rechecks_master_before_move() -> 
         'docker pull "$source_image"'
     )
     assert 'if [[ "$remote_master" != "$MASTER_COMMIT" ]]' in move_staging
+
+    promote_release = release_workflow.split("publish-release-image:", 1)[1]
+    assert (
+        promote_release.index('docker pull "$source_image"')
+        < promote_release.index(
+            'ops/container/validate-image-provenance.sh "$source_image" "$MASTER_COMMIT"'
+        )
+        < promote_release.index('docker tag "$source_image" "$release_image"')
+    )
 
 
 def test_merge_workflow_is_exact_comment_and_revalidates_before_squash() -> None:
