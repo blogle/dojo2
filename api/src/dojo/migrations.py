@@ -66,9 +66,24 @@ def _migrate_legacy_investments(
             ).fetchall()
         )
     for normalized in sorted({symbol.strip().upper() for symbol in legacy_symbols}):
+        source_timestamps = []
+        for legacy_table in (legacy_positions, legacy_prices):
+            if legacy_table:
+                source_timestamps.extend(
+                    row[0]
+                    for row in connection.execute(
+                        f"SELECT created_at FROM {legacy_table} WHERE UPPER(TRIM(ticker)) = ?",
+                        (normalized,),
+                    ).fetchall()
+                    if row[0] is not None
+                )
+        created_at = min(source_timestamps) if source_timestamps else None
         connection.execute(
-            "INSERT INTO investment_instruments VALUES (?, ?, NULL, FALSE, CURRENT_TIMESTAMP, NULL)",
-            (_legacy_instrument_id(normalized), normalized),
+            """INSERT INTO investment_instruments
+               (instrument_id, symbol, name, is_cash_equivalent, created_at, created_by_user_id)
+               VALUES (?, ?, NULL, FALSE, COALESCE(?, CURRENT_TIMESTAMP), NULL)
+               ON CONFLICT (instrument_id) DO NOTHING""",
+            (_legacy_instrument_id(normalized), normalized, created_at),
         )
     if legacy_positions:
         for row in connection.execute(f"SELECT * FROM {legacy_positions}").fetchall():
@@ -83,7 +98,8 @@ def _migrate_legacy_investments(
                 """INSERT INTO investment_positions
                    (row_id, position_id, account_id, instrument_id, effective_date,
                     quantity_micros, total_cost_basis_minor, valid_from, valid_to,
-                    created_at, created_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    created_at, created_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT (row_id) DO NOTHING""",
                 (row_id, position_id, account_id, _legacy_instrument_id(ticker), effective_date,
                  quantity, total_basis, valid_from, valid_to, created_at, created_by),
             )
@@ -95,10 +111,13 @@ def _migrate_legacy_investments(
                 """INSERT INTO investment_price_snapshots
                    (row_id, snapshot_id, account_id, instrument_id, effective_date,
                     price_minor, source, valid_from, valid_to, created_at, created_by_user_id)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT (row_id) DO NOTHING""",
                 (row_id, snapshot_id, account_id, _legacy_instrument_id(ticker), effective_date,
                  price, source, valid_from, valid_to, created_at, created_by),
             )
+    if legacy_positions or legacy_prices:
+        connection.execute(load_sql("schema/migrations/dojo15_finalize_investment_normalization"))
 
 
 def _migrate_reconciliation_foundation(connection: duckdb.DuckDBPyConnection) -> None:
