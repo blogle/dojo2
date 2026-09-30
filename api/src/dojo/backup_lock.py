@@ -106,7 +106,7 @@ class KubernetesLease:
             if status != 200:
                 raise RuntimeError(f"Could not read backup Lease: {lease}")
             current_holder = lease.get("spec", {}).get("holderIdentity", "")
-            if current_holder != holder and not lease_is_expired(lease, now):
+            if current_holder and current_holder != holder and not lease_is_expired(lease, now):
                 return LeaseDecision(
                     acquired=False,
                     holder=current_holder,

@@ -276,6 +276,13 @@ class DojoService:
             "backup": {
                 "state": backup_state,
                 "action": backup_action,
+                "active_manual_run_id": (
+                    substantive_backup_run["backup_run_id"]
+                    if substantive_backup_run is not None
+                    and substantive_backup_run["trigger_kind"] == "MANUAL"
+                    and substantive_backup_run["status"] == "RUNNING"
+                    else None
+                ),
                 "message": (
                     "A backup retry is queued. This warning will clear after it succeeds."
                     if backup_action == "queued"
