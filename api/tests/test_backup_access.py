@@ -126,6 +126,35 @@ def test_manual_backup_run_rejects_a_second_retry_while_queued(monkeypatch, tmp_
     assert response.json()["detail"]["code"] == "backup_retry_not_available"
 
 
+def test_backup_run_endpoint_returns_exact_run_after_a_later_run_is_latest(
+    monkeypatch, tmp_path
+) -> None:
+    run_id = "00000000-0000-4000-8000-000000000040"
+    later_run_id = "00000000-0000-4000-8000-000000000041"
+    with provisioned_client(monkeypatch, tmp_path) as client:
+        service = main_module.app.state.dojo_service
+        service.report_backup_run(
+            run_id,
+            {"trigger_kind": "MANUAL", "status": "RUNNING", "phase": "UPLOADING"},
+        )
+        service.report_backup_run(
+            later_run_id,
+            {"trigger_kind": "SCHEDULED", "status": "FAILED", "phase": "VERIFYING"},
+        )
+
+        latest = service.get_latest_backup_run()
+        response = client.get(f"/api/settings/backup/runs/{run_id}")
+        missing = client.get("/api/settings/backup/runs/00000000-0000-4000-8000-000000000042")
+
+    assert latest is not None
+    assert latest["backup_run_id"] == later_run_id
+    assert response.status_code == 200
+    assert response.json()["backup_run_id"] == run_id
+    assert response.json()["status"] == "RUNNING"
+    assert response.json()["phase"] == "UPLOADING"
+    assert missing.status_code == 404
+
+
 def test_backup_access_rejects_missing_configuration(monkeypatch, tmp_path) -> None:
     with provisioned_client(monkeypatch, tmp_path) as client:
         response = client.post(
