@@ -24,6 +24,12 @@ def apply_migrations(connection: duckdb.DuckDBPyConnection) -> None:
 def _rename_legacy_investment_table(
     connection: duckdb.DuckDBPyConnection, table_name: str
 ) -> str | None:
+    legacy_name = f"{table_name}_dojo15_legacy"
+    existing_tables = {
+        row[0] for row in connection.execute(load_sql("queries/duckdb_table_names")).fetchall()
+    }
+    if legacy_name in existing_tables:
+        return legacy_name
     columns = {
         row[0]
         for row in connection.execute(
@@ -33,12 +39,7 @@ def _rename_legacy_investment_table(
     canonical_column = "instrument_id"
     if not columns or canonical_column in columns:
         return None
-    legacy_name = f"{table_name}_dojo15_legacy"
-    existing_tables = {
-        row[0] for row in connection.execute(load_sql("queries/duckdb_table_names")).fetchall()
-    }
-    if legacy_name not in existing_tables:
-        connection.execute(f"ALTER TABLE {table_name} RENAME TO {legacy_name}")
+    connection.execute(f"ALTER TABLE {table_name} RENAME TO {legacy_name}")
     return legacy_name
 
 
