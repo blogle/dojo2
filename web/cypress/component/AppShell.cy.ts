@@ -94,7 +94,6 @@ describe("AppShell", () => {
 
   it("polls and completes the exact manual backup run", () => {
     const runId = "00000000-0000-4000-8000-000000000040";
-    let runPollCount = 0;
     cy.clock();
     cy.intercept("POST", "/api/settings/backup/run", {
       statusCode: 202,
@@ -104,19 +103,35 @@ describe("AppShell", () => {
         run_id: runId,
       },
     }).as("queueBackup");
-    cy.intercept("GET", `/api/settings/backup/runs/${runId}`, (request) => {
-      runPollCount += 1;
-      request.reply({
-        statusCode: 200,
-        body: {
-          backup_run_id: runId,
-          trigger_kind: "MANUAL",
-          status: runPollCount === 1 ? "RUNNING" : "SUCCEEDED",
-          phase: runPollCount === 1 ? "UPLOADING" : "COMPLETE",
-          error_message: null,
-        },
-      });
-    }).as("backupRun");
+    cy.intercept(
+      {
+        method: "GET",
+        url: `/api/settings/backup/runs/${runId}`,
+        middleware: true,
+        times: 1,
+      },
+      (request) =>
+        request.reply({
+          statusCode: 200,
+          body: {
+            backup_run_id: runId,
+            trigger_kind: "MANUAL",
+            status: "RUNNING",
+            phase: "UPLOADING",
+            error_message: null,
+          },
+        }),
+    ).as("backupRunRunning");
+    cy.intercept("GET", `/api/settings/backup/runs/${runId}`, {
+      statusCode: 200,
+      body: {
+        backup_run_id: runId,
+        trigger_kind: "MANUAL",
+        status: "SUCCEEDED",
+        phase: "COMPLETE",
+        error_message: null,
+      },
+    }).as("backupRunTerminal");
     cy.intercept("GET", "/api/app/status", {
       statusCode: 200,
       body: {
@@ -165,22 +180,25 @@ describe("AppShell", () => {
       latest_import_run: null,
     };
     router.push("/transactions");
-    router.isReady().then(() => {
+    cy.wrap(router.isReady()).then(() => {
       mount(AppShell, { global: { plugins: [router] } });
       cy.contains("button", "Retry backup").click();
       cy.wait("@queueBackup");
 
       cy.tick(2000);
-      cy.wait("@backupRun");
+      cy.wait("@backupRunRunning");
       cy.wait("@appStatus");
-      cy.contains("A backup retry is in progress.").should("be.visible");
+      cy.get("[data-cy=persistent-warning-banner-root]").should(
+        "contain.text",
+        "A backup retry is in progress.",
+      );
 
       cy.tick(2000);
-      cy.wait("@backupRun");
+      cy.wait("@backupRunTerminal");
       cy.wait("@appStatus");
       cy.contains("button", "Retry backup").should("be.visible");
-      cy.get("@backupRun.all").should("have.length", 2);
-      cy.wrap(runPollCount).should("equal", 2);
+      cy.get("@backupRunRunning.all").should("have.length", 1);
+      cy.get("@backupRunTerminal.all").should("have.length", 1);
     });
   });
 });
