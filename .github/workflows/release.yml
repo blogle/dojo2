@@ -165,27 +165,15 @@ jobs:
           echo "build=$build" >> "$GITHUB_OUTPUT"
       - uses: DeterminateSystems/nix-installer-action@main
         if: steps.staging.outputs.skip != 'true' && steps.staging.outputs.build == 'true'
-      - name: Install project dependencies
+      - name: Publish or reuse exact master image
         if: steps.staging.outputs.skip != 'true' && steps.staging.outputs.build == 'true'
-        run: nix develop --command just setup
-      - name: Build missing immutable source image
-        if: steps.staging.outputs.skip != 'true' && steps.staging.outputs.build == 'true'
-        run: |
-          source_image="ghcr.io/blogle/dojo2:git-${MASTER_COMMIT}"
-          if docker manifest inspect "$source_image" >/dev/null 2>&1; then
-            echo "Source image $source_image appeared while preparing; reusing it."
-          else
-            nix develop --command just build-web
-            DOJO_BUILD_SHA="$MASTER_COMMIT" nix build .#container --impure
-            docker load < "$(readlink -f result)"
-            docker build --build-arg DOJO_BUILD_SHA="$MASTER_COMMIT" --tag "$source_image" .
-            docker push "$source_image"
-          fi
+        run: ops/container/publish-image.sh "$MASTER_COMMIT"
       - name: Move staging only when target remains current master
         if: steps.staging.outputs.skip != 'true'
         run: |
           source_image="ghcr.io/blogle/dojo2:git-${MASTER_COMMIT}"
           docker pull "$source_image"
+          ops/container/validate-image-provenance.sh "$source_image" "$MASTER_COMMIT"
           # An older delayed publication may build its exact image, but it must
           # not move staging behind the current master ref.
           remote_master="$(git ls-remote origin refs/heads/master | cut -f1)"
@@ -247,6 +235,7 @@ jobs:
           source_image="ghcr.io/blogle/dojo2:git-${MASTER_COMMIT}"
           release_image="ghcr.io/blogle/dojo2:v${VERSION}"
           docker pull "$source_image"
+          ops/container/validate-image-provenance.sh "$source_image" "$MASTER_COMMIT"
           docker tag "$source_image" "$release_image"
           docker push "$release_image"
 
