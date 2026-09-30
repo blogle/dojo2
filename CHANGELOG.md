@@ -2,9 +2,9 @@
 
 <!-- BEGIN GENERATED RELEASES -->
 
-## Unreleased
+## v0.0.13
 
-- Reuse CI container runtime content across squash merges using Git tree-addressed images.
+- DOJO-40: reuse CI image content across squash merges by @anvil-daemon[bot] in https://github.com/blogle/dojo2/pull/27
 
 ## v0.0.12
 
