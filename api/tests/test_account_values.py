@@ -288,12 +288,19 @@ def test_tracking_cutover_is_atomic_idempotent_and_activates_on_date(
                 "account_class": "INVESTMENT",
                 "name": "Brokerage",
                 "cash_balance_minor": 10_000,
-                "holdings": [],
+                "holdings": [
+                    {
+                        "ticker": "VTI",
+                        "quantity_micros": 1_000_000,
+                        "price_minor": 5_000,
+                        "average_basis_minor": 4_000,
+                    }
+                ],
             },
             {
                 "account_class": "TANGIBLE_ASSET",
                 "name": "Collectible",
-                "opening_value_minor": 20_000,
+                "opening_value_minor": 15_000,
             },
         ],
     }
@@ -322,6 +329,27 @@ def test_tracking_cutover_is_atomic_idempotent_and_activates_on_date(
     assert {account["account_id"] for account in after} == set(successor_ids)
     assert service.get_net_worth()["current_net_worth_minor"] == 30_000
     assert service.list_tracking_snapshots(tracking_id)[0]["amount_minor"] == 30_000
+    investment_successor = next(
+        account
+        for account in service.list_accounts(show_hidden=True)
+        if account["account_id"] == successor_ids[0]
+    )
+    if investment_successor["account_class"] != "INVESTMENT":
+        investment_successor = next(
+            account
+            for account in service.list_accounts(show_hidden=True)
+            if account["account_id"] == successor_ids[1]
+            and account["account_class"] == "INVESTMENT"
+        )
+    positions = service.list_investment_positions(investment_successor["account_id"])
+    assert len(positions) == 1
+    assert positions[0]["quantity_micros"] == 1_000_000
+    assert positions[0]["total_cost_basis_minor"] == 4_000
+    assert positions[0]["instrument_id"]
+    assert service.db.fetch_one(
+        "SELECT symbol FROM investment_instruments WHERE instrument_id = ?",
+        (positions[0]["instrument_id"],),
+    ) == {"symbol": "VTI"}
 
     conflicting = payload | {"successors": [payload["successors"][0] | {"name": "Changed name"}]}
     with pytest.raises(ValueError, match="different content"):
