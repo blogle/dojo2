@@ -132,9 +132,10 @@ def test_instrument_without_symbol_persists_and_can_be_held(service) -> None:
 
     assert instrument["symbol"] is None
     assert instrument in service.list_investment_instruments()
-    assert service.list_investment_positions(account_id)[0]["instrument_id"] == instrument[
-        "instrument_id"
-    ]
+    assert (
+        service.list_investment_positions(account_id)[0]["instrument_id"]
+        == instrument["instrument_id"]
+    )
 
 
 def test_explicit_duplicate_symbol_create_reuses_global_instrument(service) -> None:
@@ -142,7 +143,10 @@ def test_explicit_duplicate_symbol_create_reuses_global_instrument(service) -> N
     second = service.create_investment_instrument({"symbol": "XYZ"})
 
     assert first["instrument_id"] == second["instrument_id"]
-    assert len([item for item in service.list_investment_instruments() if item["symbol"] == "XYZ"]) == 1
+    assert (
+        len([item for item in service.list_investment_instruments() if item["symbol"] == "XYZ"])
+        == 1
+    )
 
 
 def test_explicit_instrument_and_legacy_ticker_are_shared_across_accounts(service) -> None:
@@ -205,14 +209,15 @@ def test_position_correction_requires_basis_when_quantity_changes(service) -> No
     created = service.create_investment_position(account_id, _position_payload())
     position_id = created["position_id"]
     with pytest.raises(ValueError, match="requires a resulting cost basis"):
-        service.correct_investment_position(
-            account_id, position_id, {"quantity_micros": 2_000_000}
-        )
+        service.correct_investment_position(account_id, position_id, {"quantity_micros": 2_000_000})
 
-    assert service.db.fetch_one(
-        "SELECT COUNT(*) AS count FROM investment_positions WHERE position_id = ?",
-        (position_id,),
-    )["count"] == 1
+    assert (
+        service.db.fetch_one(
+            "SELECT COUNT(*) AS count FROM investment_positions WHERE position_id = ?",
+            (position_id,),
+        )["count"]
+        == 1
+    )
     assert service.list_investment_positions(account_id)[0]["quantity_micros"] == 1_000_000
 
 
@@ -465,14 +470,20 @@ def test_statement_rejects_duplicate_resolved_instrument_before_writing(service)
             },
         )
 
-    assert service.db.fetch_one(
-        "SELECT COUNT(*) AS count FROM investment_positions WHERE account_id = ?",
-        (account_id,),
-    )["count"] == 0
-    assert service.db.fetch_one(
-        "SELECT COUNT(*) AS count FROM investment_cash_snapshots WHERE account_id = ?",
-        (account_id,),
-    )["count"] == 0
+    assert (
+        service.db.fetch_one(
+            "SELECT COUNT(*) AS count FROM investment_positions WHERE account_id = ?",
+            (account_id,),
+        )["count"]
+        == 0
+    )
+    assert (
+        service.db.fetch_one(
+            "SELECT COUNT(*) AS count FROM investment_cash_snapshots WHERE account_id = ?",
+            (account_id,),
+        )["count"]
+        == 0
+    )
 
 
 def test_price_changes_market_gain_without_reconstructing_basis(service, clock) -> None:
@@ -547,7 +558,9 @@ def test_cash_equivalent_position_and_literal_cash_are_counted_once(service) -> 
 
     statement = service.latest_investment_statement(account_id)
     sweep_holding = next(
-        holding for holding in statement["holdings"] if holding["instrument_id"] == sweep["instrument_id"]
+        holding
+        for holding in statement["holdings"]
+        if holding["instrument_id"] == sweep["instrument_id"]
     )
     assert statement["current_value_minor"] == 35_000
     assert statement["holdings_cost_basis_minor"] == 24_000

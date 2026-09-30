@@ -3996,9 +3996,7 @@ class DojoService:
                 self.clock.now(),
             ),
         )
-        return self.db.fetch_one(
-            load_sql("queries/investment_instrument_by_id"), (instrument_id,)
-        )
+        return self.db.fetch_one(load_sql("queries/investment_instrument_by_id"), (instrument_id,))
 
     def list_investment_instruments(self) -> list[dict[str, Any]]:
         return self.db.fetch_all(
@@ -4185,9 +4183,7 @@ class DojoService:
         )
         if instrument is None:
             return []
-        return self.list_investment_price_snapshots_by_instrument(
-            str(instrument["instrument_id"])
-        )
+        return self.list_investment_price_snapshots_by_instrument(str(instrument["instrument_id"]))
 
     def list_investment_price_snapshots_by_instrument(
         self, instrument_id: str
@@ -4324,7 +4320,9 @@ class DojoService:
                 (account_id, position["instrument_id"], effective_date, account_id),
             )
             if price is None:
-                raise ValueError(f"Missing statement price for {position.get('symbol') or position['instrument_id']}")
+                raise ValueError(
+                    f"Missing statement price for {position.get('symbol') or position['instrument_id']}"
+                )
             metrics = position_metrics(
                 quantity_micros=int(position["quantity_micros"]),
                 price_minor=int(price["price_minor"]),

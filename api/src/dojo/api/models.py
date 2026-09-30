@@ -390,7 +390,9 @@ class InvestmentPositionPayload(BaseModel):
     @model_validator(mode="after")
     def validate_instrument_and_basis(self) -> "InvestmentPositionPayload":
         compatibility_symbol = self.symbol if self.symbol is not None else self.ticker
-        if self.instrument_id is None and (compatibility_symbol is None or not compatibility_symbol.strip()):
+        if self.instrument_id is None and (
+            compatibility_symbol is None or not compatibility_symbol.strip()
+        ):
             raise ValueError("Provide instrument_id or a nonblank symbol/ticker")
         if self.symbol is not None and self.ticker is not None:
             if self.symbol.strip().upper() != self.ticker.strip().upper():
@@ -401,7 +403,10 @@ class InvestmentPositionPayload(BaseModel):
             self.ticker = self.ticker.strip().upper() or None
         if self.total_cost_basis_minor is None and self.average_cost_per_share_minor is None:
             raise ValueError("Provide total_cost_basis_minor or average_cost_per_share_minor")
-        if self.total_cost_basis_minor is not None and self.average_cost_per_share_minor is not None:
+        if (
+            self.total_cost_basis_minor is not None
+            and self.average_cost_per_share_minor is not None
+        ):
             derived = total_cost_basis_minor(
                 self.quantity_micros, self.average_cost_per_share_minor
             )

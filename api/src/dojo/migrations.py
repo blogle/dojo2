@@ -61,9 +61,7 @@ def _migrate_legacy_investments(
     if legacy_prices:
         legacy_symbols.update(
             row[0]
-            for row in connection.execute(
-                f"SELECT DISTINCT ticker FROM {legacy_prices}"
-            ).fetchall()
+            for row in connection.execute(f"SELECT DISTINCT ticker FROM {legacy_prices}").fetchall()
         )
     for normalized in sorted({symbol.strip().upper() for symbol in legacy_symbols}):
         source_timestamps = []
@@ -87,8 +85,19 @@ def _migrate_legacy_investments(
         )
     if legacy_positions:
         for row in connection.execute(f"SELECT * FROM {legacy_positions}").fetchall():
-            (row_id, position_id, account_id, ticker, effective_date, quantity, average_basis,
-             valid_from, valid_to, created_at, created_by) = row
+            (
+                row_id,
+                position_id,
+                account_id,
+                ticker,
+                effective_date,
+                quantity,
+                average_basis,
+                valid_from,
+                valid_to,
+                created_at,
+                created_by,
+            ) = row
             product = int(quantity) * int(average_basis)
             total_basis = product // 1_000_000
             remainder = product % 1_000_000
@@ -100,21 +109,54 @@ def _migrate_legacy_investments(
                     quantity_micros, total_cost_basis_minor, valid_from, valid_to,
                     created_at, created_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT (row_id) DO NOTHING""",
-                (row_id, position_id, account_id, _legacy_instrument_id(ticker), effective_date,
-                 quantity, total_basis, valid_from, valid_to, created_at, created_by),
+                (
+                    row_id,
+                    position_id,
+                    account_id,
+                    _legacy_instrument_id(ticker),
+                    effective_date,
+                    quantity,
+                    total_basis,
+                    valid_from,
+                    valid_to,
+                    created_at,
+                    created_by,
+                ),
             )
     if legacy_prices:
         for row in connection.execute(f"SELECT * FROM {legacy_prices}").fetchall():
-            (row_id, snapshot_id, account_id, ticker, effective_date, price, source,
-             valid_from, valid_to, created_at, created_by) = row
+            (
+                row_id,
+                snapshot_id,
+                account_id,
+                ticker,
+                effective_date,
+                price,
+                source,
+                valid_from,
+                valid_to,
+                created_at,
+                created_by,
+            ) = row
             connection.execute(
                 """INSERT INTO investment_price_snapshots
                    (row_id, snapshot_id, account_id, instrument_id, effective_date,
                     price_minor, source, valid_from, valid_to, created_at, created_by_user_id)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT (row_id) DO NOTHING""",
-                (row_id, snapshot_id, account_id, _legacy_instrument_id(ticker), effective_date,
-                 price, source, valid_from, valid_to, created_at, created_by),
+                (
+                    row_id,
+                    snapshot_id,
+                    account_id,
+                    _legacy_instrument_id(ticker),
+                    effective_date,
+                    price,
+                    source,
+                    valid_from,
+                    valid_to,
+                    created_at,
+                    created_by,
+                ),
             )
     if legacy_positions or legacy_prices:
         connection.execute(load_sql("schema/migrations/dojo15_finalize_investment_normalization"))
