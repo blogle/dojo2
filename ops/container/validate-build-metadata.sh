@@ -3,6 +3,10 @@ set -euo pipefail
 
 archive="${1:?Set the container archive path}"
 expected_sha="${2:?Set the expected full Git SHA}"
+if [[ ! "$expected_sha" =~ ^[0-9a-f]{40}$ ]]; then
+  printf 'Invalid expected Git SHA: %s\n' "$expected_sha" >&2
+  exit 2
+fi
 manifest="$(tar -xOzf "$archive" manifest.json)"
 config="$(printf '%s' "$manifest" | jq -r '.[0].Config')"
 metadata="$(tar -xOzf "$archive" "$config")"

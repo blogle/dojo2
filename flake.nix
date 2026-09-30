@@ -12,11 +12,6 @@
         pkgs = import nixpkgs {
           inherit system;
         };
-        suppliedBuildSha = builtins.getEnv "DOJO_BUILD_SHA";
-        # CI supplies the revision explicitly. "local" keeps flake evaluation and
-        # non-deployable local images usable without relying on .git in the image.
-        buildSha = if suppliedBuildSha != "" then suppliedBuildSha else "local";
-        validBuildSha = buildSha == "local" || builtins.match "[0-9a-f]{40}" buildSha != null;
         python = pkgs.python312;
         apiPython = python.withPackages (ps: [
           ps.duckdb
@@ -62,7 +57,6 @@
           exec ${apiPython}/bin/uvicorn dojo.backup_trigger_server:app --host 127.0.0.1 --port 8001
         '';
       in
-      assert validBuildSha;
       {
         devShells.default = pkgs.mkShell {
           packages = with pkgs; [
@@ -123,12 +117,8 @@
           ];
           config = {
             Cmd = [ "/bin/dojo-api" ];
-            Env = [ "DOJO_BUILD_SHA=${buildSha}" ];
             ExposedPorts = {
               "8000/tcp" = { };
-            };
-            Labels = {
-              "org.opencontainers.image.revision" = buildSha;
             };
           };
         };

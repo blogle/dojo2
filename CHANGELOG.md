@@ -2,6 +2,10 @@
 
 <!-- BEGIN GENERATED RELEASES -->
 
+## Unreleased
+
+- Reuse CI container runtime content across squash merges using Git tree-addressed images.
+
 ## v0.0.12
 
 - DOJO-34: Correct ATB accounting semantics by @anvil-daemon[bot] in https://github.com/blogle/dojo2/pull/13
