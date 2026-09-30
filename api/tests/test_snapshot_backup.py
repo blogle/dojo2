@@ -4,6 +4,8 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "ops/k8s/snapshot-backup.sh"
 RBAC = REPO_ROOT / "deploy/k8s/base/backup-rbac.yaml"
@@ -88,6 +90,166 @@ def test_missing_build_sha_fails_before_kubernetes_calls(tmp_path: Path) -> None
     assert "--status FAILED" in status_report
     assert "DOJO_BUILD_SHA must be the full 40-character lowercase Git SHA" in status_report
     assert not kubectl_marker.exists()
+
+
+@pytest.mark.parametrize(
+    ("trigger_kind", "holder_kind"),
+    [("SCHEDULED", "MANUAL"), ("MANUAL", "SCHEDULED")],
+)
+def test_lock_contention_skips_without_kubernetes_calls(
+    tmp_path: Path, trigger_kind: str, holder_kind: str
+) -> None:
+    command_dir = tmp_path / "bin"
+    command_dir.mkdir()
+    status_log = tmp_path / "status.log"
+    kubectl_marker = tmp_path / "kubectl-called"
+    token_file = tmp_path / "token"
+    token_file.write_text("token", encoding="utf-8")
+    lock_command = command_dir / "lock"
+    lock_command.write_text(
+        f"#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" >> \"$ORDER_LOG\"\n"
+        f"if [[ \"$1\" == acquire ]]; then printf '%s\\n' '{holder_kind}:run-owner owns lock' >&2; exit 3; fi\n",
+        encoding="utf-8",
+    )
+    lock_command.chmod(0o755)
+    status_command = command_dir / "status"
+    status_command.write_text(
+        "#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" >> \"$STATUS_LOG\"\n",
+        encoding="utf-8",
+    )
+    status_command.chmod(0o755)
+    kubectl_command = command_dir / "kubectl"
+    kubectl_command.write_text(
+        f"#!/usr/bin/env bash\ntouch '{kubectl_marker}'\nexit 99\n", encoding="utf-8"
+    )
+    kubectl_command.chmod(0o755)
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "PATH": f"{command_dir}:{environment['PATH']}",
+            "DOJO_BACKUP_TRIGGER_KIND": trigger_kind,
+            "DOJO_BACKUP_RUN_ID": "00000000-0000-4000-8000-000000000035",
+            "DOJO_BACKUP_STATUS_TOKEN_FILE": str(token_file),
+            "DOJO_BACKUP_STATUS_COMMAND": str(status_command),
+            "DOJO_BACKUP_LOCK_COMMAND": str(lock_command),
+            "STATUS_LOG": str(status_log),
+            "ORDER_LOG": str(tmp_path / "order.log"),
+        }
+    )
+
+    result = subprocess.run(
+        ["bash", str(SCRIPT)], capture_output=True, text=True, env=environment, check=False
+    )
+
+    assert result.returncode == 0, result.stderr
+    report = status_log.read_text(encoding="utf-8")
+    assert "--status SKIPPED" in report
+    assert "--phase LOCKED" in report
+    assert f"{holder_kind}:run-owner owns lock" in report
+    assert not kubectl_marker.exists()
+
+
+def test_renewal_loss_cleans_child_job_and_clone_before_releasing_lock(
+    tmp_path: Path,
+) -> None:
+    command_dir = tmp_path / "bin"
+    command_dir.mkdir()
+    order_log = tmp_path / "order.log"
+    status_log = tmp_path / "status.log"
+    child_job_created = tmp_path / "child-job-created"
+    token_file = tmp_path / "token"
+    token_file.write_text("token", encoding="utf-8")
+    lock_command = command_dir / "lock"
+    lock_command.write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+printf 'lock %s\\n' "$1" >> "$ORDER_LOG"
+case "$1" in
+  acquire) exit 0 ;;
+  renew)
+    for _ in $(seq 1 500); do
+      [[ -f "$CHILD_JOB_CREATED" ]] && break
+      sleep 0.01
+    done
+    [[ -f "$CHILD_JOB_CREATED" ]]
+    exit 1
+    ;;
+  release) exit 0 ;;
+esac
+""",
+        encoding="utf-8",
+    )
+    lock_command.chmod(0o755)
+    status_command = command_dir / "status"
+    status_command.write_text(
+        "#!/usr/bin/env bash\nprintf 'status %s\\n' \"$*\" >> \"$ORDER_LOG\"\n"
+        "printf '%s\\n' \"$*\" >> \"$STATUS_LOG\"\n",
+        encoding="utf-8",
+    )
+    status_command.chmod(0o755)
+    kubectl_command = command_dir / "kubectl"
+    kubectl_command.write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$*" == *" apply -f -"* ]]; then
+  body="$(</dev/stdin)"
+  if [[ "$body" == *"kind: Job"* ]]; then
+    printf 'kubectl create child-job\\n' >> "$ORDER_LOG"
+    touch "$CHILD_JOB_CREATED"
+  else
+    printf 'kubectl apply resource\\n' >> "$ORDER_LOG"
+  fi
+elif [[ "$*" == *" get pvc dojo-data "* ]]; then
+  printf 'storage-class\\n'
+elif [[ "$*" == *" get volumesnapshot "* ]]; then
+  printf 'true\\n'
+elif [[ "$*" == *" get job "* ]]; then
+  sleep 0.2
+elif [[ "$*" == *" delete job "* ]]; then
+  printf 'kubectl delete job\\n' >> "$ORDER_LOG"
+elif [[ "$*" == *" delete pvc "* ]]; then
+  printf 'kubectl delete pvc\\n' >> "$ORDER_LOG"
+else
+  printf 'unexpected kubectl: %s\\n' "$*" >&2
+  exit 98
+fi
+""",
+        encoding="utf-8",
+    )
+    kubectl_command.chmod(0o755)
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "PATH": f"{command_dir}:{environment['PATH']}",
+            "DOJO_BUILD_SHA": BUILD_SHA,
+            "DOJO_BACKUP_TRIGGER_KIND": "MANUAL",
+            "DOJO_BACKUP_RUN_ID": "00000000-0000-4000-8000-000000000037",
+            "DOJO_BACKUP_JOB_NAME": "dojo-backup-manual-test",
+            "DOJO_BACKUP_STATUS_TOKEN_FILE": str(token_file),
+            "DOJO_BACKUP_STATUS_COMMAND": str(status_command),
+            "DOJO_BACKUP_LOCK_COMMAND": str(lock_command),
+            "DOJO_BACKUP_LOCK_RENEW_INTERVAL_SECONDS": "0.05",
+            "DOJO_VOLUME_SNAPSHOT_CLASS": "snapshot-class",
+            "STATUS_LOG": str(status_log),
+            "ORDER_LOG": str(order_log),
+            "CHILD_JOB_CREATED": str(child_job_created),
+        }
+    )
+
+    result = subprocess.run(
+        ["bash", str(SCRIPT)],
+        capture_output=True,
+        text=True,
+        env=environment,
+        check=False,
+        timeout=10,
+    )
+
+    assert result.returncode != 0
+    assert child_job_created.exists()
+    events = order_log.read_text(encoding="utf-8").splitlines()
+    assert events.index("kubectl delete job") < events.index("kubectl delete pvc")
+    assert events.index("kubectl delete pvc") < events.index("lock release")
 
 
 def test_backup_script_has_no_runtime_image_discovery_path() -> None:
