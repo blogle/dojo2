@@ -532,13 +532,19 @@ def test_container_content_is_neutral_and_commit_wrapper_sets_exact_provenance()
     assert "COPY" not in wrapper_dockerfile
 
 
-def make_docker_archive(directory: str, *, env: list[str], revision: str | None) -> Path:
-    archive = Path(directory) / "image.tar.gz"
+def make_docker_archive(
+    directory: str,
+    *,
+    env: list[str],
+    revision: str | None,
+    compressed: bool,
+) -> Path:
+    archive = Path(directory) / ("image.tar.gz" if compressed else "image.tar")
     config_path = "config.json"
     labels = {} if revision is None else {"org.opencontainers.image.revision": revision}
     config = json.dumps({"config": {"Env": env, "Labels": labels}}).encode()
     manifest = json.dumps([{"Config": config_path, "RepoTags": [], "Layers": []}]).encode()
-    with tarfile.open(archive, "w:gz") as container:
+    with tarfile.open(archive, "w:gz" if compressed else "w") as container:
         for name, content in (("manifest.json", manifest), (config_path, config)):
             info = tarfile.TarInfo(name)
             info.size = len(content)
@@ -546,13 +552,18 @@ def make_docker_archive(directory: str, *, env: list[str], revision: str | None)
     return archive
 
 
-def test_final_master_image_validator_requires_exact_build_sha_and_oci_revision() -> None:
+@pytest.mark.parametrize("archive_format", ["plain-tar", "gzip"])
+def test_final_master_image_validator_requires_exact_build_sha_and_oci_revision(
+    archive_format: str,
+) -> None:
+    compressed = archive_format == "gzip"
     master_commit = "a" * 40
     with tempfile.TemporaryDirectory() as directory:
         valid_image = make_docker_archive(
             directory,
             env=[f"DOJO_BUILD_SHA={master_commit}"],
             revision=master_commit,
+            compressed=compressed,
         )
         subprocess.run(
             [str(VALIDATE_BUILD_METADATA), str(valid_image), master_commit],
@@ -565,6 +576,7 @@ def test_final_master_image_validator_requires_exact_build_sha_and_oci_revision(
             directory,
             env=[f"DOJO_BUILD_SHA={'b' * 40}"],
             revision="b" * 40,
+            compressed=compressed,
         )
         result = subprocess.run(
             [str(VALIDATE_BUILD_METADATA), str(invalid_image), master_commit],
@@ -574,9 +586,15 @@ def test_final_master_image_validator_requires_exact_build_sha_and_oci_revision(
         assert result.returncode != 0
 
 
-def test_content_image_validator_rejects_commit_specific_provenance() -> None:
+@pytest.mark.parametrize("archive_format", ["plain-tar", "gzip"])
+def test_content_image_validator_rejects_commit_specific_provenance(
+    archive_format: str,
+) -> None:
+    compressed = archive_format == "gzip"
     with tempfile.TemporaryDirectory() as directory:
-        neutral_content = make_docker_archive(directory, env=[], revision=None)
+        neutral_content = make_docker_archive(
+            directory, env=[], revision=None, compressed=compressed
+        )
         subprocess.run(
             [str(VALIDATE_CONTENT_METADATA), str(neutral_content)],
             check=True,
@@ -585,7 +603,10 @@ def test_content_image_validator_rejects_commit_specific_provenance() -> None:
         )
 
         misleading_content = make_docker_archive(
-            directory, env=[f"DOJO_BUILD_SHA={'a' * 40}"], revision="a" * 40
+            directory,
+            env=[f"DOJO_BUILD_SHA={'a' * 40}"],
+            revision="a" * 40,
+            compressed=compressed,
         )
         result = subprocess.run(
             [str(VALIDATE_CONTENT_METADATA), str(misleading_content)],

@@ -2,9 +2,9 @@
 set -euo pipefail
 
 archive="${1:?Set the container archive path}"
-manifest="$(tar -xOzf "$archive" manifest.json)"
+manifest="$(tar -xOf "$archive" manifest.json)"
 config="$(printf '%s' "$manifest" | jq -r '.[0].Config')"
-metadata="$(tar -xOzf "$archive" "$config")"
+metadata="$(tar -xOf "$archive" "$config")"
 
 jq -e '
   ([.config.Env[]? | select(startswith("DOJO_BUILD_SHA="))] | length) == 0
