@@ -28,7 +28,9 @@ from dojo.api.models import (
     ImportCommitRequest,
     ImportRequest,
     InvestmentCashSnapshotPayload,
+    InvestmentInstrumentPayload,
     InvestmentPositionPayload,
+    InvestmentPositionUpdatePayload,
     InvestmentPriceSnapshotPayload,
     InvestmentStatementPayload,
     InvestmentTransferPayload,
@@ -807,16 +809,49 @@ def assets_liabilities(request: Request) -> dict[str, Any]:
     return get_service(request).get_assets_liabilities()
 
 
+@router.post("/investment-instruments")
+def create_investment_instrument(
+    request: Request, payload: InvestmentInstrumentPayload
+) -> dict[str, Any]:
+    try:
+        return get_service(request).create_investment_instrument(payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/investment-instruments")
+def investment_instruments(request: Request) -> dict[str, Any]:
+    return {"items": get_service(request).list_investment_instruments()}
+
+
 @router.post("/accounts/{account_id}/positions")
 def create_position(
     request: Request, account_id: str, payload: "InvestmentPositionPayload"
 ) -> dict[str, Any]:
-    return get_service(request).create_investment_position(account_id, payload.model_dump())
+    try:
+        return get_service(request).create_investment_position(account_id, payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/accounts/{account_id}/positions")
 def list_positions(request: Request, account_id: str) -> dict[str, Any]:
     return {"items": get_service(request).list_investment_positions(account_id)}
+
+
+@router.put("/accounts/{account_id}/positions/{position_id}")
+def correct_position(
+    request: Request,
+    account_id: str,
+    position_id: str,
+    payload: InvestmentPositionUpdatePayload,
+) -> dict[str, Any]:
+    try:
+        return get_service(request).correct_investment_position(
+            account_id, position_id, payload.model_dump(exclude_none=True)
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/accounts/{account_id}/investment-statements")
