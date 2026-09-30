@@ -5,6 +5,7 @@ import { createRouter, createMemoryHistory } from "vue-router";
 import App from "../src/dojo/App.vue";
 import AppShell from "../src/dojo/layouts/AppShell.vue";
 import { useAppState } from "../src/dojo/state/app";
+import { nextTick } from "vue";
 
 describe("dojo app", () => {
   beforeEach(() => {
@@ -236,9 +237,11 @@ describe("dojo app", () => {
     expect(wrapper.text()).toContain("A backup retry was queued.");
   });
 
-  it("keeps retry queued until the reserved run reaches a terminal state", async () => {
+  it("polls the reserved manual run independently of aggregate latest status", async () => {
     vi.useFakeTimers();
     try {
+      const runId = "reserved-manual-run";
+      let runPollCount = 0;
       const { state } = useAppState();
       state.appStatus = {
         app: "dojo",
@@ -258,30 +261,51 @@ describe("dojo app", () => {
         latest_import_batch: null,
         latest_import_run: null,
       };
-      const statuses = [
-        state.appStatus,
-        {
-          ...state.appStatus,
-          latest_backup_run: { backup_run_id: "new-run", status: "RUNNING" },
-        },
-        {
-          ...state.appStatus,
-          backup: { ...state.appStatus.backup, state: "configured" as const },
-          latest_backup_run: { backup_run_id: "new-run", status: "SUCCEEDED" },
-        },
-      ];
       const fetchMock = vi.fn(async (input: string | URL | Request) => {
-        if (String(input) === "/api/settings/backup/run") {
+        const url = String(input);
+        if (url === "/api/settings/backup/run") {
           return {
             ok: true,
             json: async () => ({
               status: "QUEUED",
               job_name: "job",
-              run_id: "new-run",
+              run_id: runId,
             }),
           } as Response;
         }
-        return { ok: true, json: async () => statuses.shift() } as Response;
+        if (url === `/api/settings/backup/runs/${runId}`) {
+          runPollCount += 1;
+          return {
+            ok: true,
+            json: async () => ({
+              backup_run_id: runId,
+              trigger_kind: "MANUAL",
+              status: runPollCount === 1 ? "RUNNING" : "SUCCEEDED",
+              phase: runPollCount === 1 ? "UPLOADING" : "COMPLETE",
+              error_message: null,
+            }),
+          } as Response;
+        }
+        if (url === "/api/app/status") {
+          return {
+            ok: true,
+            json: async () => ({
+              ...state.appStatus,
+              backup: {
+                state: "degraded",
+                action: "retry",
+                message: "Scheduled backup failed.",
+              },
+              latest_backup_run: {
+                backup_run_id: "different-latest-run",
+                trigger_kind: "SCHEDULED",
+                status: "FAILED",
+                phase: "VERIFYING",
+              },
+            }),
+          } as Response;
+        }
+        throw new Error(`Unexpected request: ${url}`);
       });
       vi.stubGlobal("fetch", fetchMock);
       const router = createRouter({
@@ -301,11 +325,25 @@ describe("dojo app", () => {
       expect(wrapper.text()).toContain("A backup retry was queued.");
 
       await vi.advanceTimersByTimeAsync(2000);
-      expect(wrapper.text()).toContain("A backup retry was queued.");
-      await vi.advanceTimersByTimeAsync(2000);
+      await flushPromises();
+      await nextTick();
       expect(wrapper.text()).toContain("A backup retry is in progress.");
+      expect(fetchMock).toHaveBeenCalledWith(
+        `/api/settings/backup/runs/${runId}`,
+        expect.any(Object),
+      );
+      expect(state.appStatus?.latest_backup_run?.backup_run_id).toBe(
+        "different-latest-run",
+      );
+
       await vi.advanceTimersByTimeAsync(2000);
+      await flushPromises();
+      await nextTick();
+      expect(runPollCount).toBe(2);
       expect(wrapper.text()).not.toContain("A backup retry was queued.");
+      expect(
+        wrapper.findAll("button").some((button) => button.text() === "Retry backup"),
+      ).toBe(true);
     } finally {
       vi.useRealTimers();
     }
@@ -335,7 +373,19 @@ describe("dojo app", () => {
         latest_import_batch: null,
         latest_import_run: null,
       };
-      const fetchMock = vi.fn(async () => {
+      const fetchMock = vi.fn(async (input: string | URL | Request) => {
+        if (String(input) === "/api/settings/backup/runs/hydrated-run") {
+          return {
+            ok: true,
+            json: async () => ({
+              backup_run_id: "hydrated-run",
+              trigger_kind: "MANUAL",
+              status: "SUCCEEDED",
+              phase: "COMPLETE",
+              error_message: null,
+            }),
+          } as Response;
+        }
         return {
           ok: true,
           json: async () => ({
@@ -367,6 +417,11 @@ describe("dojo app", () => {
       expect(wrapper.text()).toContain("A backup retry was queued.");
       expect(wrapper.text()).not.toContain("Repair backups");
       await vi.advanceTimersByTimeAsync(2000);
+      await flushPromises();
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/settings/backup/runs/hydrated-run",
+        expect.any(Object),
+      );
       expect(fetchMock).toHaveBeenCalledWith(
         "/api/app/status",
         expect.any(Object),

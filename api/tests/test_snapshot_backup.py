@@ -43,7 +43,7 @@ def test_rendered_backup_job_uses_its_build_sha() -> None:
     assert "serviceAccountName: dojo-backup" in result.stdout
     assert "child_lock_holder='MANUAL:run-test:job=dojo-backup-test:pod=pod-test'" in result.stdout
     assert '"$child_lock_command" renew --holder "$child_lock_holder" --namespace' in result.stdout
-    assert "kill -TERM \"$child_pid\"" in result.stdout
+    assert 'kill -TERM "$child_pid"' in result.stdout
 
 
 def test_rendered_child_lock_guard_terminates_on_renewal_loss(tmp_path: Path) -> None:
@@ -57,11 +57,11 @@ def test_rendered_child_lock_guard_terminates_on_renewal_loss(tmp_path: Path) ->
     counter = tmp_path / "renew-count"
     command.write_text(
         "#!/usr/bin/env bash\n"
-        "if [[ \"$1\" == renew ]]; then\n"
+        'if [[ "$1" == renew ]]; then\n'
         f"  count=0; [[ -f '{counter}' ]] && count=\"$(< '{counter}')\"\n"
         "  count=$((count + 1))\n"
         f"  printf '%s' \"$count\" > '{counter}'\n"
-        "  [[ \"$count\" -eq 1 ]] && exit 0\n"
+        '  [[ "$count" -eq 1 ]] && exit 0\n'
         "  exit 9\n"
         "fi\n"
         "exit 0\n",
@@ -156,14 +156,14 @@ def test_lock_contention_skips_without_kubernetes_calls(
     token_file.write_text("token", encoding="utf-8")
     lock_command = command_dir / "lock"
     lock_command.write_text(
-        f"#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" >> \"$ORDER_LOG\"\n"
+        f'#!/usr/bin/env bash\nprintf \'%s\\n\' "$*" >> "$ORDER_LOG"\n'
         f"if [[ \"$1\" == acquire ]]; then printf '%s\\n' '{holder_kind}:run-owner owns lock' >&2; exit 3; fi\n",
         encoding="utf-8",
     )
     lock_command.chmod(0o755)
     status_command = command_dir / "status"
     status_command.write_text(
-        "#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" >> \"$STATUS_LOG\"\n",
+        '#!/usr/bin/env bash\nprintf \'%s\\n\' "$*" >> "$STATUS_LOG"\n',
         encoding="utf-8",
     )
     status_command.chmod(0o755)
@@ -231,8 +231,8 @@ esac
     lock_command.chmod(0o755)
     status_command = command_dir / "status"
     status_command.write_text(
-        "#!/usr/bin/env bash\nprintf 'status %s\\n' \"$*\" >> \"$ORDER_LOG\"\n"
-        "printf '%s\\n' \"$*\" >> \"$STATUS_LOG\"\n",
+        '#!/usr/bin/env bash\nprintf \'status %s\\n\' "$*" >> "$ORDER_LOG"\n'
+        'printf \'%s\\n\' "$*" >> "$STATUS_LOG"\n',
         encoding="utf-8",
     )
     status_command.chmod(0o755)
