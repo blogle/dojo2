@@ -173,6 +173,9 @@ docs-serve:
 validate-aggregates-fixture:
 	cd api && uv run python -m dojo.validation_cli --fixture
 
+dev-fixture output=".local/dev-fixture.duckdb":
+	cd api && uv run python -m dojo.dev_fixture "{{output}}"
+
 validate-reviewed-aggregates-fixture:
 	cd api && uv run python -m dojo.validation_cli --fixture --reviewed
 
