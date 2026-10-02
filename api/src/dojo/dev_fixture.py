@@ -8,6 +8,7 @@ from importlib.metadata import version
 from pathlib import Path
 
 from dojo.clock import FrozenClock
+from dojo.constants import CATEGORY_KIND_CREDIT_CARD_PAYMENT
 from dojo.database import Database
 from dojo.dev_fixture_accounts import add_development_accounts
 from dojo.dev_fixture_scenario import MERCHANTS, MONTHLY_PLANS, development_named_ranges
@@ -59,23 +60,26 @@ def build_development_database(output_path: str | Path) -> Path:
             raise RuntimeError("Development fixture failed aggregate validation")
         with service.db.transaction() as connection:
             for category in connection.execute(
-                "SELECT category_id, name FROM current_categories ORDER BY sort_order"
+                """SELECT category_id, name, category_kind FROM current_categories
+                   ORDER BY sort_order"""
             ).fetchall():
-                category_id, name = category
-                goal_type = (
-                    "ONE_TIME"
-                    if name in {"Annual Travel", "Home Project"}
-                    else "DISCRETIONARY"
-                    if name in {"Restaurants", "Hobbies", "Clothing"}
-                    else "RECURRING"
-                )
-                goal_amount = (
-                    {"Annual Travel": 150_000, "Home Project": 85_000}[name]
-                    if goal_type == "ONE_TIME"
-                    else None
-                    if goal_type == "DISCRETIONARY"
-                    else MONTHLY_PLANS.get(name, MERCHANTS.get(name, ("", 12_000))[1]) or 12_000
-                )
+                category_id, name, category_kind = category
+                goal_type = None
+                if category_kind != CATEGORY_KIND_CREDIT_CARD_PAYMENT:
+                    goal_type = (
+                        "ONE_TIME"
+                        if name in {"Annual Travel", "Home Project"}
+                        else "DISCRETIONARY"
+                        if name in {"Restaurants", "Hobbies", "Clothing"}
+                        else "RECURRING"
+                    )
+                goal_amount = None
+                if goal_type == "ONE_TIME":
+                    goal_amount = {"Annual Travel": 150_000, "Home Project": 85_000}[name]
+                elif goal_type == "RECURRING":
+                    goal_amount = (
+                        MONTHLY_PLANS.get(name, MERCHANTS.get(name, ("", 12_000))[1]) or 12_000
+                    )
                 connection.execute(
                     """UPDATE categories SET goal_type = ?, goal_amount_minor = ?,
                        goal_frequency = ?, goal_due_date = ?
