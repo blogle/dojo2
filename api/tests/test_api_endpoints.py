@@ -23,6 +23,7 @@ from tests.support.scd_invariants import (
 
 
 def provisioned_main_module(monkeypatch, tmp_path, filename: str):
+    monkeypatch.setenv("APP_ENV", "test")
     duckdb_path = tmp_path / filename
     monkeypatch.setenv("DUCKDB_PATH", str(duckdb_path))
     provision_database(str(duckdb_path))
@@ -51,7 +52,6 @@ def commit_api_budget_baseline(service, account_id: str) -> dict[str, object]:
 
 def test_app_bootstrap_and_import_flow(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("SESSION_SECRET", "test-secret")
-    monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
     monkeypatch.setenv(
         "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
     )
@@ -124,7 +124,6 @@ def test_app_bootstrap_and_import_flow(monkeypatch, tmp_path) -> None:
 
 def test_normalized_investment_instrument_and_position_mutations(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("SESSION_SECRET", "test-secret")
-    monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
     monkeypatch.setenv(
         "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
     )
@@ -218,7 +217,6 @@ def test_budget_accounts_and_net_worth_endpoints_return_validated_aggregates(
     monkeypatch, tmp_path
 ) -> None:
     monkeypatch.setenv("SESSION_SECRET", "test-secret")
-    monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
     monkeypatch.setenv(
         "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
     )
@@ -277,7 +275,6 @@ def test_budget_accounts_and_net_worth_endpoints_return_validated_aggregates(
 
 def test_bootstrap_response_stays_shell_sized(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("SESSION_SECRET", "test-secret")
-    monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
     monkeypatch.setenv(
         "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
     )
@@ -301,7 +298,6 @@ def test_bootstrap_response_stays_shell_sized(monkeypatch, tmp_path) -> None:
 
 def test_transactions_endpoint_returns_bounded_sorted_pages(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("SESSION_SECRET", "test-secret")
-    monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
     monkeypatch.setenv(
         "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
     )
@@ -336,7 +332,6 @@ def test_transactions_endpoint_returns_bounded_sorted_pages(monkeypatch, tmp_pat
 
 def test_transaction_memo_suggestions_are_fuzzy_and_bounded(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("SESSION_SECRET", "test-secret")
-    monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
     monkeypatch.setenv(
         "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
     )
@@ -364,7 +359,6 @@ def test_transaction_memo_suggestions_are_fuzzy_and_bounded(monkeypatch, tmp_pat
 
 def test_transactions_endpoint_filters_by_account_with_status_counts(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("SESSION_SECRET", "test-secret")
-    monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
     monkeypatch.setenv(
         "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
     )
@@ -404,7 +398,6 @@ def test_account_transaction_summary_is_aggregated_server_side(monkeypatch, tmp_
     from collections import defaultdict
 
     monkeypatch.setenv("SESSION_SECRET", "test-secret")
-    monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
     monkeypatch.setenv(
         "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
     )
@@ -460,7 +453,6 @@ def test_account_transaction_summary_is_aggregated_server_side(monkeypatch, tmp_
 
 def test_account_balance_trend_is_sampled_server_side(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("SESSION_SECRET", "test-secret")
-    monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
     monkeypatch.setenv(
         "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
     )
@@ -499,7 +491,6 @@ def test_account_balance_trend_is_sampled_server_side(monkeypatch, tmp_path) -> 
 
 def test_transactions_endpoint_rejects_unsupported_sort_fields(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("SESSION_SECRET", "test-secret")
-    monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
     monkeypatch.setenv(
         "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
     )
@@ -513,9 +504,8 @@ def test_transactions_endpoint_rejects_unsupported_sort_fields(monkeypatch, tmp_
         assert response.status_code == 422
 
 
-def test_google_start_endpoint_reports_fixture_mode_without_oauth(monkeypatch, tmp_path) -> None:
+def test_google_start_endpoint_reports_unconfigured_without_oauth(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("SESSION_SECRET", "test-secret")
-    monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
     monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_ID", "")
     monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_SECRET", "")
     monkeypatch.setenv("GOOGLE_OAUTH_REDIRECT_URI", "")
@@ -526,7 +516,7 @@ def test_google_start_endpoint_reports_fixture_mode_without_oauth(monkeypatch, t
         assert response.status_code == 200
         payload = response.json()
         assert payload["configured"] is False
-        assert payload["fixture_mode"] is True
+        assert "fixture_mode" not in payload
         assert payload["authorized"] is False
 
 
@@ -769,7 +759,6 @@ def test_google_callback_completes_for_the_initiating_frontend_origin(
 
 def test_delete_then_restore_preserves_transaction_id(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("SESSION_SECRET", "test-secret")
-    monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
     monkeypatch.setenv(
         "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
     )
@@ -825,7 +814,6 @@ def test_delete_then_restore_preserves_transaction_id(monkeypatch, tmp_path) -> 
 
 def test_restore_missing_transaction_returns_404(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("SESSION_SECRET", "test-secret")
-    monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
     monkeypatch.setenv(
         "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
     )
@@ -846,7 +834,6 @@ def test_restore_missing_transaction_returns_404(monkeypatch, tmp_path) -> None:
 
 def test_restore_already_active_transaction_returns_400(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("SESSION_SECRET", "test-secret")
-    monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
     monkeypatch.setenv(
         "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
     )
@@ -874,7 +861,6 @@ def test_restore_already_active_transaction_returns_400(monkeypatch, tmp_path) -
 
 def test_import_results_in_entry_order_values_matching_source_order(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("SESSION_SECRET", "test-secret")
-    monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
     monkeypatch.setenv(
         "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
     )
@@ -905,7 +891,6 @@ def test_import_results_in_entry_order_values_matching_source_order(monkeypatch,
 
 def test_same_date_transactions_maintain_entry_order(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("SESSION_SECRET", "test-secret")
-    monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
     monkeypatch.setenv(
         "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
     )
@@ -936,7 +921,6 @@ def test_same_date_transactions_maintain_entry_order(monkeypatch, tmp_path) -> N
 
 def test_analyze_import_draft_returns_review_items(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("SESSION_SECRET", "test-secret")
-    monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
     monkeypatch.setenv(
         "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
     )
@@ -964,7 +948,6 @@ def test_analyze_import_draft_returns_review_items(monkeypatch, tmp_path) -> Non
 
 def test_commit_import_draft_imports_data(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("SESSION_SECRET", "test-secret")
-    monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
     monkeypatch.setenv(
         "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
     )
@@ -1011,7 +994,6 @@ def test_commit_import_draft_imports_data(monkeypatch, tmp_path) -> None:
 
 def test_transaction_update_rejects_stale_version(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("SESSION_SECRET", "test-secret")
-    monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
     monkeypatch.setenv(
         "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
     )
@@ -1056,7 +1038,6 @@ def test_transaction_update_rejects_stale_version(monkeypatch, tmp_path) -> None
 
 def test_transaction_update_preserves_scd_history_and_derived_state(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("SESSION_SECRET", "test-secret")
-    monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
     monkeypatch.setenv(
         "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
     )
@@ -1196,7 +1177,6 @@ def test_transaction_update_preserves_scd_history_and_derived_state(monkeypatch,
 
 def test_transaction_update_protected_history_contract(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("SESSION_SECRET", "test-secret")
-    monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
     monkeypatch.setenv(
         "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
     )
@@ -1271,7 +1251,6 @@ def test_transaction_update_protected_history_contract(monkeypatch, tmp_path) ->
 
 def test_transaction_delete_protected_history_contract(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("SESSION_SECRET", "test-secret")
-    monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
     monkeypatch.setenv(
         "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
     )
@@ -1338,7 +1317,6 @@ def test_transaction_delete_protected_history_contract(monkeypatch, tmp_path) ->
 
 def test_reconciliation_undo_endpoint_is_latest_only(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("SESSION_SECRET", "test-secret")
-    monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
     monkeypatch.setenv(
         "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
     )
@@ -1399,7 +1377,6 @@ def test_reconciliation_undo_endpoint_is_latest_only(monkeypatch, tmp_path) -> N
 
 def test_reviewed_import_requires_complete_decisions(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("SESSION_SECRET", "test-secret")
-    monkeypatch.setenv("DEV_FIXTURE_MODE", "true")
     monkeypatch.setenv(
         "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
     )
