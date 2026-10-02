@@ -59,7 +59,7 @@ def add_development_accounts(connection: DuckDBPyConnection, now: datetime) -> N
             "rate_type": "FIXED",
             "scheduled_principal_interest_minor": 31_500,
             "payment_frequency": "MONTHLY",
-            "next_payment_date": date(2026, 7, 15),
+            "next_payment_date": date(2026, 10, 15),
             "maturity_date": date(2031, 5, 1),
             "remaining_term_months": 58,
             "recurring_extra_principal_minor": 0,
@@ -80,7 +80,7 @@ def add_development_accounts(connection: DuckDBPyConnection, now: datetime) -> N
         (instrument_id, "CASH", "Brokerage cash", now),
     )
 
-    for month in range(1, 7):
+    for month in range(1, 10):
         effective_date = date(2026, month, monthrange(2026, month)[1])
         _snapshot(
             connection,

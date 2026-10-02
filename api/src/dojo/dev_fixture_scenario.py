@@ -121,11 +121,12 @@ def development_named_ranges() -> dict[str, NamedRangeMatrix]:
     allocation_from: list[str] = []
     allocation_to: list[str] = []
     allocation_memos: list[str] = []
-    for month in range(1, 7):
+    for month in range(1, 11):
         last_day = monthrange(2026, month)[1]
         transaction(date(2026, month, 1), ACCOUNTS[0], 315_000, "ATB", "Juniper Works payroll")
-        transaction(date(2026, month, 15), ACCOUNTS[0], 315_000, "ATB", "Juniper Works payroll")
-        transaction(date(2026, month, 20), ACCOUNTS[0], 42_000, "ATB", "Studio North contract")
+        if month < 10:
+            transaction(date(2026, month, 15), ACCOUNTS[0], 315_000, "ATB", "Juniper Works payroll")
+            transaction(date(2026, month, 20), ACCOUNTS[0], 42_000, "ATB", "Studio North contract")
 
         # Several goals remain unfunded to demonstrate an upcoming shortfall.
         for category_name in MERCHANTS:
@@ -148,10 +149,14 @@ def development_named_ranges() -> dict[str, NamedRangeMatrix]:
             # low-frequency annual and project categories look artificially busy.
             if category_index >= 23 and month not in {2, 4, 6}:
                 continue
-            day = min(3 + (category_index * 3) % 24, last_day)
+            day = (
+                min(1 + category_index % 2, last_day)
+                if month == 10
+                else min(3 + (category_index * 3) % 24, last_day)
+            )
             use_card = category_index % 3 == 1
             account = ACCOUNTS[3] if use_card else ACCOUNTS[0]
-            pending = month == 6 and category_name in {"Groceries", "Fuel"}
+            pending = month in {6, 10} and category_name in {"Groceries", "Fuel"}
             actual_amount = amount + ((month + category_index) % 4) * 350
             if category_name == "Rent":
                 actual_amount = amount
@@ -166,7 +171,7 @@ def development_named_ranges() -> dict[str, NamedRangeMatrix]:
 
         for occurrence in range(1, 5):
             transaction(
-                date(2026, month, 4 + occurrence * 5),
+                date(2026, month, 2 if month == 10 else 4 + occurrence * 5),
                 ACCOUNTS[0],
                 -(18_000 + occurrence * 175),
                 "Groceries",
@@ -174,7 +179,7 @@ def development_named_ranges() -> dict[str, NamedRangeMatrix]:
             )
         for occurrence in range(1, 3):
             transaction(
-                date(2026, month, 8 + occurrence * 9),
+                date(2026, month, 2 if month == 10 else 8 + occurrence * 9),
                 ACCOUNTS[3],
                 -(4_600 + occurrence * 225),
                 "Restaurants",

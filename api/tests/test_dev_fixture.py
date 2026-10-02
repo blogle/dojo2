@@ -59,6 +59,10 @@ def test_development_fixture_is_deterministic_and_financially_coherent(tmp_path)
             "2026-04",
             "2026-05",
             "2026-06",
+            "2026-07",
+            "2026-08",
+            "2026-09",
+            "2026-10",
         }
         transfers = [
             row["amount_minor"] for row in first_rows if row["system_category"] == "TRANSFER"
@@ -82,7 +86,7 @@ def test_development_fixture_is_deterministic_and_financially_coherent(tmp_path)
 
         service = DojoService(
             str(first_path),
-            clock=FrozenClock(datetime(2026, 7, 1, 12, tzinfo=timezone.utc), date(2026, 7, 1)),
+            clock=FrozenClock(datetime(2026, 10, 2, 12, tzinfo=timezone.utc), date(2026, 10, 2)),
         )
         try:
             for account in service.list_accounts(show_hidden=True):
@@ -107,15 +111,15 @@ def test_development_fixture_is_deterministic_and_financially_coherent(tmp_path)
                 "LOAN",
                 "TANGIBLE_ASSET",
             }
-            june_categories = {
+            current_categories = {
                 row["name"]: row
-                for row in service.list_categories(month="2026-06", show_hidden=True)
+                for row in service.list_categories(month="2026-10", show_hidden=True)
             }
-            assert june_categories["Groceries"]["available_minor"] < 0
-            assert june_categories["Rent"]["available_minor"] >= 0
-            assert june_categories["Annual Travel"]["month_activity_minor"] == 0
-            assert june_categories["Auto Loan Payment"]["goal_type"] == "RECURRING"
-            assert june_categories["Cedar Card Payment"]
+            assert current_categories["Groceries"]["available_minor"] < 0
+            assert current_categories["Rent"]["available_minor"] >= 0
+            assert current_categories["Annual Travel"]["month_activity_minor"] == 0
+            assert current_categories["Auto Loan Payment"]["goal_type"] == "RECURRING"
+            assert current_categories["Cedar Card Payment"]
 
             unlinked_valuations = first.fetch_all(
                 """SELECT valuation.account_id FROM current_net_worth_valuations AS valuation
