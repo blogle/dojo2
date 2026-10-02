@@ -26,9 +26,17 @@ def development_fixture_fingerprint() -> str:
         module_dir / "dev_fixture_scenario.py",
         module_dir / "dev_fixture_accounts.py",
         module_dir / "migrations.py",
+        module_dir / "database.py",
+        module_dir / "clock.py",
+        module_dir / "constants.py",
+        module_dir / "money.py",
+        module_dir / "importer.py",
+        module_dir / "aggregate_validation.py",
+        module_dir / "scd.py",
+        module_dir / "service.py",
     ):
         digest.update(source.read_bytes())
-    for source in sorted((module_dir / "sql" / "schema").rglob("*.sql")):
+    for source in sorted((module_dir / "sql").rglob("*.sql")):
         digest.update(str(source.relative_to(module_dir)).encode("utf-8"))
         digest.update(source.read_bytes())
     return digest.hexdigest()
