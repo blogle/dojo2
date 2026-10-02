@@ -58,6 +58,28 @@ def build_development_database(output_path: str | Path) -> Path:
         )
         if not result["ok"]:
             raise RuntimeError("Development fixture failed aggregate validation")
+        edit_target = service.db.fetch_one(
+            """SELECT tx.transaction_id, tx.row_id, tx.date, tx.account_id, tx.amount_minor,
+                      tx.category_id, tx.status
+               FROM current_transactions AS tx
+               JOIN current_categories AS category USING (category_id)
+               WHERE category.name = 'Books' ORDER BY tx.date LIMIT 1"""
+        )
+        if edit_target is None:
+            raise RuntimeError("Development fixture is missing its historical edit example")
+        service.update_transaction(
+            edit_target["transaction_id"],
+            {
+                "expected_version": edit_target["row_id"],
+                "date": edit_target["date"],
+                "account_id": edit_target["account_id"],
+                "amount_minor": edit_target["amount_minor"],
+                "category_id": edit_target["category_id"],
+                "system_category": None,
+                "status": edit_target["status"],
+                "memo": "Papertrail Books purchase; memo corrected",
+            },
+        )
         with service.db.transaction() as connection:
             for category in connection.execute(
                 """SELECT category_id, name, category_kind FROM current_categories
