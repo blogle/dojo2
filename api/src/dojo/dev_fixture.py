@@ -108,7 +108,9 @@ def build_development_database(output_path: str | Path) -> Path:
                     goal_amount = {"Annual Travel": 150_000, "Home Project": 85_000}[name]
                 elif goal_type == "RECURRING":
                     goal_amount = (
-                        MONTHLY_PLANS.get(name, MERCHANTS.get(name, ("", 12_000))[1]) or 12_000
+                        24_000
+                        if name == "Auto Loan Payment"
+                        else MONTHLY_PLANS.get(name, MERCHANTS.get(name, ("", 12_000))[1]) or 12_000
                     )
                 connection.execute(
                     """UPDATE categories SET goal_type = ?, goal_amount_minor = ?,

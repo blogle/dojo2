@@ -51,7 +51,7 @@ def test_development_fixture_is_deterministic_and_financially_coherent(tmp_path)
             """SELECT valuation_id, account_id, effective_date, amount_minor
                FROM current_net_worth_valuations ORDER BY effective_date, raw_name"""
         )
-        assert len(first_rows) >= 200
+        assert 200 <= len(first_rows) < 1_000
         assert {row["date"].strftime("%Y-%m") for row in first_rows} == {
             "2026-01",
             "2026-02",
@@ -119,6 +119,8 @@ def test_development_fixture_is_deterministic_and_financially_coherent(tmp_path)
             assert current_categories["Rent"]["available_minor"] >= 0
             assert current_categories["Annual Travel"]["month_activity_minor"] == 0
             assert current_categories["Auto Loan Payment"]["goal_type"] == "RECURRING"
+            assert current_categories["Auto Loan Payment"]["goal_amount_minor"] == 24_000
+            assert current_categories["Auto Loan Payment"]["month_budgeted_minor"] == 0
             assert current_categories["Cedar Card Payment"]
 
             unlinked_valuations = first.fetch_all(

@@ -127,6 +127,13 @@ def development_named_ranges() -> dict[str, NamedRangeMatrix]:
         if month < 10:
             transaction(date(2026, month, 15), ACCOUNTS[0], 315_000, "ATB", "Juniper Works payroll")
             transaction(date(2026, month, 20), ACCOUNTS[0], 42_000, "ATB", "Studio North contract")
+            transaction(
+                date(2026, month, 16),
+                ACCOUNTS[0],
+                -31_500,
+                "Auto Loan Payment",
+                "Cedar Auto Loan scheduled payment",
+            )
 
         # Several goals remain unfunded to demonstrate an upcoming shortfall.
         for category_name in MERCHANTS:
