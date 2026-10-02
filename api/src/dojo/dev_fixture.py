@@ -58,11 +58,9 @@ def build_development_database(output_path: str | Path) -> Path:
         if not result["ok"]:
             raise RuntimeError("Development fixture failed aggregate validation")
         with service.db.transaction() as connection:
-            for category in (
-                connection.execute(
-                    "SELECT category_id, name FROM current_categories ORDER BY sort_order"
-                ).fetchall()
-            ):
+            for category in connection.execute(
+                "SELECT category_id, name FROM current_categories ORDER BY sort_order"
+            ).fetchall():
                 category_id, name = category
                 goal_type = (
                     "ONE_TIME"
