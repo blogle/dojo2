@@ -65,6 +65,11 @@ def test_development_fixture_is_deterministic_and_financially_coherent(tmp_path)
         ]
         assert sum(transfers) == 0
         assert {row["status"] for row in first_rows} == {"CLEARED", "PENDING"}
+        historical_edits = first.fetch_one(
+            """SELECT COUNT(*) AS count FROM transactions
+               WHERE valid_to <> TIMESTAMPTZ '9999-12-31 23:59:59+00'"""
+        )
+        assert historical_edits is not None and historical_edits["count"] >= 1
 
         categories = first.fetch_all("SELECT name, goal_type FROM current_categories")
         assert len(categories) >= 30
