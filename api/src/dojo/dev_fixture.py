@@ -15,7 +15,7 @@ from dojo.dev_fixture_scenario import MERCHANTS, MONTHLY_PLANS, development_name
 from dojo.migrations import apply_migrations
 from dojo.service import DojoService
 
-FIXTURE_TIME = datetime(2026, 7, 1, 12, tzinfo=timezone.utc)
+FIXTURE_TIME = datetime(2026, 10, 2, 12, tzinfo=timezone.utc)
 
 
 def development_fixture_fingerprint() -> str:
@@ -47,7 +47,7 @@ def build_development_database(output_path: str | Path) -> Path:
 
     service = DojoService(
         str(output),
-        clock=FrozenClock(FIXTURE_TIME, business_date=date(2026, 7, 1)),
+        clock=FrozenClock(FIXTURE_TIME, business_date=date(2026, 10, 2)),
     )
     try:
         result = service.import_sheet_data(
