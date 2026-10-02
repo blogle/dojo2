@@ -124,7 +124,6 @@ def oauth_status_payload(request: Request) -> dict[str, Any]:
     has_backup_credential = get_service(request).has_backup_credential()
     return {
         "configured": settings.oauth_configured,
-        "fixture_mode": settings.dev_fixture_mode,
         "authorized": token is not None
         and GOOGLE_SHEETS_READONLY_SCOPE in token.get(DOJO_GRANTED_SCOPES_KEY, ()),
         "backup_authorized": has_backup_credential,
@@ -396,11 +395,10 @@ def import_google_sheet(request: Request, payload: ImportRequest) -> dict[str, A
     settings = get_settings(request)
     service = get_service(request)
     raw = payload.sheet_url_or_id
-    normalized = raw.strip().casefold()
-    if normalized in {"fixture", "fixture://default", "default"} or (
-        settings.dev_fixture_mode and settings.app_env != "e2e" and not settings.oauth_configured
-    ):
-        return service.import_sheet_data(source="fixture://default", source_kind="fixture")
+    # Integration tests retain a workbook-shaped parser seam; development selects
+    # the generated DuckDB file through DUCKDB_PATH instead of this endpoint.
+    if settings.app_env == "test" and raw == "fixture://default":
+        return service.import_sheet_data(source="test-fixture", source_kind="fixture")
 
     session_id = get_or_create_oauth_session_id(request)
     token = get_oauth_token_store(request).get(session_id)
@@ -446,11 +444,8 @@ def analyze_google_sheet(request: Request, payload: ImportRequest) -> dict[str, 
     settings = get_settings(request)
     service = get_service(request)
     raw = payload.sheet_url_or_id
-    normalized = raw.strip().casefold()
-    if normalized in {"fixture", "fixture://default", "default"} or (
-        settings.dev_fixture_mode and settings.app_env != "e2e" and not settings.oauth_configured
-    ):
-        return service.analyze_import_draft(source="fixture://default", source_kind="fixture")
+    if settings.app_env == "test" and raw == "fixture://default":
+        return service.analyze_import_draft(source="test-fixture", source_kind="fixture")
 
     session_id = get_or_create_oauth_session_id(request)
     token = get_oauth_token_store(request).get(session_id)

@@ -169,7 +169,7 @@ Before claiming the feature complete, run:
 
 ## Validation and Acceptance
 
-Milestone 1 is accepted when a fresh database provisions successfully, importing `fixture://default` succeeds, existing budget and net-worth fixture assertions still pass, and new tests prove the following behavior:
+Milestone 1 is accepted when a fresh database provisions successfully, test parser coverage succeeds, existing budget and net-worth invariants still pass, and new tests prove the following behavior:
 
 - Aspire budget accounts import as `BUDGET` accounts.
 - Aspire non-duplicate net-worth categories import as `TRACKING` accounts, not richer entities.

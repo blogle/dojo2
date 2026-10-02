@@ -52,9 +52,9 @@ def run_validation(args: argparse.Namespace, duckdb_path: Path) -> dict[str, Any
         if args.fixture:
             if args.reviewed:
                 return _run_reviewed_validation(
-                    service, source="fixture://default", source_kind="fixture"
+                    service, source="test-fixture", source_kind="fixture"
                 )
-            result = service.import_sheet_data(source="fixture://default", source_kind="fixture")
+            result = service.import_sheet_data(source="test-fixture", source_kind="fixture")
             return dict(result["validation_report"])
 
         payload = json.loads(Path(args.fetch_dump).read_text())

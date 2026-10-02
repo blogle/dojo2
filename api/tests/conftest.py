@@ -21,6 +21,6 @@ def service(tmp_path, clock: MutableClock) -> DojoService:
 
 @pytest.fixture
 def imported_service(service: DojoService) -> DojoService:
-    result = service.import_sheet_data(source="fixture://default", source_kind="fixture")
+    result = service.import_sheet_data(source="test-fixture", source_kind="fixture")
     assert result["ok"] is True
     return service

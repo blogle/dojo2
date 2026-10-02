@@ -52,7 +52,7 @@ def imported_service_context() -> Iterator[tuple[DojoService, MutableClock]]:
         duckdb_path = Path(temp_dir) / "property.duckdb"
         provision_database(str(duckdb_path))
         service = DojoService(str(duckdb_path), clock=clock)
-        result = service.import_sheet_data(source="fixture://default", source_kind="fixture")
+        result = service.import_sheet_data(source="test-fixture", source_kind="fixture")
         assert result["ok"] is True
         try:
             yield service, clock

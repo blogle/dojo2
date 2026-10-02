@@ -320,7 +320,7 @@ def test_net_worth_duplicate_matching_normalizes_names(service: DojoService) -> 
 
 
 def test_net_worth_rows_are_always_labeled(service: DojoService) -> None:
-    result = service.import_sheet_data(source="fixture://default", source_kind="fixture")
+    result = service.import_sheet_data(source="test-fixture", source_kind="fixture")
     assert result["ok"] is True
 
     net_worth = service.get_net_worth()

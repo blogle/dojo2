@@ -243,7 +243,7 @@ class TestApiBenchmarks:
         duckdb_path = tmp_path / "bench-api.duckdb"
         os.environ["DUCKDB_PATH"] = str(duckdb_path)
         os.environ["SESSION_SECRET"] = "bench-secret"
-        os.environ["DEV_FIXTURE_MODE"] = "true"
+        os.environ["APP_ENV"] = "test"
         os.environ["GOOGLE_OAUTH_REDIRECT_URI"] = (
             "http://localhost:8000/api/onboarding/google/callback"
         )

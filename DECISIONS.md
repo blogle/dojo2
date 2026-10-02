@@ -1,5 +1,19 @@
 # Decisions
 
+## 2026-10-02 — Select synthetic development data through the normal DuckDB path
+
+### Context
+
+The importer-specific development fixture was small and made development rely on an onboarding URI, even though the application already selects its database through `DUCKDB_PATH`. That coupled sample-data selection to migration behavior and did not exercise current account and budget surfaces with realistic history.
+
+### Decision
+
+Generate an independently authored synthetic scenario as a normal DuckDB file using explicit schema provisioning and fixture population. Developers select the generated file with `DUCKDB_PATH`; normal development and production have no fixture-specific URI or automatic seeding protocol. The legacy workbook-shaped parser seam is restricted to `APP_ENV=test` for importer/API tests.
+
+### Consequence
+
+The generator is a deterministic local reset path, not a checked-in database. Empty databases still follow real onboarding, and E2E scenario databases remain independently built through the existing explicit baseline/reset workflow.
+
 ## 2026-09-17 — Explain Available to budget without redefining its scope
 
 ### Context

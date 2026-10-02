@@ -20,6 +20,7 @@ Use the root `justfile` as the only routine command interface.
 | `just setup` | Sync backend and frontend dependencies |
 | `just dev` | Print the canonical local run commands |
 | `just api` | Provision the API database and start FastAPI |
+| `just dev-fixture [output]` | Generate or reset the deterministic synthetic development DuckDB |
 | `just web` | Start the Vue development server |
 | `just build` | Build backend and frontend artifacts |
 | `just format` | Apply formatting fixes |
@@ -158,7 +159,8 @@ Backend integration and property tests use real DuckDB with explicit provisionin
 - `api/tests/conftest.py` provisions a temporary DuckDB database for each test.
 - `api/tests/support/clock.py` provides a mutable deterministic clock.
 - `api/tests/support/scd_invariants.py` provides reusable SCD2 history assertions.
-- `fixture://default` is the canonical sanitized import fixture used by automated tests.
+- Use `just dev-fixture` to build or reset `api/.local/dev-fixture.duckdb`, then run `DUCKDB_PATH=.local/dev-fixture.duckdb just api`. The fixture is generated locally and is never stored as a mutable repository database.
+- The importer-only fixture URI remains available to API tests under `APP_ENV=test` as a parser seam; it is not accepted by normal development or production app environments.
 
 Tests must not depend on:
 
