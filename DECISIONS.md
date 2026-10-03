@@ -8,7 +8,7 @@ The importer-specific development fixture was small and made development rely on
 
 ### Decision
 
-Generate an independently authored synthetic scenario as a normal DuckDB file using explicit schema provisioning and fixture population. Developers select the generated file with `DUCKDB_PATH`; normal development and production have no fixture-specific URI or automatic seeding protocol. The legacy workbook-shaped parser seam is restricted to `APP_ENV=test` for importer/API tests.
+Generate an independently authored synthetic scenario as a normal DuckDB file using explicit schema provisioning and fixture population. Developers select the generated file with `DUCKDB_PATH`; normal development and production have no fixture-specific URI or automatic seeding protocol. API import tests inject OAuth state and mock Google named-range fetching; importer unit tests may pass workbook-shaped test data directly to parser/service entrypoints.
 
 ### Consequence
 
