@@ -392,14 +392,8 @@ def google_callback(request: Request, code: str, state: str) -> HTMLResponse:
 
 @router.post("/import/google-sheet")
 def import_google_sheet(request: Request, payload: ImportRequest) -> dict[str, Any]:
-    settings = get_settings(request)
     service = get_service(request)
     raw = payload.sheet_url_or_id
-    # Integration tests retain a workbook-shaped parser seam; development selects
-    # the generated DuckDB file through DUCKDB_PATH instead of this endpoint.
-    if settings.app_env == "test" and raw == "fixture://default":
-        return service.import_sheet_data(source="test-fixture", source_kind="fixture")
-
     session_id = get_or_create_oauth_session_id(request)
     token = get_oauth_token_store(request).get(session_id)
     if token is None:
@@ -441,12 +435,8 @@ def import_status(request: Request) -> dict[str, Any]:
 
 @router.post("/import/google-sheet/analyze")
 def analyze_google_sheet(request: Request, payload: ImportRequest) -> dict[str, Any]:
-    settings = get_settings(request)
     service = get_service(request)
     raw = payload.sheet_url_or_id
-    if settings.app_env == "test" and raw == "fixture://default":
-        return service.analyze_import_draft(source="test-fixture", source_kind="fixture")
-
     session_id = get_or_create_oauth_session_id(request)
     token = get_oauth_token_store(request).get(session_id)
     if token is None:

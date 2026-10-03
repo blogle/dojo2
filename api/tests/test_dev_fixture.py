@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
+from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
+import dojo.dev_fixture as dev_fixture
 from dojo.api.main import create_app
 from dojo.api.settings import Settings
 from dojo.clock import FrozenClock
@@ -83,6 +86,12 @@ def test_development_fixture_is_deterministic_and_financially_coherent(tmp_path)
             "DISCRETIONARY",
         }
         assert len(first.fetch_all("SELECT * FROM current_category_groups")) >= 8
+        assert {
+            row["goal_frequency"]
+            for row in first.fetch_all(
+                "SELECT goal_frequency FROM current_categories WHERE goal_type = 'RECURRING'"
+            )
+        } >= {"MONTHLY", "YEARLY", "EVERY_6_MONTHS"}
 
         service = DojoService(
             str(first_path),
@@ -119,9 +128,74 @@ def test_development_fixture_is_deterministic_and_financially_coherent(tmp_path)
             assert current_categories["Rent"]["available_minor"] >= 0
             assert current_categories["Annual Travel"]["month_activity_minor"] == 0
             assert current_categories["Auto Loan Payment"]["goal_type"] == "RECURRING"
-            assert current_categories["Auto Loan Payment"]["goal_amount_minor"] == 24_000
+            assert current_categories["Auto Loan Payment"]["goal_amount_minor"] == 31_500
             assert current_categories["Auto Loan Payment"]["month_budgeted_minor"] == 0
-            assert current_categories["Cedar Card Payment"]
+            assert current_categories["Auto Loan Payment"]["goal_frequency"] == "MONTHLY"
+            assert current_categories["Rent"]["goal_frequency"] == "MONTHLY"
+            assert current_categories["Rent"]["goal_due_date"] == date(2026, 10, 5)
+            assert current_categories["Rent"]["monthly_funding_minor"] == 145_000
+            assert current_categories["Auto Loan Payment"]["goal_due_date"] == date(2026, 10, 15)
+            assert current_categories["Auto Loan Payment"]["available_minor"] < 0
+            assert current_categories["Insurance"]["goal_frequency"] == "YEARLY"
+            assert current_categories["Insurance"]["goal_due_date"] == date(2027, 2, 15)
+            assert current_categories["Insurance"]["monthly_funding_minor"] == 10_416
+            assert current_categories["School"]["goal_frequency"] == "EVERY_6_MONTHS"
+            assert current_categories["School"]["goal_due_date"] == date(2027, 2, 1)
+            assert current_categories["School"]["monthly_funding_minor"] == 5_000
+
+            annual_travel = current_categories["Annual Travel"]
+            assert annual_travel["starting_available_minor"] > 0
+            assert annual_travel["month_budgeted_minor"] > 0
+            assert 0 < annual_travel["available_minor"] < annual_travel["goal_amount_minor"]
+            assert annual_travel["monthly_funding_minor"] == 75_000
+            home_project = current_categories["Home Project"]
+            assert home_project["goal_type"] == "ONE_TIME"
+            assert home_project["available_minor"] == 0
+            assert home_project["goal_amount_minor"] == 85_000
+            assert home_project["monthly_funding_minor"] == 85_000
+
+            for category_name in ("Rent", "Annual Travel"):
+                category = current_categories[category_name]
+                assert category["available_minor"] == (
+                    category["starting_available_minor"]
+                    + category["month_budgeted_minor"]
+                    + category["month_activity_minor"]
+                )
+
+            budget = service.get_budget("2026-10", show_hidden=True)
+            atb = service.compute_available_to_budget()
+            explanation = service.explain_available_to_budget(month="2026-10")
+            assert budget["available_to_budget_minor"] == atb
+            assert explanation["available_to_budget_minor"] == atb
+            assert sum(component["amount_minor"] for component in explanation["components"]) == atb
+
+            accounts_by_name = {
+                account["name"]: account for account in service.list_accounts(show_hidden=True)
+            }
+            card_payment = current_categories["Cedar Card Payment"]
+            card_account_id = accounts_by_name["Cedar Card"]["account_id"]
+            assert card_payment["linked_account_id"] == card_account_id
+            assert card_payment["available_minor"] > 0
+            card_purchases = first.fetch_one(
+                """SELECT COUNT(*) AS count, SUM(amount_minor) AS amount
+                   FROM current_transactions
+                   WHERE account_id = ? AND category_id IS NOT NULL""",
+                (card_account_id,),
+            )
+            assert card_purchases is not None
+            assert card_purchases["count"] > 0 and card_purchases["amount"] < 0
+            payment_legs = first.fetch_all(
+                """SELECT account.name, transaction.amount_minor
+                   FROM current_transactions AS transaction
+                   JOIN current_accounts AS account USING (account_id)
+                   WHERE transaction.date = DATE '2026-06-25'
+                     AND transaction.system_category = 'TX_ACCOUNT_TRANSFER'
+                     AND transaction.memo IN ('Cedar card payment', 'Payment received')"""
+            )
+            assert {row["name"]: row["amount_minor"] for row in payment_legs} == {
+                "Maple Checking": -25_000,
+                "Cedar Card": 25_000,
+            }
 
             unlinked_valuations = first.fetch_all(
                 """SELECT valuation.account_id FROM current_net_worth_valuations AS valuation
@@ -140,3 +214,21 @@ def test_development_fixture_is_deterministic_and_financially_coherent(tmp_path)
     finally:
         first.close()
         second.close()
+
+
+def test_failed_generation_preserves_existing_database(tmp_path, monkeypatch) -> None:
+    target = tmp_path / "dev-fixture.duckdb"
+    original = b"known-good fixture file"
+    target.write_bytes(original)
+
+    def fail_after_partial_build(path: Path) -> None:
+        path.write_bytes(b"partial fixture")
+        raise RuntimeError("synthetic fixture build failure")
+
+    monkeypatch.setattr(dev_fixture, "_populate_development_database", fail_after_partial_build)
+
+    with pytest.raises(RuntimeError, match="synthetic fixture build failure"):
+        build_development_database(target)
+
+    assert target.read_bytes() == original
+    assert list(tmp_path.glob(".dev-fixture.duckdb.*.building")) == []

@@ -160,7 +160,7 @@ Backend integration and property tests use real DuckDB with explicit provisionin
 - `api/tests/support/clock.py` provides a mutable deterministic clock.
 - `api/tests/support/scd_invariants.py` provides reusable SCD2 history assertions.
 - Use `just dev-fixture` to build or reset `api/.local/dev-fixture.duckdb`, then run `DUCKDB_PATH=.local/dev-fixture.duckdb just api`. The fixture is generated locally and is never stored as a mutable repository database.
-- The importer-only fixture URI remains available to API tests under `APP_ENV=test` as a parser seam; it is not accepted by normal development or production app environments.
+- API import tests inject authorized OAuth state and mock the Google named-range fetch; importer tests may pass synthetic named ranges directly to the parser/service.
 
 Tests must not depend on:
 

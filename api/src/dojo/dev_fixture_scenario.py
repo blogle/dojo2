@@ -43,12 +43,12 @@ MERCHANTS = {
     "Pharmacy": ("Clover Pharmacy", 1_200),
     "Fitness": ("Common Ground Gym", 3_900),
     "Childcare": ("Little Harbor Center", 42_000),
-    "School": ("Fieldstone School", 5_000),
+    "School": ("Fieldstone School", 30_000),
     "Pet Care": ("Willow Pet Clinic", 2_200),
     "Phone": ("Signal Mobile", 5_400),
     "Streaming": ("Mosaic Video", 1_600),
     "Cloud Storage": ("Northstar Cloud", 900),
-    "Insurance": ("Evergreen Mutual", 12_500),
+    "Insurance": ("Evergreen Mutual", 125_000),
     "Emergency Reserve": ("Reserve transfer", 0),
     "Annual Travel": ("Travel savings", 0),
     "Gifts": ("Gift savings", 0),
@@ -76,7 +76,8 @@ MONTHLY_PLANS = {
     "Phone": 6_000,
     "Streaming": 2_000,
     "Cloud Storage": 1_500,
-    "Insurance": 13_000,
+    "Insurance": 15_000,
+    "Annual Travel": 18_000,
     "Clothing": 8_000,
     "Hobbies": 7_000,
     "Books": 4_000,
@@ -139,6 +140,8 @@ def development_named_ranges() -> dict[str, NamedRangeMatrix]:
         for category_name in MERCHANTS:
             if category_name == "Cedar Card Payment":
                 continue
+            if category_name == "Annual Travel" and month < 4:
+                continue
             amount = MONTHLY_PLANS.get(category_name, MERCHANTS[category_name][1])
             amount += 1_000 if amount else 0
             if amount:
@@ -151,6 +154,10 @@ def development_named_ranges() -> dict[str, NamedRangeMatrix]:
         for category_index, category_name in enumerate(MERCHANTS):
             merchant, amount = MERCHANTS[category_name]
             if not amount:
+                continue
+            if category_name == "Insurance" and month != 2:
+                continue
+            if category_name == "School" and month not in {2, 8}:
                 continue
             # A deterministic mix gives each category activity without making
             # low-frequency annual and project categories look artificially busy.
@@ -219,7 +226,7 @@ def development_named_ranges() -> dict[str, NamedRangeMatrix]:
         24_000 if name == "Auto Loan Payment" else MERCHANTS.get(name, ("", 0))[1] or 8_000
         for name in category_names
     ]
-    goals = ["Monthly" if i % 4 != 0 else "" for i, _ in enumerate(category_names)]
+    goals = [""] * len(category_names)
     net_worth_dates: list[str] = []
     net_worth_amounts: list[str] = []
     net_worth_categories: list[str] = []

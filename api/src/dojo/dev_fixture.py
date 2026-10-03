@@ -3,19 +3,32 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 from datetime import date, datetime, timezone
 from importlib.metadata import version
 from pathlib import Path
+from uuid import uuid4
 
 from dojo.clock import FrozenClock
-from dojo.constants import CATEGORY_KIND_CREDIT_CARD_PAYMENT
 from dojo.database import Database
 from dojo.dev_fixture_accounts import add_development_accounts
-from dojo.dev_fixture_scenario import MERCHANTS, MONTHLY_PLANS, development_named_ranges
+from dojo.dev_fixture_scenario import development_named_ranges
 from dojo.migrations import apply_migrations
 from dojo.service import DojoService
 
 FIXTURE_TIME = datetime(2026, 10, 2, 12, tzinfo=timezone.utc)
+CATEGORY_GOALS: dict[str, tuple[str, int, str | None, date | None]] = {
+    "Rent": ("RECURRING", 145_000, "MONTHLY", date(2026, 10, 5)),
+    "Electricity": ("RECURRING", 11_500, "MONTHLY", date(2026, 10, 20)),
+    "Auto Loan Payment": ("RECURRING", 31_500, "MONTHLY", date(2026, 10, 15)),
+    "Insurance": ("RECURRING", 125_000, "YEARLY", date(2027, 2, 15)),
+    "School": ("RECURRING", 30_000, "EVERY_6_MONTHS", date(2027, 2, 1)),
+    "Annual Travel": ("ONE_TIME", 150_000, None, date(2026, 12, 31)),
+    "Home Project": ("ONE_TIME", 85_000, None, date(2026, 10, 31)),
+    "Restaurants": ("DISCRETIONARY", 25_000, None, None),
+    "Hobbies": ("DISCRETIONARY", 15_000, None, None),
+    "Clothing": ("DISCRETIONARY", 20_000, None, None),
+}
 
 
 def development_fixture_fingerprint() -> str:
@@ -45,8 +58,18 @@ def development_fixture_fingerprint() -> str:
 def build_development_database(output_path: str | Path) -> Path:
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.unlink(missing_ok=True)
+    temporary_output = output.with_name(f".{output.name}.{uuid4().hex}.building")
+    try:
+        _populate_development_database(temporary_output)
+        _validate_development_database(temporary_output)
+        os.replace(temporary_output, output)
+    finally:
+        temporary_output.unlink(missing_ok=True)
+        Path(f"{temporary_output}.wal").unlink(missing_ok=True)
+    return output
 
+
+def _populate_development_database(output: Path) -> None:
     database = Database(str(output))
     try:
         apply_migrations(database.connection)
@@ -89,29 +112,12 @@ def build_development_database(output_path: str | Path) -> Path:
             },
         )
         with service.db.transaction() as connection:
-            for category in connection.execute(
-                """SELECT category_id, name, category_kind FROM current_categories
-                   ORDER BY sort_order"""
+            for category_id, name in connection.execute(
+                "SELECT category_id, name FROM current_categories ORDER BY sort_order"
             ).fetchall():
-                category_id, name, category_kind = category
-                goal_type = None
-                if category_kind != CATEGORY_KIND_CREDIT_CARD_PAYMENT:
-                    goal_type = (
-                        "ONE_TIME"
-                        if name in {"Annual Travel", "Home Project"}
-                        else "DISCRETIONARY"
-                        if name in {"Restaurants", "Hobbies", "Clothing"}
-                        else "RECURRING"
-                    )
-                goal_amount = None
-                if goal_type == "ONE_TIME":
-                    goal_amount = {"Annual Travel": 150_000, "Home Project": 85_000}[name]
-                elif goal_type == "RECURRING":
-                    goal_amount = (
-                        24_000
-                        if name == "Auto Loan Payment"
-                        else MONTHLY_PLANS.get(name, MERCHANTS.get(name, ("", 12_000))[1]) or 12_000
-                    )
+                goal_type, goal_amount, goal_frequency, goal_due_date = CATEGORY_GOALS.get(
+                    name, (None, None, None, None)
+                )
                 connection.execute(
                     """UPDATE categories SET goal_type = ?, goal_amount_minor = ?,
                        goal_frequency = ?, goal_due_date = ?
@@ -119,15 +125,39 @@ def build_development_database(output_path: str | Path) -> Path:
                     (
                         goal_type,
                         goal_amount,
-                        "MONTHLY" if goal_type == "RECURRING" else None,
-                        {"Annual Travel": "2026-12-31", "Home Project": "2026-10-31"}.get(name),
+                        goal_frequency,
+                        goal_due_date,
                         category_id,
                     ),
                 )
             add_development_accounts(connection, FIXTURE_TIME)
     finally:
         service.close()
-    return output
+
+
+def _validate_development_database(path: Path) -> None:
+    service = DojoService(
+        str(path),
+        clock=FrozenClock(FIXTURE_TIME, business_date=date(2026, 10, 2)),
+    )
+    try:
+        if service.get_app_status()["mode"] != "ready":
+            raise RuntimeError("Development fixture did not enter the ready application state")
+        transaction_count = service.db.fetch_one(
+            "SELECT COUNT(*) AS count FROM current_transactions"
+        )
+        if transaction_count is None or not 200 <= transaction_count["count"] < 1_000:
+            raise RuntimeError("Development fixture has an unexpected transaction count")
+        required_frequencies = {"MONTHLY", "YEARLY", "EVERY_6_MONTHS"}
+        configured_frequencies = {
+            category["goal_frequency"]
+            for category in service.list_categories(month="2026-10", show_hidden=True)
+            if category["goal_type"] == "RECURRING"
+        }
+        if not required_frequencies <= configured_frequencies:
+            raise RuntimeError("Development fixture is missing recurring goal frequencies")
+    finally:
+        service.close()
 
 
 def main() -> int:
