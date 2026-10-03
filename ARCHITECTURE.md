@@ -98,6 +98,7 @@ Core read-path SQL such as account listing, transaction paging, account balances
 - `web/cypress/` provides the checked-in Cypress component-testing harness for Vue components.
 - `web/cypress/e2e/` runs the real Vue router and FastAPI API against deterministic scenario databases in Nix-provided Chromium.
 - `api/src/dojo/e2e.py` builds allowlisted scenario baselines from canonical migrations plus data-only SQL under `api/src/dojo/sql/tests/e2e/`.
+- `api/src/dojo/dev_fixture.py` explicitly provisions and populates a deterministic synthetic financial-history database; developers select it through the ordinary `DUCKDB_PATH` setting.
 - The E2E-only reset route is absent outside `APP_ENV=e2e`; it constructs a replacement API-owned worker database and service before atomically swapping process-local state, so a failed replacement leaves the current service usable.
 - Shared XDG baselines use an inter-process file lock and atomic publication, allowing concurrent E2E runs without exposing partial database files.
 - Generated baselines, logs, failure databases, and timing reports live under `${XDG_CACHE_HOME:-$HOME/.cache}/dojo/e2e/`, never in the repository or developer database.
@@ -108,7 +109,6 @@ Core read-path SQL such as account listing, transaction paging, account balances
 
 The importer is named-range-first and allowlist-driven.
 
-- `fixture://default` is the canonical deterministic source used by automated tests.
 - Google Sheet imports fetch only the consumed named ranges.
 - The importer parses accounts, category groups, categories, transactions, allocations, and net-worth valuations into the DuckDB ledger.
 - `api/src/dojo/aggregate_validation.py` compares persisted aggregates against the interpreted imported source data and records structured pass/fail results.

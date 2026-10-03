@@ -300,7 +300,7 @@ def test_net_worth_duplicate_matching_normalizes_names(service: DojoService) -> 
     replace_range_values(named_ranges, "ntw_Categories", {"Checking": "  💰 checking account  "})
 
     result = service.import_sheet_data(
-        source="fixture://normalized-net-worth",
+        source="normalized-net-worth-test-sheet",
         source_kind="google_sheets",
         spreadsheet_title="Normalized Net Worth",
         named_ranges=named_ranges,
@@ -320,7 +320,7 @@ def test_net_worth_duplicate_matching_normalizes_names(service: DojoService) -> 
 
 
 def test_net_worth_rows_are_always_labeled(service: DojoService) -> None:
-    result = service.import_sheet_data(source="fixture://default", source_kind="fixture")
+    result = service.import_sheet_data(source="test-fixture", source_kind="fixture")
     assert result["ok"] is True
 
     net_worth = service.get_net_worth()
@@ -345,7 +345,7 @@ def test_ambiguous_normalized_net_worth_duplicate_fails_validation(service: Dojo
     )
 
     result = service.import_sheet_data(
-        source="fixture://ambiguous-net-worth",
+        source="ambiguous-net-worth-test-sheet",
         source_kind="google_sheets",
         spreadsheet_title="Ambiguous Net Worth",
         named_ranges=named_ranges,

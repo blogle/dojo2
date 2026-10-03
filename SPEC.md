@@ -4,7 +4,7 @@
 
 dojo currently provides:
 
-* onboarding that can import a deterministic repository fixture or a Google Sheet through the backend OAuth flow
+* onboarding that can import a Google Sheet through the backend OAuth flow
 * a DuckDB-backed financial ledger with SCD2 history for editable financial and configuration records
 * a budget view with Available to Budget, grouped categories, starting available, month activity, and month budgeted values
 * bounded transaction listing with server-side pagination and frontend bounded state
@@ -12,6 +12,8 @@ dojo currently provides:
 * transaction creation, editing, status changes, deletion, and account transfers
 * category-group, category, and account management
 * net-worth reporting that combines ledger-derived budget-account balances with imported tracking valuations while avoiding double-counting duplicate budget-account valuations
+
+Development uses a separate deterministic synthetic DuckDB database generated with `just dev-fixture` and selected through the normal `DUCKDB_PATH` setting. It is already provisioned and populated, so opening it enters the ready application directly and never changes empty-database onboarding or production startup behavior.
 
 ## Product Direction
 

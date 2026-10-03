@@ -124,7 +124,6 @@ def oauth_status_payload(request: Request) -> dict[str, Any]:
     has_backup_credential = get_service(request).has_backup_credential()
     return {
         "configured": settings.oauth_configured,
-        "fixture_mode": settings.dev_fixture_mode,
         "authorized": token is not None
         and GOOGLE_SHEETS_READONLY_SCOPE in token.get(DOJO_GRANTED_SCOPES_KEY, ()),
         "backup_authorized": has_backup_credential,
@@ -393,15 +392,8 @@ def google_callback(request: Request, code: str, state: str) -> HTMLResponse:
 
 @router.post("/import/google-sheet")
 def import_google_sheet(request: Request, payload: ImportRequest) -> dict[str, Any]:
-    settings = get_settings(request)
     service = get_service(request)
     raw = payload.sheet_url_or_id
-    normalized = raw.strip().casefold()
-    if normalized in {"fixture", "fixture://default", "default"} or (
-        settings.dev_fixture_mode and settings.app_env != "e2e" and not settings.oauth_configured
-    ):
-        return service.import_sheet_data(source="fixture://default", source_kind="fixture")
-
     session_id = get_or_create_oauth_session_id(request)
     token = get_oauth_token_store(request).get(session_id)
     if token is None:
@@ -443,15 +435,8 @@ def import_status(request: Request) -> dict[str, Any]:
 
 @router.post("/import/google-sheet/analyze")
 def analyze_google_sheet(request: Request, payload: ImportRequest) -> dict[str, Any]:
-    settings = get_settings(request)
     service = get_service(request)
     raw = payload.sheet_url_or_id
-    normalized = raw.strip().casefold()
-    if normalized in {"fixture", "fixture://default", "default"} or (
-        settings.dev_fixture_mode and settings.app_env != "e2e" and not settings.oauth_configured
-    ):
-        return service.analyze_import_draft(source="fixture://default", source_kind="fixture")
-
     session_id = get_or_create_oauth_session_id(request)
     token = get_oauth_token_store(request).get(session_id)
     if token is None:

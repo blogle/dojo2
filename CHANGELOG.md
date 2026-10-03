@@ -39,6 +39,7 @@
 
 ## Unreleased
 
+- Added a deterministic synthetic development database generator with nine complete months plus current-month activity, selected through `DUCKDB_PATH` rather than onboarding.
 - Simplified transaction entry with Transaction and Transfer modes, Available to budget category selection, and atomic transfers with independent counterparty details.
 - Refined transaction entry with searchable entity pickers, direct segmented choices, clearer transfer labels, and bounded fuzzy memo suggestions.
 
