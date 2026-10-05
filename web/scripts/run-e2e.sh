@@ -133,7 +133,6 @@ api_started=$(date +%s%N)
 (
   cd "$repo_root/api"
   APP_ENV=e2e \
-    DEV_FIXTURE_MODE=true \
     GOOGLE_OAUTH_CLIENT_ID="" \
     GOOGLE_OAUTH_CLIENT_SECRET="" \
     GOOGLE_OAUTH_REDIRECT_URI="" \

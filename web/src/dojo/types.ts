@@ -348,7 +348,6 @@ export type ImportPreview = {
 
 export type GoogleOnboardingStatus = {
   configured: boolean;
-  fixture_mode: boolean;
   authorized: boolean;
   message: string;
   auth_url?: string | null;

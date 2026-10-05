@@ -26,6 +26,7 @@ from dojo.benchmarks import (
 )
 from dojo.migrations import provision_database
 from dojo.sql import load_sql
+from tests.support.google_sheet_import import seed_service_from_test_workbook
 
 
 class TestBackendBenchmarks:
@@ -243,7 +244,7 @@ class TestApiBenchmarks:
         duckdb_path = tmp_path / "bench-api.duckdb"
         os.environ["DUCKDB_PATH"] = str(duckdb_path)
         os.environ["SESSION_SECRET"] = "bench-secret"
-        os.environ["DEV_FIXTURE_MODE"] = "true"
+        os.environ["APP_ENV"] = "test"
         os.environ["GOOGLE_OAUTH_REDIRECT_URI"] = (
             "http://localhost:8000/api/onboarding/google/callback"
         )
@@ -274,7 +275,7 @@ class TestApiBenchmarks:
         """Benchmark GET /api/transactions with endpoint timing and payload size."""
 
         def run(client):
-            client.post("/api/import/google-sheet", json={"sheet_url_or_id": "fixture://default"})
+            seed_service_from_test_workbook(main_module.app.state.dojo_service)
             for limit in (20, 100, 500):
                 self._bench_get(
                     client,
@@ -289,7 +290,7 @@ class TestApiBenchmarks:
         """Benchmark GET /api/budget."""
 
         def run(client):
-            client.post("/api/import/google-sheet", json={"sheet_url_or_id": "fixture://default"})
+            seed_service_from_test_workbook(main_module.app.state.dojo_service)
             self._bench_get(
                 client,
                 "/api/budget",
@@ -303,7 +304,7 @@ class TestApiBenchmarks:
         """Benchmark GET /api/accounts."""
 
         def run(client):
-            client.post("/api/import/google-sheet", json={"sheet_url_or_id": "fixture://default"})
+            seed_service_from_test_workbook(main_module.app.state.dojo_service)
             self._bench_get(
                 client, "/api/accounts", "GET /api/accounts", params={"show_hidden": "true"}
             )
@@ -314,7 +315,7 @@ class TestApiBenchmarks:
         """Benchmark GET /api/categories."""
 
         def run(client):
-            client.post("/api/import/google-sheet", json={"sheet_url_or_id": "fixture://default"})
+            seed_service_from_test_workbook(main_module.app.state.dojo_service)
             self._bench_get(
                 client,
                 "/api/categories",
@@ -328,7 +329,7 @@ class TestApiBenchmarks:
         """Benchmark GET /api/net-worth."""
 
         def run(client):
-            client.post("/api/import/google-sheet", json={"sheet_url_or_id": "fixture://default"})
+            seed_service_from_test_workbook(main_module.app.state.dojo_service)
             self._bench_get(client, "/api/net-worth", "GET /api/net-worth")
 
         self._run_with_client(tmp_path, run)
@@ -337,7 +338,7 @@ class TestApiBenchmarks:
         """Benchmark GET /api/bootstrap (the most expensive initial load)."""
 
         def run(client):
-            client.post("/api/import/google-sheet", json={"sheet_url_or_id": "fixture://default"})
+            seed_service_from_test_workbook(main_module.app.state.dojo_service)
             self._bench_get(client, "/api/bootstrap", "GET /api/bootstrap")
 
         self._run_with_client(tmp_path, run)
@@ -346,7 +347,7 @@ class TestApiBenchmarks:
         """Print payload sizes for all major endpoints."""
 
         def run(client):
-            client.post("/api/import/google-sheet", json={"sheet_url_or_id": "fixture://default"})
+            seed_service_from_test_workbook(main_module.app.state.dojo_service)
 
             endpoints = [
                 (

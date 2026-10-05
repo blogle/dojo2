@@ -57,7 +57,6 @@ describe("dojo app", () => {
         },
         "/api/onboarding/google/status": {
           configured: true,
-          fixture_mode: false,
           authorized: false,
           message: "Google OAuth is configured and ready.",
         },

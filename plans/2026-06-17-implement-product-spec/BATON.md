@@ -110,7 +110,7 @@ Relevant contributor guidance:
 - **Known failing checks**: None. `just check` and `just test-e2e` pass with Nix-provided Chromium.
 - **Required services**: DuckDB (provisioned by `just api`), Google OAuth (optional)
 - **Feature flags**: None
-- **Aspire data**: Deterministic fixture available at `fixture://default`
+- **Aspire data**: Import through Google OAuth and the Google Sheets flow
 
 ## Capability and dependency status
 

@@ -21,7 +21,7 @@ def _find_check(
 
 
 def test_import_validation_report_is_structured_and_passing(service: DojoService) -> None:
-    result = service.import_sheet_data(source="fixture://default", source_kind="fixture")
+    result = service.import_sheet_data(source="test-fixture", source_kind="fixture")
 
     assert result["ok"] is True
     report = result["validation_report"]
@@ -80,7 +80,7 @@ def test_aspire_transfer_residual_205_51_validates_to_zero_atb(service: DojoServ
 
 
 def test_validation_report_tracks_hidden_budget_summary_semantics(service: DojoService) -> None:
-    report = service.import_sheet_data(source="fixture://default", source_kind="fixture")[
+    report = service.import_sheet_data(source="test-fixture", source_kind="fixture")[
         "validation_report"
     ]
 
@@ -101,7 +101,7 @@ def test_validation_report_tracks_hidden_budget_summary_semantics(service: DojoS
 
 
 def test_validation_report_documents_ignored_budget_net_worth_values(service: DojoService) -> None:
-    report = service.import_sheet_data(source="fixture://default", source_kind="fixture")[
+    report = service.import_sheet_data(source="test-fixture", source_kind="fixture")[
         "validation_report"
     ]
 
@@ -119,7 +119,7 @@ def test_validation_report_documents_ignored_budget_net_worth_values(service: Do
 
 
 def test_validation_report_requires_labeled_ledger_net_worth_rows(service: DojoService) -> None:
-    report = service.import_sheet_data(source="fixture://default", source_kind="fixture")[
+    report = service.import_sheet_data(source="test-fixture", source_kind="fixture")[
         "validation_report"
     ]
 

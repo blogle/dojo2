@@ -31,7 +31,6 @@ class Settings(BaseSettings):
     cors_allowed_origins: str = Field(
         default="http://localhost:5173,http://localhost:5174", alias="CORS_ALLOWED_ORIGINS"
     )
-    dev_fixture_mode: bool = Field(default=False, alias="DEV_FIXTURE_MODE")
     e2e_reset_token: str = Field(default="", alias="E2E_RESET_TOKEN")
     e2e_baseline_dir: str = Field(default="", alias="E2E_BASELINE_DIR")
     e2e_run_dir: str = Field(default="", alias="E2E_RUN_DIR")

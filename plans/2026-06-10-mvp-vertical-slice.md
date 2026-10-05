@@ -203,7 +203,7 @@ Expected backend interfaces:
 - FastAPI app in `api/src/dojo/api/main.py`
 - DuckDB schema/services under `api/src/dojo/`
 - Required endpoints listed in `mvp_spec.md` Section 15
-- Environment variables including `DUCKDB_PATH`, `DEV_FIXTURE_MODE`, `GOOGLE_OAUTH_*`, `SESSION_SECRET`, and frontend `VITE_API_BASE_URL`
+- Environment variables including `DUCKDB_PATH`, `GOOGLE_OAUTH_*`, `SESSION_SECRET`, and frontend `VITE_API_BASE_URL`
 
 Expected frontend interfaces:
 

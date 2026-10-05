@@ -585,9 +585,6 @@ def extract_sheet_id(raw: str) -> str:
     if not value:
         raise ValueError("Sheet URL or ID is required")
 
-    if value.startswith("fixture://"):
-        return value.removeprefix("fixture://")
-
     if "/spreadsheets/d/" in value:
         path = urlparse(value).path
         marker = "/spreadsheets/d/"

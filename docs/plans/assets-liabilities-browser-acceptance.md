@@ -23,7 +23,7 @@ The suite is intentionally small. It proves the integration seams and user-visib
 
 ## Surprises & Discoveries
 
-- Observation: `fixture://default` is useful for importer and budget tests but is not a sufficient rich-account acceptance seed.
+- Observation: The importer parser test data is not a sufficient rich-account acceptance seed; the generated development database is used for semantic account coverage.
   Evidence: `api/src/dojo/fixture_data.py` contains budget accounts, categories, transactions, allocations, and two imported tracking accounts, but no investment account, tangible asset, rich loan, statement, account-budget link, or cutover state.
 
 - Observation: Cypress component tests do not exercise the deployed integration path.

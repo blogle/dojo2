@@ -1,6 +1,6 @@
 # dojo
 
-dojo is a local-first personal finance application. The repository contains a FastAPI API, a Vue 3 frontend, a DuckDB-backed financial ledger, deterministic fixture-backed import flows, and repository-level quality gates that are intended to run the same way locally and in CI.
+dojo is a local-first personal finance application. The repository contains a FastAPI API, a Vue 3 frontend, a DuckDB-backed financial ledger, and repository-level quality gates that are intended to run the same way locally and in CI.
 
 ## Stack
 
@@ -26,7 +26,7 @@ Use `direnv + nix develop`. Do not rely on host-installed Python, Node, `uv`, `p
 
 `just api` explicitly provisions the DuckDB schema before starting the FastAPI server.
 
-For a deterministic local data set, import `fixture://default` from the onboarding flow.
+Generate the fictional development database with `just dev-fixture` (default repository path `api/.local/dev-fixture.duckdb`), then point the normal database setting at it: `DUCKDB_PATH=.local/dev-fixture.duckdb just api`. The generated database opens directly in the ready application; it does not use Aspire onboarding. Rerun `just dev-fixture` to reset local development data; pass another output path to create an isolated copy.
 
 ## Primary Checks
 

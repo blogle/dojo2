@@ -335,7 +335,6 @@ Optional variables:
 ```text
 LOG_LEVEL
 CORS_ALLOWED_ORIGINS
-DEV_FIXTURE_MODE
 ```
 
 ### 5.2 OAuth Redirect URI
