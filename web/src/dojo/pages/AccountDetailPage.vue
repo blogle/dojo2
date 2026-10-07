@@ -187,6 +187,7 @@ const showAllReconciliationTransactions = ref(false);
 const persistentEditsDuringAttempt = ref(false);
 const showExitWarning = ref(false);
 const reconciliationMutationError = ref("");
+const transactionMutationError = ref("");
 const sourceBalancesBeforeEdit = ref<{
   cleared: string;
   pending: string;
@@ -317,7 +318,7 @@ const sourceBalanceInputs = computed(() => [
 ]);
 const enteredSourceBalances = computed(() =>
   sourceBalanceInputs.value.flatMap(({ key, value }) => {
-    const minor = value.trim() ? parseCurrencyMinor(value) : null;
+    const minor = value.trim() ? parseSourceBalanceMinor(value) : null;
     return minor === null ? [] : [{ key, minor }];
   }),
 );
@@ -707,20 +708,26 @@ const metricItems = computed((): MetricStripItem[] => {
         key: "balance",
         label: "Current balance",
         value: formatCurrency(account.value.display_balance_minor),
-        auxValue: `As of ${formatDateShort()}`,
+        auxValue: investigatingReconciliation.value && budgetAttempt.value
+          ? `Source ${formatCurrency(budgetAttempt.value.source.actual_minor)} · Δ ${formatCurrency(budgetAttempt.value.deltas.actual_delta_minor)}`
+          : `As of ${formatDateShort()}`,
       },
       {
         key: "pending",
         label: "Pending",
         value: formatCurrency(account.value.pending_balance_minor),
-        auxValue: `${transactionStatusCounts.value.PENDING} transactions`,
+        auxValue: investigatingReconciliation.value && budgetAttempt.value
+          ? `Source ${formatCurrency(budgetAttempt.value.source.pending_minor)} · Δ ${formatCurrency(budgetAttempt.value.deltas.pending_delta_minor)}`
+          : `${transactionStatusCounts.value.PENDING} transactions`,
         status: { label: "", variant: "warning" as const },
       },
       {
         key: "cleared",
         label: "Cleared",
         value: formatCurrency(account.value.cleared_balance_minor),
-        auxValue: `${transactionStatusCounts.value.CLEARED} transactions`,
+        auxValue: investigatingReconciliation.value && budgetAttempt.value
+          ? `Source ${formatCurrency(budgetAttempt.value.source.cleared_minor)} · Δ ${formatCurrency(budgetAttempt.value.deltas.cleared_delta_minor)}`
+          : `${transactionStatusCounts.value.CLEARED} transactions`,
         status: { label: "", variant: "positive" as const },
       },
       {
@@ -731,19 +738,24 @@ const metricItems = computed((): MetricStripItem[] => {
       },
       {
         key: "recon",
-        label: "Reconciliation",
-        value:
-          account.value.reconciliation_status === "CURRENT"
+        label: investigatingReconciliation.value
+          ? "Reconciliation · In progress"
+          : "Reconciliation",
+        value: investigatingReconciliation.value && budgetAttempt.value
+          ? certificationAllowed.value ? "Balances match" : "Review differences"
+          : account.value.reconciliation_status === "CURRENT"
             ? "Recorded"
             : "Not reconciled",
-        auxValue:
-          account.value.reconciliation_status === "CURRENT"
+        auxValue: investigatingReconciliation.value && budgetAttempt.value
+          ? `As of ${budgetAttempt.value.cutoff}`
+          : account.value.reconciliation_status === "CURRENT"
             ? "A reconciliation is on record"
             : "No reconciliation recorded",
         status: {
-          label: "",
-          variant:
-            account.value.reconciliation_status === "CURRENT"
+          label: investigatingReconciliation.value ? "Active" : "",
+          variant: investigatingReconciliation.value
+            ? ("warning" as const)
+            : account.value.reconciliation_status === "CURRENT"
               ? ("positive" as const)
               : ("warning" as const),
         },
@@ -1114,11 +1126,16 @@ const updateTransactionMutation = useMutation({
     expectedVersion: string;
   }) => updateTransaction(id, payload, expectedVersion),
   onSuccess: () => {
+    transactionMutationError.value = "";
     invalidateAccountDetailQueries();
     if (investigatingReconciliation.value) {
       persistentEditsDuringAttempt.value = true;
       void refreshReconciliationAfterMutation();
     }
+  },
+  onError: (error) => {
+    transactionMutationError.value =
+      error instanceof Error ? error.message : "Transaction change failed.";
   },
 });
 
@@ -1302,6 +1319,16 @@ const budgetAttemptMutation = useMutation({
       error instanceof Error ? error.message : "Could not compare balances.";
   },
 });
+let budgetAttemptTimeout: ReturnType<typeof setTimeout> | undefined;
+watch(
+  [sourceCleared, sourcePending, sourceActual, sourceAsOfDate, sourceEntryReady],
+  () => {
+    clearTimeout(budgetAttemptTimeout);
+    budgetAttempt.value = null;
+    if (!showReconciliationModal.value || !isBudgetAccount.value || !sourceEntryReady.value) return;
+    budgetAttemptTimeout = setTimeout(() => budgetAttemptMutation.mutate(), 350);
+  },
+);
 const budgetApplyMutation = useMutation({
   mutationFn: () => {
     if (!budgetAttempt.value) throw new Error("Enter source balances first");
@@ -1380,21 +1407,15 @@ function previewBudgetBalances() {
 }
 
 function sourceInputValue(key: "cleared" | "pending" | "actual") {
-  const value =
-    derivedSourceBalance.value?.key === key
-      ? derivedSourceBalance.value.minor
-      : key === "cleared"
-        ? parseCurrencyMinor(sourceCleared.value)
-        : key === "pending"
-          ? parseCurrencyMinor(sourcePending.value)
-          : parseCurrencyMinor(sourceActual.value);
-  return value === null || value === undefined
-    ? key === "cleared"
-      ? sourceCleared.value
-      : key === "pending"
-        ? sourcePending.value
-        : sourceActual.value
-    : (value / 100).toFixed(2);
+  if (derivedSourceBalance.value?.key === key) {
+    return (derivedSourceBalance.value.minor / 100).toFixed(2);
+  }
+
+  return key === "cleared"
+    ? sourceCleared.value
+    : key === "pending"
+      ? sourcePending.value
+      : sourceActual.value;
 }
 
 function sourceInputDisabled(key: "cleared" | "pending" | "actual") {
@@ -2027,6 +2048,12 @@ function parseCurrencyMinor(value: string): number | null {
   return Math.round(amount * 100);
 }
 
+function parseSourceBalanceMinor(value: string): number | null {
+  const amount = Number(value.replace(/[$,]/g, "").trim());
+  if (!Number.isFinite(amount)) return null;
+  return Math.round(amount * 100);
+}
+
 function parsePercentMinor(value: string): number | null {
   const normalized = value.replace(/[%,$]/g, "").trim();
   if (!normalized) return null;
@@ -2228,6 +2255,25 @@ function formatTaxTreatment(value: string | null | undefined): string {
           class="account-detail-page__metrics"
         />
 
+        <div
+          v-if="investigatingReconciliation && budgetAttempt"
+          class="account-detail-page__reconciliation-actions"
+          data-cy="active-reconciliation-banner"
+          aria-label="Active reconciliation controls"
+        >
+          <Button variant="tertiary" @click="editSourceBalances"
+            >Edit source balances</Button
+          >
+          <Button variant="tertiary" @click="exitReconciliation"
+            >Exit reconciliation</Button
+          >
+          <Button
+            v-if="certificationAllowed"
+            @click="budgetApplyMutation.mutate()"
+            >Reconcile account</Button
+          >
+        </div>
+
         <section
           v-if="isBudgetAccount"
           class="account-detail-page__budget-entry"
@@ -2240,81 +2286,6 @@ function formatTaxTreatment(value: string | null | undefined): string {
             :default-account-id="accountId"
             @submit="handleAccountEntry"
           />
-        </section>
-
-        <section
-          v-if="investigatingReconciliation && budgetAttempt"
-          class="account-detail-page__reconciliation-banner"
-          data-cy="active-reconciliation-banner"
-          aria-label="Active reconciliation"
-        >
-          <div>
-            <strong
-              :class="{
-                'account-detail-page__reconciliation-success':
-                  certificationAllowed,
-              }"
-            >
-              {{
-                certificationAllowed ? "Balances match" : "Reconciling account"
-              }}
-            </strong>
-            <span>Source as of {{ budgetAttempt.cutoff }}</span>
-          </div>
-          <dl>
-            <div>
-              <dt>Cleared · Source</dt>
-              <dd>
-                {{ formatCurrency(budgetAttempt.source.cleared_minor) }}
-                <small
-                  >dojo {{ formatCurrency(budgetAttempt.dojo.cleared_minor) }} ·
-                  Δ
-                  {{
-                    formatCurrency(budgetAttempt.deltas.cleared_delta_minor)
-                  }}</small
-                >
-              </dd>
-            </div>
-            <div>
-              <dt>Pending · Source</dt>
-              <dd>
-                {{ formatCurrency(budgetAttempt.source.pending_minor) }}
-                <small
-                  >dojo {{ formatCurrency(budgetAttempt.dojo.pending_minor) }} ·
-                  Δ
-                  {{
-                    formatCurrency(budgetAttempt.deltas.pending_delta_minor)
-                  }}</small
-                >
-              </dd>
-            </div>
-            <div>
-              <dt>Actual · Source</dt>
-              <dd>
-                {{ formatCurrency(budgetAttempt.source.actual_minor) }}
-                <small
-                  >dojo {{ formatCurrency(budgetAttempt.dojo.actual_minor) }} ·
-                  Δ
-                  {{
-                    formatCurrency(budgetAttempt.deltas.actual_delta_minor)
-                  }}</small
-                >
-              </dd>
-            </div>
-          </dl>
-          <div class="account-detail-page__reconciliation-banner-actions">
-            <Button variant="tertiary" @click="editSourceBalances"
-              >Edit source balances</Button
-            >
-            <Button variant="tertiary" @click="exitReconciliation"
-              >Exit reconciliation</Button
-            >
-            <Button
-              v-if="certificationAllowed"
-              @click="budgetApplyMutation.mutate()"
-              >Reconcile account</Button
-            >
-          </div>
         </section>
 
         <div
@@ -2705,6 +2676,9 @@ function formatTaxTreatment(value: string | null | undefined): string {
                 </div>
 
                 <div v-else class="account-detail-page__ledger-shell">
+                  <p v-if="transactionMutationError" role="alert">
+                    {{ transactionMutationError }}
+                  </p>
                   <div
                     v-if="investigatingReconciliation && isBudgetAccount"
                     class="account-detail-page__changes-note"
@@ -3033,7 +3007,7 @@ function formatTaxTreatment(value: string | null | undefined): string {
                 {{ derivedSourceBalance.key }} is derived from the other two
                 source balances.
               </p>
-              <p
+              <div
                 v-if="budgetAttempt"
                 class="account-detail-page__reconciliation-proof"
                 data-cy="budget-reconciliation-proof"
@@ -3041,25 +3015,10 @@ function formatTaxTreatment(value: string | null | undefined): string {
                 <strong>{{
                   certificationAllowed ? "Balances match" : "Differences found"
                 }}</strong>
-                <span
-                  >Cleared Δ
-                  {{
-                    formatCurrency(budgetAttempt.deltas.cleared_delta_minor)
-                  }}</span
-                >
-                <span
-                  >Pending Δ
-                  {{
-                    formatCurrency(budgetAttempt.deltas.pending_delta_minor)
-                  }}</span
-                >
-                <span
-                  >Actual Δ
-                  {{
-                    formatCurrency(budgetAttempt.deltas.actual_delta_minor)
-                  }}</span
-                >
-              </p>
+                <span>Cleared Δ {{ formatCurrency(budgetAttempt.deltas.cleared_delta_minor) }}</span>
+                <span>Pending Δ {{ formatCurrency(budgetAttempt.deltas.pending_delta_minor) }}</span>
+                <span>Actual Δ {{ formatCurrency(budgetAttempt.deltas.actual_delta_minor) }}</span>
+              </div>
               <p
                 v-if="reconciliationMutationError"
                 class="account-detail-page__config-note"
@@ -3854,8 +3813,12 @@ function formatTaxTreatment(value: string | null | undefined): string {
 .account-detail-page__metrics {
   order: 2;
 }
-.account-detail-page__reconciliation-banner {
-  order: 1;
+.account-detail-page__reconciliation-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+  order: 2;
 }
 .account-detail-page__content {
   order: 4;
@@ -3866,7 +3829,6 @@ function formatTaxTreatment(value: string | null | undefined): string {
 .account-detail-page--budget .account-detail-page__left {
   grid-template-columns: minmax(0, 1fr);
 }
-.account-detail-page__reconciliation-banner,
 .account-detail-page__investigation {
   display: grid;
   gap: var(--space-md);
@@ -3875,44 +3837,9 @@ function formatTaxTreatment(value: string | null | undefined): string {
   border-radius: var(--radius-all);
   background: var(--color-surface);
 }
-.account-detail-page__reconciliation-banner > div:first-child {
-  display: flex;
-  justify-content: space-between;
-  gap: var(--space-md);
-}
-.account-detail-page__reconciliation-banner > div:first-child span,
 .account-detail-page__investigation p {
   color: var(--color-on-surface-muted);
 }
-.account-detail-page__reconciliation-success {
-  color: var(--color-positive);
-}
-.account-detail-page__reconciliation-banner dl {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: var(--space-md);
-  margin: 0;
-}
-.account-detail-page__reconciliation-banner dl > div {
-  display: grid;
-  gap: var(--space-xs);
-}
-.account-detail-page__reconciliation-banner dt {
-  color: var(--color-on-surface-muted);
-  font: var(--text-label-sm-font-weight) var(--text-label-sm-font-size)
-    var(--text-label-sm-font-family);
-}
-.account-detail-page__reconciliation-banner dd {
-  margin: 0;
-  font-feature-settings:
-    "tnum" 1,
-    "zero" 1;
-}
-.account-detail-page__reconciliation-banner small {
-  display: block;
-  color: var(--color-on-surface-muted);
-}
-.account-detail-page__reconciliation-banner-actions,
 .account-detail-page__investigation-heading,
 .account-detail-page__investigation-heading > div:last-child {
   display: flex;
@@ -3935,11 +3862,10 @@ function formatTaxTreatment(value: string | null | undefined): string {
     var(--text-body-sm-font-family);
 }
 .account-detail-page__reconciliation-proof {
-  display: grid;
-  gap: var(--space-xs);
-  padding: var(--space-md);
-  border: 1px solid var(--color-outline);
-  border-radius: var(--radius-all);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-xs) var(--space-md);
   font-feature-settings:
     "tnum" 1,
     "zero" 1;
