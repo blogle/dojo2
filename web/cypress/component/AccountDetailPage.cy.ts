@@ -23,6 +23,7 @@ const budgetAccount = {
 const transactions = [
   {
     transaction_id: "txn-1",
+    version: "version-1",
     date: "2026-06-02",
     account_id: budgetAccount.account_id,
     account_name: budgetAccount.name,
@@ -36,6 +37,7 @@ const transactions = [
   },
   {
     transaction_id: "txn-2",
+    version: "version-1",
     date: "2026-05-29",
     account_id: budgetAccount.account_id,
     account_name: budgetAccount.name,
@@ -49,6 +51,7 @@ const transactions = [
   },
   {
     transaction_id: "txn-other",
+    version: "version-1",
     date: "2026-06-01",
     account_id: "acct-savings-9999",
     account_name: "Savings",
@@ -63,7 +66,7 @@ const transactions = [
 ];
 
 function stubFetch() {
-  cy.stub(window, "fetch").callsFake((url: string) => {
+  cy.stub(window, "fetch").callsFake((url: string, init?: RequestInit) => {
     const path = new URL(url, "http://localhost").pathname;
 
     if (path === "/api/accounts") {
@@ -105,6 +108,110 @@ function stubFetch() {
           status: 200,
           headers: { "Content-Type": "application/json" },
         }),
+      );
+    }
+
+    if (
+      path === `/api/accounts/${budgetAccount.account_id}/reconciliations/draft`
+    ) {
+      const body = JSON.parse(init?.body as string);
+      const cleared =
+        body.source_cleared_minor ??
+        body.source_actual_minor - body.source_pending_minor;
+      const pending =
+        body.source_pending_minor ??
+        body.source_actual_minor - body.source_cleared_minor;
+      const actual =
+        body.source_actual_minor ??
+        body.source_cleared_minor + body.source_pending_minor;
+      const clearedDelta = cleared - budgetAccount.cleared_balance_minor;
+      const pendingDelta = pending - budgetAccount.pending_balance_minor;
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            reconciliation_id: "attempt-1",
+            account_id: budgetAccount.account_id,
+            state: "READY",
+            cutoff: body.cutoff,
+            source: {
+              cleared_minor: cleared,
+              pending_minor: pending,
+              actual_minor: actual,
+              derived:
+                body.source_actual_minor === undefined ? "actual" : "pending",
+            },
+            dojo: {
+              cleared_minor: budgetAccount.cleared_balance_minor,
+              pending_minor: budgetAccount.pending_balance_minor,
+              actual_minor: budgetAccount.display_balance_minor,
+            },
+            deltas: {
+              cleared_delta_minor: clearedDelta,
+              pending_delta_minor: pendingDelta,
+              actual_delta_minor: clearedDelta + pendingDelta,
+            },
+            certification_allowed: clearedDelta === 0 && pendingDelta === 0,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    }
+
+    if (path === `/api/reconciliations/attempt-1/apply`) {
+      return Promise.resolve(
+        new Response(JSON.stringify({ state: "SUCCESSFUL" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    }
+
+    if (path.startsWith("/api/transactions/") && init?.method === "PUT") {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({ transaction_id: "txn-1", version: "version-2" }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    }
+
+    if (
+      path ===
+      `/api/accounts/${budgetAccount.account_id}/reconciliation-working-set`
+    ) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            items: [
+              {
+                transaction_id: "txn-1",
+                classification: "EDITED",
+                baseline: { amount_minor: -8743 },
+                current: { amount_minor: -9000 },
+                changed_fields: ["amount_minor"],
+              },
+              {
+                transaction_id: "txn-2",
+                classification: "CARRIED_PENDING",
+                baseline: { status: "PENDING" },
+                current: { status: "PENDING" },
+                changed_fields: [],
+              },
+              {
+                transaction_id: "txn-removed",
+                classification: "REMOVED",
+                baseline: {
+                  date: "2026-05-18",
+                  amount_minor: -4500,
+                  memo: "Removed market row",
+                },
+                current: null,
+                changed_fields: [],
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
       );
     }
 
@@ -223,10 +330,8 @@ describe("AccountDetailPage", () => {
       "not.contain.text",
       "View budgeting details",
     );
-    cy.get("[data-cy=reconciliation-section]").should(
-      "contain.text",
-      "View reconciliation",
-    );
+    cy.get("[data-cy=reconciliation-section]").should("not.exist");
+    cy.get("[data-cy=transaction-entry-form]").should("be.visible");
     cy.get("[data-cy=history-section]").should("not.exist");
     cy.get("[data-cy=configuration-section]").should("not.exist");
     cy.get("[data-cy=summary-section]").should(
@@ -245,11 +350,113 @@ describe("AccountDetailPage", () => {
       "Reconcile account",
     );
     cy.get('input[name="reconciliation-cutoff"]').should("be.visible");
-    cy.get('input[name="reconciliation-ending-balance"]').should("be.visible");
+    cy.get('input[name="source-cleared"]').should("be.visible");
+    cy.get('input[name="source-pending"]').should("be.visible");
+    cy.get('input[name="source-actual"]').should("be.visible");
     cy.get("[data-cy=form-modal-root]").should(
       "contain.text",
-      "Preview difference",
+      "Compare balances",
     );
+  });
+
+  it("derives the third source balance and commits an instant match", () => {
+    mountPage();
+    cy.get("[data-cy=account-detail-reconcile]").click();
+    cy.get('input[name="source-cleared"]').type("6716.75");
+    cy.get('input[name="source-pending"]').type("125.43");
+    cy.get('input[name="source-actual"]')
+      .should("be.disabled")
+      .and("have.value", "6842.18");
+    cy.get("[data-cy=form-modal-root]").contains("Compare balances").click();
+    cy.get("[data-cy=budget-reconciliation-proof]").should(
+      "contain.text",
+      "Balances match",
+    );
+    cy.get("[data-cy=form-modal-root]").contains("Reconcile account").click();
+    cy.get("[data-cy=form-modal-root]").should("not.exist");
+  });
+
+  it("keeps an equal-and-opposite discrepancy blocked and opens the investigation ledger", () => {
+    mountPage();
+    cy.get("[data-cy=account-detail-reconcile]").click();
+    cy.get('input[name="source-cleared"]').type("6717.75");
+    cy.get('input[name="source-pending"]').type("124.43");
+    cy.get("[data-cy=form-modal-root]").contains("Compare balances").click();
+    cy.get("[data-cy=budget-reconciliation-proof]").should(
+      "contain.text",
+      "Differences found",
+    );
+    cy.get("[data-cy=budget-reconciliation-proof]").should(
+      "contain.text",
+      "Actual Δ $0.00",
+    );
+    cy.get("[data-cy=form-modal-root]").contains("Review differences").click();
+    cy.get("[data-cy=reconciliation-investigation]").should("be.visible");
+    cy.get("[data-cy=active-reconciliation-banner]")
+      .should("contain.text", "Cleared")
+      .and("contain.text", "Pending");
+    cy.get("[data-cy=transaction-ledger]").should("contain.text", "Edited");
+    cy.get("[data-cy=transaction-ledger]").should("contain.text", "Pending");
+    cy.get("[data-cy=removed-reconciliation-rows]")
+      .should("contain.text", "Removed market row")
+      .and("contain.text", "Removed");
+  });
+
+  it("exits without a warning when no canonical transaction was changed", () => {
+    mountPage();
+    cy.get("[data-cy=account-detail-reconcile]").click();
+    cy.get('input[name="source-cleared"]').type("6717.75");
+    cy.get('input[name="source-pending"]').type("124.43");
+    cy.get("[data-cy=form-modal-root]").contains("Compare balances").click();
+    cy.get("[data-cy=form-modal-root]").contains("Review differences").click();
+    cy.get("[data-cy=active-reconciliation-banner]")
+      .contains("Exit reconciliation")
+      .click();
+    cy.get("[data-cy=form-modal-root]").should("not.exist");
+    cy.get("[data-cy=active-reconciliation-banner]").should("not.exist");
+  });
+
+  it("replaces temporary source balances and recomputes the independent deltas", () => {
+    mountPage();
+    cy.get("[data-cy=account-detail-reconcile]").click();
+    cy.get('input[name="source-cleared"]').type("6717.75");
+    cy.get('input[name="source-pending"]').type("124.43");
+    cy.get("[data-cy=form-modal-root]").contains("Compare balances").click();
+    cy.get("[data-cy=form-modal-root]").contains("Review differences").click();
+    cy.get("[data-cy=active-reconciliation-banner]")
+      .contains("Edit source balances")
+      .click();
+    cy.get('input[name="source-cleared"]').should("have.value", "6717.75");
+    cy.get('input[name="source-pending"]').clear().type("125.43");
+    cy.get("[data-cy=form-modal-root]").contains("Compare balances").click();
+    cy.get("[data-cy=budget-reconciliation-proof]")
+      .should("contain.text", "Cleared Δ $1.00")
+      .and("contain.text", "Pending Δ $0.00");
+    cy.get("[data-cy=form-modal-root]").contains("Review differences").click();
+    cy.get("[data-cy=active-reconciliation-banner]").should(
+      "contain.text",
+      "Pending",
+    );
+  });
+
+  it("warns after a persistent canonical edit and describes it as already saved", () => {
+    mountPage();
+    cy.get("[data-cy=account-detail-reconcile]").click();
+    cy.get('input[name="source-cleared"]').type("6717.75");
+    cy.get('input[name="source-pending"]').type("124.43");
+    cy.get("[data-cy=form-modal-root]").contains("Compare balances").click();
+    cy.get("[data-cy=form-modal-root]").contains("Review differences").click();
+    cy.get(".ledger__row").first().click();
+    cy.get('.ledger__row--editing input[placeholder="Memo"]')
+      .clear()
+      .type("Corrected memo");
+    cy.get("[data-cy=reconciliation-investigation]").click();
+    cy.get("[data-cy=active-reconciliation-banner]")
+      .contains("Exit reconciliation")
+      .click();
+    cy.get("[data-cy=form-modal-root]")
+      .should("contain.text", "already been saved")
+      .and("contain.text", "account unreconciled");
   });
 
   it("opens edit configuration and submits account metadata", () => {

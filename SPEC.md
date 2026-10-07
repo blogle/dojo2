@@ -1320,31 +1320,32 @@ Each account or entity has:
 * a last applied reconciliation
 * a current working set of changes made since that reconciliation
 * an external source value or record set
-* a proposed reconciled state
+* temporary source evidence for the active attempt
 
 The working set depends on the account or entity type. Budget accounts use ledger records. Tracking accounts use snapshot values. Investment accounts use account-transfer rows plus value and activity records. Loans use obligation balances, payment records, and split state. Tangible assets use valuation records.
 
 Reconciliation commits are lightweight evidence that relevant records for one entity were verified as of a date. They record the entity, effective date, verification time, source summary, and references to relevant logical records and SCD2 version timestamps. They do not copy full domain records; the SCD2 tables remain the historical source of truth.
 
-The user reviews the difference between:
+For budget accounts, the user reviews the difference between:
 
 1. the last reconciled state
 2. the current dojo working state
 3. the upstream source of truth
-4. the proposed resulting state
+4. the balance proof against dojo’s current canonical ledger
+
+Budget-account manual evidence is entered using Cleared, Pending, and Actual. The user supplies any two values and dojo visibly derives the third. Cleared, Pending, and Actual deltas are signed source-minus-dojo differences; Actual delta is the sum of Cleared and Pending deltas. Certification requires both Cleared and Pending deltas to be zero. An Actual-only match cannot certify the account.
+
+When both independent balances match, Reconcile account commits the complete current canonical account state directly. When either differs, Review differences opens the normal account ledger with a single reconciliation summary and Changes since last reconciliation selected by default. All transactions remains available with the existing filters. Transaction edits, additions, and removals persist immediately; source evidence remains temporary until certification. Exiting without canonical edits is silent. When canonical edits occurred, the user is told they are already saved and the account remains unreconciled.
+
+The ledger keeps Pending/Cleared settlement Status separate from reconciliation Change provenance. Change labels are Added, Edited, and Removed. Pending transactions carried from the last reconciliation remain visible as settlement context. Reconciliation never introduces a balance plug, row acknowledgement, include/exclude decision, or shadow transaction editor.
 
 ### Proposed Flow
 
 1. Open an account or entity detail page
 2. Select Reconcile
-3. Choose or provide the source-of-truth data
-4. Review current balance or valuation differences
-5. Review added, edited, removed, and unmatched records
-6. Edit or amend dojo records as needed
-7. Resolve conflicts
-8. Review the resulting balance or valuation
-9. Select Apply reconciliation
-10. Save the reviewed state as the new reconciliation baseline
+3. Enter source evidence and inspect the comparison
+4. Commit directly when the budget account’s Cleared and Pending balances both match
+5. Otherwise investigate differences on the account’s canonical ledger and commit once both balances match
 
 ### User-Facing Language
 
@@ -1353,15 +1354,14 @@ Use:
 * Changes since last reconciliation
 * Source records
 * Current records
-* Proposed changes
-* Conflict
-* Include
-* Exclude
-* Apply reconciliation
+* Review differences
+* Reconcile account
 * Reconciliation history
 * Restore prior version
 
 ### Reconciliation Review Component
+
+Budget-account reconciliation does not stage proposed transaction values or require per-row decisions. Its investigation view uses the ordinary transaction ledger and exposes source-versus-dojo balance proof in one persistent summary.
 
 For each changed or conflicting record, display:
 

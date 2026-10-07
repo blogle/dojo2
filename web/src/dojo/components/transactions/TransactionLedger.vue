@@ -28,6 +28,10 @@ const props = withDefaults(
     showTransferProvenance?: boolean;
     runningBalances?: Record<string, number>;
     lockedAccountId?: string;
+    reconciliationChanges?: Record<
+      string,
+      { label: string; changedFields: string[] }
+    >;
   }>(),
   {
     totalCount: undefined,
@@ -38,6 +42,7 @@ const props = withDefaults(
     showTransferProvenance: false,
     runningBalances: () => ({}),
     lockedAccountId: undefined,
+    reconciliationChanges: () => ({}),
   },
 );
 
@@ -271,6 +276,8 @@ function transferProvenance(tx: Transaction): string {
             :class="{
               'ledger__header-row--no-account': !showAccountColumn,
               'ledger__header-row--with-balance': showRunningBalance,
+              'ledger__header-row--with-reconciliation':
+                Object.keys(reconciliationChanges).length > 0,
             }"
           >
             <th class="ledger__head ledger__head--check">
@@ -284,6 +291,12 @@ function transferProvenance(tx: Transaction): string {
             <th class="ledger__head">Direction</th>
             <th class="ledger__head ledger__head--end">Amount</th>
             <th class="ledger__head">Status</th>
+            <th
+              v-if="Object.keys(reconciliationChanges).length"
+              class="ledger__head"
+            >
+              Change
+            </th>
             <th
               v-if="showRunningBalance"
               class="ledger__head ledger__head--end"
@@ -306,6 +319,8 @@ function transferProvenance(tx: Transaction): string {
                 'ledger__row--editing': editingId === tx.transaction_id,
                 'ledger__row--no-account': !showAccountColumn,
                 'ledger__row--with-balance': showRunningBalance,
+                'ledger__row--with-reconciliation':
+                  Object.keys(reconciliationChanges).length > 0,
               }"
               :style="{
                 transform: `translateY(${virtualRow.start}px)`,
@@ -375,6 +390,12 @@ function transferProvenance(tx: Transaction): string {
                   </button>
                 </td>
                 <td
+                  v-if="Object.keys(reconciliationChanges).length"
+                  class="ledger__cell ledger__cell--change"
+                >
+                  —
+                </td>
+                <td
                   v-if="showRunningBalance"
                   class="ledger__cell ledger__cell--end ledger__cell--amount"
                 >
@@ -432,6 +453,32 @@ function transferProvenance(tx: Transaction): string {
                   >
                     {{ tx.status === "CLEARED" ? "Cleared" : "Pending" }}
                   </StateBadge>
+                </td>
+                <td
+                  v-if="Object.keys(reconciliationChanges).length"
+                  class="ledger__cell ledger__cell--change"
+                >
+                  <template
+                    v-if="
+                      reconciliationChanges[tx.transaction_id]?.label ===
+                      'Edited'
+                    "
+                  >
+                    <details @click.stop>
+                      <summary>Edited</summary>
+                      <span
+                        >Last reconciled → Current:
+                        {{
+                          reconciliationChanges[
+                            tx.transaction_id
+                          ]?.changedFields.join(", ")
+                        }}</span
+                      >
+                    </details>
+                  </template>
+                  <span v-else>{{
+                    reconciliationChanges[tx.transaction_id]?.label ?? "—"
+                  }}</span>
                 </td>
                 <td
                   v-if="showRunningBalance"
@@ -506,12 +553,42 @@ function transferProvenance(tx: Transaction): string {
     minmax(70px, 0.6fr) minmax(80px, 0.7fr) minmax(76px, 0.6fr);
 }
 
+.ledger__header-row--no-account.ledger__header-row--with-reconciliation,
+.ledger__row--no-account.ledger__row--with-reconciliation {
+  grid-template-columns:
+    28px minmax(78px, 0.6fr) minmax(110px, 0.9fr) minmax(150px, 1.2fr)
+    minmax(70px, 0.6fr) minmax(80px, 0.7fr) minmax(76px, 0.6fr) minmax(
+      74px,
+      0.6fr
+    );
+}
+.ledger__header-row:not(
+    .ledger__header-row--no-account
+  ).ledger__header-row--with-reconciliation,
+.ledger__row:not(.ledger__row--no-account).ledger__row--with-reconciliation {
+  grid-template-columns:
+    28px minmax(70px, 0.6fr) minmax(70px, 0.8fr) minmax(80px, 0.9fr)
+    minmax(90px, 1.1fr) minmax(60px, 0.6fr) minmax(70px, 0.6fr) minmax(
+      60px,
+      0.5fr
+    )
+    minmax(74px, 0.6fr);
+}
+
 .ledger__header-row--no-account.ledger__header-row--with-balance,
 .ledger__row--no-account.ledger__row--with-balance {
   grid-template-columns:
     28px minmax(78px, 0.6fr) minmax(110px, 0.9fr) minmax(150px, 1.2fr)
     minmax(70px, 0.6fr) minmax(80px, 0.7fr) minmax(76px, 0.6fr)
     minmax(90px, 0.7fr);
+}
+
+.ledger__header-row--no-account.ledger__header-row--with-balance.ledger__header-row--with-reconciliation,
+.ledger__row--no-account.ledger__row--with-balance.ledger__row--with-reconciliation {
+  grid-template-columns:
+    28px minmax(78px, 0.6fr) minmax(110px, 0.9fr) minmax(150px, 1.2fr)
+    minmax(70px, 0.6fr) minmax(80px, 0.7fr) minmax(76px, 0.6fr)
+    minmax(74px, 0.6fr) minmax(90px, 0.7fr);
 }
 
 .ledger__body {
@@ -602,6 +679,32 @@ function transferProvenance(tx: Transaction): string {
   font-feature-settings:
     "tnum" 1,
     "zero" 1;
+}
+
+.ledger__cell--change {
+  color: var(--color-on-surface-muted);
+  font-family: var(--text-label-sm-font-family);
+  font-size: var(--text-label-sm-font-size);
+}
+.ledger__cell--change details {
+  position: relative;
+}
+.ledger__cell--change summary {
+  cursor: pointer;
+  color: var(--color-on-surface);
+}
+.ledger__cell--change details span {
+  position: absolute;
+  z-index: 3;
+  width: max-content;
+  max-width: 280px;
+  padding: var(--space-sm);
+  border: 1px solid var(--color-outline);
+  border-radius: var(--radius-all);
+  background: var(--color-surface-raised);
+  color: var(--color-on-surface-muted);
+  box-shadow: var(--shadow-popover);
+  white-space: normal;
 }
 
 .ledger__row--editing .ledger__cell {

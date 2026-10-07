@@ -1,5 +1,7 @@
 # Changelog
 
+- Implemented budget-account reconciliation from Cleared/Pending/Actual source evidence, direct certification when independent balances match, and ledger-based investigation with persistent source/delta context and mutation provenance.
+
 <!-- BEGIN GENERATED RELEASES -->
 
 ## v0.0.13

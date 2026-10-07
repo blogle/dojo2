@@ -1,6 +1,7 @@
 import { mount } from "cypress/vue";
 
 import TransactionLedger from "../../src/dojo/components/transactions/TransactionLedger.vue";
+import ledgerFixtures from "../../src/dojo/components/transactions/TransactionLedger.fixtures";
 
 const currentMonth = new Date().toISOString().slice(0, 7);
 
@@ -74,6 +75,33 @@ const mockTransactions = [
 ];
 
 describe("TransactionLedger", () => {
+  it("renders reconciliation provenance independently from settlement status", () => {
+    const scenario = ledgerFixtures.scenarios[0];
+    mount(TransactionLedger, { props: scenario?.props ?? {} });
+
+    cy.get(".ledger__header-row")
+      .should("contain.text", "Status")
+      .and("contain.text", "Change");
+    cy.get(".ledger__row")
+      .eq(0)
+      .should("contain.text", "Cleared")
+      .and("contain.text", "Added");
+    cy.get(".ledger__row")
+      .eq(1)
+      .should("contain.text", "Pending")
+      .and("contain.text", "Edited");
+    cy.get(".ledger__row")
+      .eq(1)
+      .find("details")
+      .should("not.have.attr", "open");
+    cy.get(".ledger__row").eq(1).find("summary").click();
+    cy.get(".ledger__row")
+      .eq(1)
+      .find("details")
+      .should("have.attr", "open")
+      .and("contain.text", "amount_minor, status");
+  });
+
   it("renders transaction rows", () => {
     mount(TransactionLedger, {
       props: {

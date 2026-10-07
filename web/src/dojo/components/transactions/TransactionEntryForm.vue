@@ -21,6 +21,7 @@ import CurrencyField from "../forms/CurrencyField.vue";
 const props = defineProps<{
   accounts: Account[];
   categories: Category[];
+  defaultAccountId?: string;
 }>();
 
 const emit = defineEmits<{
@@ -66,6 +67,7 @@ function todayString() {
 
 function resetForm() {
   date.value = todayString();
+  accountId.value = props.defaultAccountId ?? "";
   categoryId.value = "";
   mode.value = "transaction";
   toAccountId.value = "";
@@ -83,6 +85,14 @@ function resetForm() {
   memoSearchVersion += 1;
   toAccountMemoSearchVersion += 1;
 }
+
+watch(
+  () => props.defaultAccountId,
+  (value) => {
+    if (value) accountId.value = value;
+  },
+  { immediate: true },
+);
 
 resetForm();
 

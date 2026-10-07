@@ -117,6 +117,12 @@ sections:
       - component: HierarchicalCategoryTable
         fixture: tables/HierarchicalCategoryTable.fixtures.ts
 
+  - id: transactions
+    title: Transactions
+    entries:
+      - component: TransactionLedger
+        fixture: transactions/TransactionLedger.fixtures.ts
+
   - id: feedback
     title: Feedback
     entries:
