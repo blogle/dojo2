@@ -3159,7 +3159,7 @@ class DojoService:
         return {"transaction_id": transaction_id, "version": version}
 
     def update_transaction(self, transaction_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        self._validate_transaction_payload(payload)
+        self._validate_transaction_payload(payload, allow_uncategorized=True)
         now = self.clock.now()
         with self.db.transaction() as connection:
             cursor = connection.execute(
@@ -6411,11 +6411,16 @@ class DojoService:
         )
 
     def _validate_transaction_payload(
-        self, payload: dict[str, Any], *, new_entry: bool = False
+        self,
+        payload: dict[str, Any],
+        *,
+        new_entry: bool = False,
+        allow_uncategorized: bool = False,
     ) -> None:
         has_category = payload.get("category_id") is not None
         has_system = payload.get("system_category") is not None
-        if has_category == has_system:
+        is_uncategorized = not has_category and not has_system
+        if has_category == has_system and not (allow_uncategorized and is_uncategorized):
             raise ValueError("Exactly one of category_id or system_category must be set")
         if not new_entry:
             return

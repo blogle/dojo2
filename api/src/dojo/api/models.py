@@ -140,7 +140,7 @@ class FundGroupRequest(BaseModel):
     items: list[GroupFundingItem] = Field(min_length=1)
 
 
-class TransactionPayload(BaseModel):
+class _TransactionFields(BaseModel):
     date: date
     account_id: str
     amount_minor: int
@@ -151,6 +151,8 @@ class TransactionPayload(BaseModel):
     insert_after_transaction_id: str | None = None
     loan_account_id: str | None = None
 
+
+class TransactionPayload(_TransactionFields):
     @model_validator(mode="after")
     def validate_category_choice(self) -> "TransactionPayload":
         if (self.category_id is None) == (self.system_category is None):
@@ -158,9 +160,15 @@ class TransactionPayload(BaseModel):
         return self
 
 
-class TransactionUpdatePayload(TransactionPayload):
+class TransactionUpdatePayload(_TransactionFields):
     expected_version: UUID
     acknowledge_reconciled_history_change: bool = False
+
+    @model_validator(mode="after")
+    def validate_category_choice(self) -> "TransactionUpdatePayload":
+        if self.category_id is not None and self.system_category is not None:
+            raise ValueError("Set at most one of category_id or system_category")
+        return self
 
 
 class TransferPayload(BaseModel):

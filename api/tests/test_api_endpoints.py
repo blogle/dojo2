@@ -1000,6 +1000,104 @@ def test_transaction_update_rejects_stale_version(monkeypatch, tmp_path) -> None
         assert updated["memo"] == "first edit"
 
 
+def test_uncategorized_pending_transaction_can_clear_during_reconciliation(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setenv("SESSION_SECRET", "test-secret")
+    monkeypatch.setenv(
+        "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
+    )
+    provisioned_main_module(monkeypatch, tmp_path, "uncategorized-pending-update.duckdb")
+
+    with TestClient(main_module.app) as client:
+        assert import_test_sheet(client, monkeypatch).status_code == 200
+        service = main_module.app.state.dojo_service
+        transactions = client.get(
+            "/api/transactions", params={"show_hidden": "true", "limit": 10_000}
+        ).json()["items"]
+        imported = next(
+            item
+            for item in transactions
+            if item["category_id"] is not None and item["system_category"] is None
+        )
+
+        with service.db.transaction() as connection:
+            connection.execute(
+                "UPDATE transactions SET category_id = NULL, system_category = NULL, "
+                "status = 'PENDING' WHERE row_id = ?",
+                (imported["version"],),
+            )
+
+        uncategorized = next(
+            item
+            for item in client.get(
+                "/api/transactions",
+                params={
+                    "show_hidden": "true",
+                    "limit": 10_000,
+                    "account_id": imported["account_id"],
+                },
+            ).json()["items"]
+            if item["transaction_id"] == imported["transaction_id"]
+        )
+        baseline = commit_api_budget_baseline(service, imported["account_id"])
+        attempt_payload = {
+            "source_kind": "BANK_STATEMENT",
+            "cutoff": str(service.clock.today()),
+            "source_cleared_minor": 0,
+            "source_pending_minor": 0,
+        }
+        before = service.create_reconciliation_draft(imported["account_id"], attempt_payload)
+        update_payload = {
+            "date": uncategorized["date"],
+            "account_id": uncategorized["account_id"],
+            "amount_minor": uncategorized["amount_minor"],
+            "category_id": None,
+            "system_category": None,
+            "status": "CLEARED",
+            "memo": uncategorized["memo"],
+            "expected_version": uncategorized["version"],
+        }
+
+        rejected_create = client.post(
+            "/api/transactions",
+            json={key: value for key, value in update_payload.items() if key != "expected_version"},
+        )
+        assert rejected_create.status_code == 422
+
+        updated = client.put(
+            f"/api/transactions/{uncategorized['transaction_id']}", json=update_payload
+        )
+        assert updated.status_code == 200, updated.text
+        assert updated.json()["version"] != uncategorized["version"]
+
+        after = service.create_reconciliation_draft(imported["account_id"], attempt_payload)
+        assert before["dojo"]["pending_minor"] != after["dojo"]["pending_minor"]
+        assert before["dojo"]["cleared_minor"] != after["dojo"]["cleared_minor"]
+        assert before["dojo"]["actual_minor"] == after["dojo"]["actual_minor"]
+
+        versions = service.db.fetch_all(
+            "SELECT row_id, category_id, system_category, status, valid_from, valid_to "
+            "FROM transactions WHERE transaction_id = ? ORDER BY valid_from",
+            (uncategorized["transaction_id"],),
+        )
+        assert len(versions) == 2
+        assert [row["status"] for row in versions] == ["PENDING", "CLEARED"]
+        assert all(row["category_id"] is None for row in versions)
+        assert all(row["system_category"] is None for row in versions)
+        assert versions[0]["valid_to"] == versions[1]["valid_from"]
+        assert [
+            str(item["reconciliation_id"])
+            for item in service.list_reconciliations(imported["account_id"])
+        ] == [str(baseline["reconciliation_id"])]
+        working_set_item = next(
+            item
+            for item in service.reconciliation_working_set(imported["account_id"])["items"]
+            if item["transaction_id"] == uncategorized["transaction_id"]
+        )
+        assert working_set_item["classification"] == "PENDING_CLEARED"
+
+
 def test_transaction_update_preserves_scd_history_and_derived_state(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("SESSION_SECRET", "test-secret")
     monkeypatch.setenv(
