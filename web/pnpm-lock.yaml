@@ -41,6 +41,9 @@ importers:
       "@eslint/js":
         specifier: ^9.14.0
         version: 9.39.4
+      "@unship/cli":
+        specifier: 0.2.1
+        version: 0.2.1
       "@vitejs/plugin-vue":
         specifier: ^5.1.4
         version: 5.2.4(vite@5.4.21(@types/node@26.0.1))(vue@3.5.35(typescript@5.9.3))
@@ -1210,6 +1213,14 @@ packages:
         integrity: sha512-QVLZu3ZPQEE+HICQyAMZ2yLQhxf0meY/wx6Hx14YcTNj13JB3qHlX3lJ02L3fLGHgERRH71kvYDwiXIguT3AjQ==,
       }
     engines: { node: ^18.18.0 || ^20.9.0 || >=21.1.0 }
+
+  "@unship/cli@0.2.1":
+    resolution:
+      {
+        integrity: sha512-vOnk7n/1xamKkMC6YgfAZqjMZ7+q9YfNfcOJOWUbsbh4nOgR4fv/UnPPuBem3m86xtAFUKnHKPvM7IX4EgJesQ==,
+      }
+    engines: { node: ">=20" }
+    hasBin: true
 
   "@vitejs/plugin-vue@5.2.4":
     resolution:
@@ -5458,6 +5469,8 @@ snapshots:
     dependencies:
       "@typescript-eslint/types": 8.61.0
       eslint-visitor-keys: 5.0.1
+
+  "@unship/cli@0.2.1": {}
 
   "@vitejs/plugin-vue@5.2.4(vite@5.4.21(@types/node@26.0.1))(vue@3.5.35(typescript@5.9.3))":
     dependencies:
