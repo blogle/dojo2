@@ -54,7 +54,7 @@ $UNSHIP setup --out public/unship-picker.js --src /unship-picker.js --json
 
 The paths above are examples: choose the app's actual served file and URL. Reuse an existing destination; do not add a second mount. Setup creates a missing file, leaves identical bytes untouched, and reports differing content without overwriting it. For a known old generated picker, repeat with `--force`; replacement saves a backup. Preserve custom modifications and resolve them deliberately before replacement. Require `picker.current: true` after preparation.
 
-Setup prepares the file, not the app shell. Add the returned small script tag once in a dev-only shell; keep the runtime and agent instructions out of production builds. Respect framework script ordering: in Next.js App Router, use a valid root-document script placement or an appropriate async include, rather than a synchronous `next/script` in an arbitrary component.
+Setup prepares the file, not the app shell. Add the returned small script tag once in a dev-only shell; keep the runtime and agent instructions out of production builds. In Vue single-file components, do not put a `<script>` element in the template: Vue ignores side-effect script tags there. Load the picker from a dev-only `onMounted` hook by creating and appending a script element. Respect framework script ordering: in Next.js App Router, use a valid root-document script placement or an appropriate async include, rather than a synchronous `next/script` in an arbitrary component.
 
 If the preview serves built output or caches an old script, rebuild/reload as needed and verify the served file matches the selected runtime. Reinjecting a script does not replace an already-running singleton. Report unresolved browser freshness honestly.
 
