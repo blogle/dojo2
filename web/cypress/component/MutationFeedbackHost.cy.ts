@@ -4,6 +4,7 @@ import MutationFeedbackHost from "../../src/dojo/layouts/MutationFeedbackHost.vu
 import {
   notifyMutationError,
   notifyMutationSuccess,
+  notifyReconciledHistoryConfirmation,
   useMutationFeedback,
 } from "../../src/dojo/state/mutationFeedback";
 
@@ -62,6 +63,59 @@ describe("shared mutation feedback", () => {
       .and("have.attr", "aria-live", "assertive")
       .and("contain.text", "Dojo could not save this change");
     cy.get('[aria-label="Dismiss notification"]').focus().type("{enter}");
+    cy.get('[data-cy="mutation-feedback"]').should("not.exist");
+  });
+
+  it("confirms a reconciled transaction change before retrying it", () => {
+    const confirm = cy.stub().resolves();
+    notifyReconciledHistoryConfirmation(async () => {
+      await confirm();
+      notifyMutationSuccess("Transaction updated");
+    }, cy.stub());
+    mount(MutationFeedbackHost);
+
+    cy.get('[data-cy="mutation-feedback"]')
+      .should(
+        "contain.text",
+        "The completed reconciliation is preserved",
+      )
+      .and("contain.text", "Apply anyway");
+    cy.get(".mutation-feedback__confirm").click();
+
+    cy.wrap(null).should(() => {
+      expect(confirm).to.have.been.calledOnce;
+      expect(feedback.notice.value?.message).to.equal("Transaction updated");
+    });
+  });
+
+  it("cancels a reconciled transaction change", () => {
+    const cancel = cy.stub();
+    notifyReconciledHistoryConfirmation(async () => {}, cancel);
+    mount(MutationFeedbackHost);
+
+    cy.get('[data-cy="mutation-feedback"]').contains("Cancel").click();
+
+    cy.wrap(cancel).should("have.been.calledOnce");
+    cy.get('[data-cy="mutation-feedback"]').should("not.exist");
+  });
+
+  it("keeps cancellation available if applying the change fails", () => {
+    const cancel = cy.stub();
+    notifyReconciledHistoryConfirmation(
+      async () => {
+        throw new Error("Retry failed");
+      },
+      cancel,
+    );
+    mount(MutationFeedbackHost);
+
+    cy.get(".mutation-feedback__confirm").click();
+    cy.get('[data-cy="mutation-feedback"]')
+      .should("contain.text", "Dojo could not save this change")
+      .contains("Cancel")
+      .click();
+
+    cy.wrap(cancel).should("have.been.calledOnce");
     cy.get('[data-cy="mutation-feedback"]').should("not.exist");
   });
 });

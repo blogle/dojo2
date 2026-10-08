@@ -3,7 +3,14 @@ import { onBeforeUnmount, onMounted } from "vue";
 
 import { useMutationFeedback } from "../state/mutationFeedback";
 
-const { notice, undoPending, dismiss, undoLatest } = useMutationFeedback();
+const {
+  notice,
+  undoPending,
+  confirmationPending,
+  dismiss,
+  undoLatest,
+  confirmChange,
+} = useMutationFeedback();
 
 function handleKeydown(event: KeyboardEvent): void {
   if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "z")
@@ -37,6 +44,24 @@ onBeforeUnmount(() => document.removeEventListener("keydown", handleKeydown));
     >
       <span class="mutation-feedback__message">{{ notice.message }}</span>
       <button
+        v-if="notice.confirm"
+        class="mutation-feedback__confirm"
+        type="button"
+        :disabled="confirmationPending"
+        @click="confirmChange"
+      >
+        {{ confirmationPending ? "Applying…" : "Apply anyway" }}
+      </button>
+      <button
+        v-if="notice.cancel"
+        class="mutation-feedback__cancel"
+        type="button"
+        :disabled="confirmationPending"
+        @click="dismiss"
+      >
+        Cancel
+      </button>
+      <button
         v-if="notice.undoId"
         class="mutation-feedback__undo"
         type="button"
@@ -49,6 +74,7 @@ onBeforeUnmount(() => document.removeEventListener("keydown", handleKeydown));
         class="mutation-feedback__dismiss"
         type="button"
         aria-label="Dismiss notification"
+        :disabled="confirmationPending"
         @click="dismiss"
       >
         ×
@@ -100,7 +126,9 @@ onBeforeUnmount(() => document.removeEventListener("keydown", handleKeydown));
   cursor: pointer;
 }
 
-.mutation-feedback__undo {
+.mutation-feedback__undo,
+.mutation-feedback__confirm,
+.mutation-feedback__cancel {
   font-family: var(--text-label-sm-font-family) !important;
   font-size: var(--text-label-sm-font-size) !important;
   font-weight: 600 !important;

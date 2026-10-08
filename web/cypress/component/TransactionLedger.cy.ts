@@ -102,6 +102,10 @@ describe("TransactionLedger", () => {
       .should("contain.text", "amount_minor, status");
     cy.get(".ledger__row")
       .eq(2)
+      .should("contain.text", "Removed purchase")
+      .and("contain.text", "Removed");
+    cy.get(".ledger__row")
+      .eq(3)
       .should("contain.text", "Pending")
       .and("contain.text", "Uncategorized")
       .and("not.contain.text", "Category missing");
@@ -267,6 +271,50 @@ describe("TransactionLedger", () => {
     cy.get('[data-cy="transaction-ledger"] [role="alert"]')
       .should("contain.text", "Transaction changed elsewhere")
       .and("be.visible");
+  });
+
+  it("deselects an edit when its confirmation is cancelled", () => {
+    type Completion =
+      | { success: true }
+      | { cancelled: true }
+      | { success: false; message: string };
+    let finish: ((result: Completion) => void) | undefined;
+    const onCommit = cy.stub().callsFake(
+      (
+        _id: string,
+        _payload: unknown,
+        complete: (result: Completion) => void,
+      ) => {
+        finish = complete;
+      },
+    );
+    mount(TransactionLedger, {
+      props: {
+        transactions: mockTransactions,
+        accounts: mockAccounts,
+        categories: mockCategories,
+        onCommit,
+      },
+    });
+
+    cy.get(".ledger__row").first().click();
+    cy.get('.ledger__row--editing input[placeholder="Memo"]').clear().type("Edited");
+    cy.get("body").click(10, 10);
+    cy.wrap(onCommit).should("have.been.calledOnce");
+    cy.then(() => finish?.({ cancelled: true }));
+    cy.get(".ledger__row--editing").should("not.exist");
+  });
+
+  it("shows removed reconciliation rows without allowing edits", () => {
+    const scenario = ledgerFixtures.scenarios[0];
+    mount(TransactionLedger, {
+      props: scenario?.props ?? {},
+    });
+
+    cy.contains(".ledger__row", "Removed purchase")
+      .should("contain.text", "Removed")
+      .click();
+    cy.get(".ledger__row--editing").should("not.exist");
   });
 
   it("commits edit on click outside the table", () => {

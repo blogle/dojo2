@@ -1590,8 +1590,16 @@ class DojoService:
             ) == BUDGET_ACCOUNT_TYPE_CREDIT_CARD and account.get("display_liability_positive"):
                 display_balance = -display_balance
             value = values[account_id]
+            last_reconciliation_date = None
             if account["account_class"] in {ACCOUNT_CLASS_BUDGET, ACCOUNT_CLASS_INVESTMENT}:
-                reconciliation_status = self.get_reconciliation_status(account_id)
+                reconciliation = self._reconciliation_state(account_id)[
+                    "effective_reconciliation"
+                ]
+                reconciliation_status = (
+                    "CURRENT" if reconciliation is not None else "NOT_RECONCILED"
+                )
+                if reconciliation is not None:
+                    last_reconciliation_date = str(reconciliation["committed_at"])
                 if not (
                     account["account_class"] == ACCOUNT_CLASS_INVESTMENT
                     and reconciliation_status == "NOT_RECONCILED"
@@ -1613,6 +1621,7 @@ class DojoService:
                     ),
                     "change_30d_minor": value.change_minor,
                     "reconciliation_status": value.reconciliation_status,
+                    "last_reconciliation_date": last_reconciliation_date,
                     "provisional_value_minor": value.provisional_minor,
                     "liability_component_minor": value.liability_minor,
                     "restricted_asset_component_minor": value.restricted_asset_minor,

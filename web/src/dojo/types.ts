@@ -108,6 +108,7 @@ export type Account = {
     | "NOT_RECONCILED"
     | "REOPENED"
     | "PROVISIONAL";
+  last_reconciliation_date?: string | null;
   provisional_value_minor?: number;
   investment_self_managed?: boolean | null;
   investment_tax_treatment?: string | null;

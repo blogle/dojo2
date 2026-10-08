@@ -9,6 +9,7 @@ import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import {
+  ApiError,
   deleteTransaction,
   createTransaction,
   createTransfer,
@@ -64,12 +65,16 @@ import TableShell from "@/dojo/components/tables/TableShell.vue";
 import TransactionFilterBar from "@/dojo/components/transactions/TransactionFilterBar.vue";
 import TransactionLedger from "@/dojo/components/transactions/TransactionLedger.vue";
 import TransactionEntryForm from "@/dojo/components/transactions/TransactionEntryForm.vue";
-import type { Transaction, TransactionPayload } from "@/dojo/types";
+import type {
+  Transaction,
+  TransactionPayload,
+} from "@/dojo/types";
 import { formatCurrency } from "@/dojo/utils/currency";
 import { institutionSuggestions } from "@/dojo/utils/institutions";
 import {
   mutationErrorMessage,
   notifyMutationError,
+  notifyReconciledHistoryConfirmation,
   notifyMutationSuccess,
   notifyVersionedMutationSuccess,
 } from "@/dojo/state/mutationFeedback";
@@ -302,21 +307,94 @@ const reconciliationChanges = computed(() =>
               ? "Removed"
               : null;
       return label
-        ? [[item.transaction_id, { label, changedFields: item.changed_fields }]]
-        : [];
+       ? [
+           [
+             item.transaction_id,
+              {
+                label,
+                changedFields: item.changed_fields,
+                removed: item.classification === "REMOVED",
+               details: item.changed_fields
+                 .map((field) => {
+                   const formatValue = (value: unknown) => {
+                     if (value == null) return "—";
+                     if (field === "amount_minor" && typeof value === "number") {
+                       return formatCurrency(value);
+                     }
+                     return String(value);
+                   };
+                   const fieldLabel =
+                     field === "amount_minor"
+                       ? "Amount"
+                       : field === "status"
+                         ? "Status"
+                         : field;
+                   return `${fieldLabel}: ${formatValue(item.baseline?.[field])} → ${formatValue(item.current?.[field])}`;
+                 })
+                 .join("; "),
+             },
+           ],
+         ]
+         : [];
     }),
   ),
 );
 const removedReconciliationItems = computed(() =>
   workingSetItems.value.filter((item) => item.classification === "REMOVED"),
 );
+const removedReconciliationTransactions = computed(() =>
+  removedReconciliationItems.value.flatMap((item): Transaction[] => {
+    const baseline = item.baseline;
+    if (!baseline) return [];
+
+    const transactionAccountId = String(baseline.account_id ?? accountId.value);
+    const categoryId =
+      typeof baseline.category_id === "string" ? baseline.category_id : null;
+    const systemCategory = (
+      [
+        "TX_AVAILABLE_TO_BUDGET",
+        "TX_ACCOUNT_TRANSFER",
+        "TX_STARTING_BALANCE",
+        "TX_BALANCE_ADJUSTMENT",
+        "TX_UNCATEGORIZED",
+      ] as const
+    ).find((candidate) => candidate === baseline.system_category) ?? null;
+
+    return [
+      {
+        transaction_id: item.transaction_id,
+        version: String(baseline.row_id ?? item.transaction_id),
+        date: String(baseline.date ?? ""),
+        account_id: transactionAccountId,
+        account_name:
+          accounts.value?.find(
+            (candidate) => candidate.account_id === transactionAccountId,
+          )?.name ?? "",
+        amount_minor: Number(baseline.amount_minor ?? 0),
+        category_id: categoryId,
+        category_name:
+          categories.value.find((category) => category.category_id === categoryId)
+            ?.name ?? null,
+        system_category: systemCategory,
+        status: baseline.status === "PENDING" ? "PENDING" : "CLEARED",
+        memo: String(baseline.memo ?? ""),
+        is_hidden_entity: false,
+      },
+    ];
+  }),
+);
 const investigationTransactions = computed(() =>
-  showAllReconciliationTransactions.value
-    ? transactions.value
-    : transactions.value.filter((item) => {
-        const change = workingSetByTransactionId.value.get(item.transaction_id);
-        return !!change;
-      }),
+  [
+    ...(showAllReconciliationTransactions.value
+      ? transactions.value
+      : transactions.value.filter((item) => {
+          const change = workingSetByTransactionId.value.get(
+            item.transaction_id,
+          );
+          return !!change;
+        })),
+    ...removedReconciliationTransactions.value,
+  ].sort((left, right) => right.date.localeCompare(left.date)),
 );
 
 const sourceBalanceInputs = computed(() => [
@@ -764,7 +842,11 @@ const metricItems = computed((): MetricStripItem[] => {
           investigatingReconciliation.value && budgetAttempt.value
             ? `As of ${budgetAttempt.value.cutoff}`
             : account.value.reconciliation_status === "CURRENT"
-              ? "A reconciliation is on record"
+              ? account.value.last_reconciliation_date
+                ? `Last reconciled ${formatDateShort(
+                    new Date(account.value.last_reconciliation_date),
+                  )}`
+                : "A reconciliation is on record"
               : "No reconciliation recorded",
         status: {
           label: investigatingReconciliation.value ? "Active" : "",
@@ -1152,6 +1234,13 @@ const updateTransactionMutation = useMutation({
     }
   },
   onError: (error) => {
+    if (
+      error instanceof ApiError &&
+      error.code === "reconciled_history_change_requires_confirmation"
+    ) {
+      transactionMutationError.value = "";
+      return;
+    }
     transactionMutationError.value = mutationErrorMessage(error);
   },
 });
@@ -1863,7 +1952,10 @@ function handleCommitEdit(
   id: string,
   payload: TransactionPayload,
   complete: (
-    result: { success: true } | { success: false; message: string },
+    result:
+      | { success: true }
+      | { cancelled: true }
+      | { success: false; message: string },
   ) => void,
 ) {
   const transaction = transactions.value.find(
@@ -1914,6 +2006,48 @@ function handleCommitEdit(
         );
       },
       onError: (error) => {
+        if (
+          error instanceof ApiError &&
+          error.code === "reconciled_history_change_requires_confirmation"
+        ) {
+          notifyReconciledHistoryConfirmation(
+            async () => {
+              const result = await updateTransaction(
+                id,
+                payload,
+                transaction.version,
+                { acknowledgeReconciledHistoryChange: true },
+              );
+              complete({ success: true });
+              transactionMutationError.value = "";
+              invalidateAccountDetailQueries();
+              if (investigatingReconciliation.value) {
+                persistentEditsDuringAttempt.value = true;
+                await refreshReconciliationAfterMutation();
+              }
+              notifyVersionedMutationSuccess(
+                "Transaction updated",
+                "Transaction edit undone",
+                {
+                  key: `transaction:${id}`,
+                  version: result.version,
+                  run: async (expectedVersion) => {
+                    const restored = await updateTransaction(
+                      id,
+                      previous,
+                      expectedVersion,
+                      { acknowledgeReconciledHistoryChange: true },
+                    );
+                    invalidateAccountDetailQueries();
+                    return restored.version;
+                  },
+                },
+              );
+            },
+            () => complete({ cancelled: true }),
+          );
+          return;
+        }
         complete({ success: false, message: mutationErrorMessage(error) });
       },
     },
@@ -1923,7 +2057,10 @@ function handleCommitEdit(
 function handleRemoveTransaction(
   transaction: Transaction,
   complete: (
-    result: { success: true } | { success: false; message: string },
+    result:
+      | { success: true }
+      | { cancelled: true }
+      | { success: false; message: string },
   ) => void,
 ) {
   deleteTransactionMutation.mutate(
@@ -1956,6 +2093,44 @@ function handleRemoveTransaction(
         );
       },
       onError: (error) => {
+        if (
+          error instanceof ApiError &&
+          error.code === "reconciled_history_change_requires_confirmation"
+        ) {
+          notifyReconciledHistoryConfirmation(
+            async () => {
+              await deleteTransaction(
+                transaction.transaction_id,
+                transaction.version,
+                { acknowledgeReconciledHistoryChange: true },
+              );
+              complete({ success: true });
+              invalidateAccountDetailQueries();
+              if (investigatingReconciliation.value) {
+                persistentEditsDuringAttempt.value = true;
+                await refreshReconciliationAfterMutation();
+              }
+              notifyVersionedMutationSuccess(
+                "Transaction removed",
+                "Transaction removal undone",
+                {
+                  key: `transaction:${transaction.transaction_id}`,
+                  version: transaction.version,
+                  run: async (expectedVersion) => {
+                    const restored = await restoreTransaction(
+                      transaction.transaction_id,
+                      expectedVersion,
+                    );
+                    invalidateAccountDetailQueries();
+                    return restored.version;
+                  },
+                },
+              );
+            },
+            () => complete({ cancelled: true }),
+          );
+          return;
+        }
         complete({ success: false, message: mutationErrorMessage(error) });
       },
     },
@@ -2869,46 +3044,6 @@ function formatTaxTreatment(value: string | null | undefined): string {
                     @update:status-filter="statusFilter = $event"
                   />
 
-                  <div
-                    v-if="
-                      investigatingReconciliation &&
-                      removedReconciliationItems.length
-                    "
-                    class="account-detail-page__removed-rows"
-                    data-cy="removed-reconciliation-rows"
-                  >
-                    <h3>Removed transactions</h3>
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>Date</th>
-                          <th>Memo</th>
-                          <th class="account-detail-page__removed-amount">
-                            Amount
-                          </th>
-                          <th>Change</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        <tr
-                          v-for="item in removedReconciliationItems"
-                          :key="item.transaction_id"
-                        >
-                          <td>{{ item.baseline?.date }}</td>
-                          <td>{{ item.baseline?.memo }}</td>
-                          <td class="account-detail-page__removed-amount">
-                            {{
-                              formatCurrency(
-                                Number(item.baseline?.amount_minor ?? 0),
-                              )
-                            }}
-                          </td>
-                          <td>Removed</td>
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
-
                   <TransactionLedger
                     :transactions="
                       investigatingReconciliation && isBudgetAccount
@@ -2917,7 +3052,12 @@ function formatTaxTreatment(value: string | null | undefined): string {
                     "
                     :accounts="accounts ?? []"
                     :categories="categories"
-                    :total-count="transactionTotal"
+                    :total-count="
+                      transactionTotal +
+                      (investigatingReconciliation && isBudgetAccount
+                        ? removedReconciliationTransactions.length
+                        : 0)
+                    "
                     :has-more="hasNextPage"
                     :loading-more="isFetchingNextPage"
                     :show-account-column="false"
@@ -4053,34 +4193,6 @@ function formatTaxTreatment(value: string | null | undefined): string {
 .account-detail-page__reconciliation-proof strong {
   color: var(--color-positive);
 }
-.account-detail-page__removed-rows {
-  padding: var(--space-md);
-  border-top: 1px solid var(--color-outline);
-}
-.account-detail-page__removed-rows h3 {
-  margin: 0 0 var(--space-sm);
-  font: var(--text-label-md-font-weight) var(--text-label-md-font-size)
-    var(--text-label-md-font-family);
-}
-.account-detail-page__removed-rows table {
-  width: 100%;
-  border-collapse: collapse;
-  font: var(--text-body-sm-font-weight) var(--text-body-sm-font-size)
-    var(--text-body-sm-font-family);
-}
-.account-detail-page__removed-rows th,
-.account-detail-page__removed-rows td {
-  padding: var(--space-sm);
-  border-bottom: 1px solid var(--color-outline);
-  text-align: left;
-}
-.account-detail-page__removed-amount {
-  text-align: right !important;
-  font-feature-settings:
-    "tnum" 1,
-    "zero" 1;
-}
-
 .account-detail-page__notice {
   display: flex;
   align-items: center;

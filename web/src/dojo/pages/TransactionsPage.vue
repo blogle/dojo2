@@ -24,6 +24,7 @@ import {
   notifyMutationSuccess,
   notifyVersionedMutationSuccess,
   notifyMutationError,
+  notifyReconciledHistoryConfirmation,
   mutationErrorMessage,
 } from "../state/mutationFeedback";
 
@@ -204,7 +205,10 @@ function handleCommitEdit(
   id: string,
   payload: Parameters<typeof updateTransaction>[1],
   complete: (
-    result: { success: true } | { success: false; message: string },
+    result:
+      | { success: true }
+      | { cancelled: true }
+      | { success: false; message: string },
   ) => void,
 ) {
   const tx = transactions.value.find((t) => t.transaction_id === id);
@@ -251,6 +255,43 @@ function handleCommitEdit(
       onError: (error) => {
         if (error instanceof ApiError && error.status === 409) {
           invalidateRelatedQueries();
+        }
+        if (
+          error instanceof ApiError &&
+          error.code === "reconciled_history_change_requires_confirmation"
+        ) {
+          notifyReconciledHistoryConfirmation(
+            async () => {
+              const result = await updateTransaction(
+                id,
+                payload,
+                tx.version,
+                { acknowledgeReconciledHistoryChange: true },
+              );
+              complete({ success: true });
+              invalidateRelatedQueries();
+              notifyVersionedMutationSuccess(
+                "Transaction updated",
+                "Transaction edit undone",
+                {
+                  key: `transaction:${id}`,
+                  version: result.version,
+                  run: async (expectedVersion) => {
+                    const restored = await updateTransaction(
+                      id,
+                      previous,
+                      expectedVersion,
+                      { acknowledgeReconciledHistoryChange: true },
+                    );
+                    invalidateRelatedQueries();
+                    return restored.version;
+                  },
+                },
+              );
+            },
+            () => complete({ cancelled: true }),
+          );
+          return;
         }
         complete({ success: false, message: mutationErrorMessage(error) });
       },
@@ -311,7 +352,10 @@ function handleSubmit(
 function handleRemove(
   tx: Transaction,
   complete: (
-    result: { success: true } | { success: false; message: string },
+    result:
+      | { success: true }
+      | { cancelled: true }
+      | { success: false; message: string },
   ) => void,
 ) {
   deleteMutation.mutate(
@@ -340,6 +384,38 @@ function handleRemove(
       onError: (error) => {
         if (error instanceof ApiError && error.status === 409) {
           invalidateRelatedQueries();
+        }
+        if (
+          error instanceof ApiError &&
+          error.code === "reconciled_history_change_requires_confirmation"
+        ) {
+          notifyReconciledHistoryConfirmation(
+            async () => {
+              await deleteTransaction(tx.transaction_id, tx.version, {
+                acknowledgeReconciledHistoryChange: true,
+              });
+              complete({ success: true });
+              invalidateRelatedQueries();
+              notifyVersionedMutationSuccess(
+                "Transaction removed",
+                "Transaction removal undone",
+                {
+                  key: `transaction:${tx.transaction_id}`,
+                  version: tx.version,
+                  run: async (expectedVersion) => {
+                    const restored = await restoreTransaction(
+                      tx.transaction_id,
+                      expectedVersion,
+                    );
+                    invalidateRelatedQueries();
+                    return restored.version;
+                  },
+                },
+              );
+            },
+            () => complete({ cancelled: true }),
+          );
+          return;
         }
         complete({ success: false, message: mutationErrorMessage(error) });
       },

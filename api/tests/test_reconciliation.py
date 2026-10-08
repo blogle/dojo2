@@ -783,7 +783,13 @@ def test_historical_protection_excludes_metadata_pending_lifecycle_and_new_rows(
         service, cleared_id, memo="metadata", acknowledge_reconciled_history_change=False
     )
     _update_transaction(
-        service, pending_id, status="CLEARED", acknowledge_reconciled_history_change=False
+        service,
+        pending_id,
+        status="CLEARED",
+        date=date(2026, 2, 4),
+        amount_minor=15,
+        memo="Posted amount",
+        acknowledge_reconciled_history_change=False,
     )
     new_id = service.create_transaction(
         {
@@ -795,9 +801,11 @@ def test_historical_protection_excludes_metadata_pending_lifecycle_and_new_rows(
         }
     )["transaction_id"]
 
-    assert new_id in {
-        item["transaction_id"] for item in service.reconciliation_working_set(account_id)["items"]
-    }
+    items = service.reconciliation_working_set(account_id)["items"]
+    assert new_id in {item["transaction_id"] for item in items}
+    pending_item = next(item for item in items if item["transaction_id"] == pending_id)
+    assert pending_item["classification"] == "PENDING_CLEARED"
+    assert set(pending_item["changed_fields"]) == {"date", "amount_minor", "status"}
 
 
 def test_investment_reconciliation_uses_statement_value(service) -> None:

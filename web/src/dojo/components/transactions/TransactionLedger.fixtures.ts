@@ -34,6 +34,11 @@ export default defineFixtures<TransactionLedgerProps>({
             label: "Edited",
             changedFields: ["amount_minor", "status"],
           },
+          "transaction-removed": {
+            label: "Removed",
+            changedFields: [],
+            removed: true,
+          },
         },
         transactions: [
           {
@@ -62,6 +67,20 @@ export default defineFixtures<TransactionLedgerProps>({
             system_category: null,
             status: "PENDING",
             memo: "Fuel",
+            is_hidden_entity: false,
+          },
+          {
+            transaction_id: "transaction-removed",
+            version: "2026-09-01T10:00:00Z",
+            date: "2026-09-01",
+            account_id: account.account_id,
+            account_name: account.name,
+            amount_minor: -2_500,
+            category_id: null,
+            category_name: null,
+            system_category: null,
+            status: "CLEARED",
+            memo: "Removed purchase",
             is_hidden_entity: false,
           },
           {

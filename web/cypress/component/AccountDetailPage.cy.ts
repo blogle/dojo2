@@ -246,6 +246,7 @@ function stubFetch(
                   date: "2026-05-18",
                   amount_minor: -4500,
                   memo: "Removed market row",
+                  status: "CLEARED",
                 },
                 current: null,
                 changed_fields: [],
@@ -623,9 +624,12 @@ describe("AccountDetailPage", () => {
       .and("contain.text", "Pending");
     cy.get("[data-cy=transaction-ledger]").should("contain.text", "Edited");
     cy.get("[data-cy=transaction-ledger]").should("contain.text", "Pending");
-    cy.get("[data-cy=removed-reconciliation-rows]")
+    cy.get("[data-cy=transaction-ledger]")
       .should("contain.text", "Removed market row")
       .and("contain.text", "Removed");
+    cy.contains(".ledger__row", "Removed market row")
+      .click()
+      .should("not.have.class", "ledger__row--editing");
   });
 
   it("exits without a warning when no canonical transaction was changed", () => {

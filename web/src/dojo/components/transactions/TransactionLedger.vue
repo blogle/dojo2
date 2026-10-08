@@ -30,7 +30,12 @@ const props = withDefaults(
     lockedAccountId?: string;
     reconciliationChanges?: Record<
       string,
-      { label: string; changedFields: string[] }
+      {
+        label: string;
+        changedFields: string[];
+        details?: string;
+        removed?: boolean;
+      }
     >;
   }>(),
   {
@@ -46,7 +51,10 @@ const props = withDefaults(
   },
 );
 
-type EditCompletion = { success: true } | { success: false; message: string };
+type EditCompletion =
+  | { success: true }
+  | { cancelled: true }
+  | { success: false; message: string };
 
 const emit = defineEmits<{
   commit: [
@@ -95,6 +103,7 @@ const virtualTransactionRows = computed<
 );
 
 function startEdit(tx: Transaction) {
+  if (isRemovedTransaction(tx)) return;
   if (editSaving.value && editingId.value !== tx.transaction_id) return;
   editingId.value = tx.transaction_id;
   editError.value = "";
@@ -107,6 +116,10 @@ function startEdit(tx: Transaction) {
   editDirection.value = tx.amount_minor >= 0 ? "inflow" : "outflow";
   editStatus.value = tx.status;
   editMemo.value = tx.memo;
+}
+
+function isRemovedTransaction(tx: Transaction): boolean {
+  return props.reconciliationChanges?.[tx.transaction_id]?.removed === true;
 }
 
 function transactionCategorySelection(tx: Transaction): string {
@@ -176,6 +189,11 @@ function commitEdit() {
 
 function completeEditMutation(result: EditCompletion) {
   editSaving.value = false;
+  if ("cancelled" in result) {
+    editingId.value = null;
+    editError.value = "";
+    return;
+  }
   if (result.success) {
     editingId.value = null;
     editError.value = "";
@@ -185,6 +203,7 @@ function completeEditMutation(result: EditCompletion) {
 }
 
 function removeTransaction(tx: Transaction) {
+  if (isRemovedTransaction(tx)) return;
   if (editSaving.value) return;
   editSaving.value = true;
   emit("remove", tx, completeEditMutation);
@@ -406,13 +425,18 @@ function systemCategoryLabel(value: string | null): string {
                 'ledger__row--with-balance': showRunningBalance,
                 'ledger__row--with-reconciliation':
                   Object.keys(reconciliationChanges).length > 0,
+                'ledger__row--removed': isRemovedTransaction(tx),
               }"
               :style="{
                 transform: `translateY(${virtualRow.start}px)`,
               }"
               data-cy="transaction-row"
-              @click="editingId !== tx.transaction_id && startEdit(tx)"
-              tabindex="0"
+              @click="
+                !isRemovedTransaction(tx) &&
+                editingId !== tx.transaction_id &&
+                startEdit(tx)
+              "
+              :tabindex="isRemovedTransaction(tx) ? -1 : 0"
             >
               <td class="ledger__cell ledger__cell--check">
                 <template v-if="editingId === tx.transaction_id">
@@ -499,7 +523,9 @@ function systemCategoryLabel(value: string | null): string {
                   class="ledger__cell ledger__cell--end ledger__cell--amount"
                 >
                   {{
-                    formatCurrency(runningBalances?.[tx.transaction_id] ?? 0)
+                    isRemovedTransaction(tx)
+                      ? "—"
+                      : formatCurrency(runningBalances?.[tx.transaction_id] ?? 0)
                   }}
                 </td>
               </template>
@@ -572,17 +598,9 @@ function systemCategoryLabel(value: string | null): string {
                       'Edited'
                     "
                   >
-                    <details @click.stop>
-                      <summary>Edited</summary>
-                      <span
-                        >Last reconciled → Current:
-                        {{
-                          reconciliationChanges[
-                            tx.transaction_id
-                          ]?.changedFields.join(", ")
-                        }}</span
-                      >
-                    </details>
+                    <span
+                      :title="reconciliationChanges[tx.transaction_id]?.details"
+                    >Edited</span>
                   </template>
                   <span v-else>{{
                     reconciliationChanges[tx.transaction_id]?.label ?? "—"

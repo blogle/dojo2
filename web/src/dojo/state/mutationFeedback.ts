@@ -25,11 +25,14 @@ export type MutationNotice = {
   kind: NoticeKind;
   message: string;
   undoId?: number;
+  confirm?: () => Promise<void>;
+  cancel?: () => void;
 };
 
 const undoEntries = shallowRef<UndoEntry[]>([]);
 const currentNotice = shallowRef<MutationNotice | null>(null);
 const undoPending = ref(false);
+const confirmationPending = ref(false);
 let nextNoticeId = 1;
 
 export function mutationErrorMessage(error: unknown): string {
@@ -38,7 +41,7 @@ export function mutationErrorMessage(error: unknown): string {
       return "This transaction changed elsewhere. Refresh it and try again.";
     }
     if (error.code === "reconciled_history_change_requires_confirmation") {
-      return "This transaction belongs to a completed reconciliation. Review the account reconciliation before changing it.";
+      return "This transaction belongs to a completed reconciliation. Changing it will affect future reconciliation results.";
     }
     if (error.status === 422) {
       if (
@@ -146,8 +149,44 @@ export function notifyMutationError(error: unknown): void {
   };
 }
 
+export function notifyReconciledHistoryConfirmation(
+  confirm: () => Promise<void>,
+  cancel: () => void,
+): void {
+  currentNotice.value = {
+    id: nextNoticeId++,
+    kind: "error",
+    message:
+      "This transaction belongs to a completed reconciliation. The completed reconciliation is preserved; applying this change will affect future reconciliation results.",
+    confirm,
+    cancel,
+  };
+}
+
+export async function confirmMutationChange(): Promise<void> {
+  const notice = currentNotice.value;
+  if (!notice?.confirm || confirmationPending.value) return;
+
+  confirmationPending.value = true;
+  try {
+    await notice.confirm();
+    if (currentNotice.value?.id === notice.id) dismissMutationNotice();
+  } catch (error) {
+    currentNotice.value = {
+      id: nextNoticeId++,
+      kind: "error",
+      message: mutationErrorMessage(error),
+      ...(notice.cancel ? { cancel: notice.cancel } : {}),
+    };
+  } finally {
+    confirmationPending.value = false;
+  }
+}
+
 export function dismissMutationNotice(): void {
-  const undoId = currentNotice.value?.undoId;
+  const notice = currentNotice.value;
+  notice?.cancel?.();
+  const undoId = notice?.undoId;
   if (undoId !== undefined) {
     undoEntries.value = undoEntries.value.filter(
       (entry) => entry.id !== undoId,
@@ -195,7 +234,9 @@ export function useMutationFeedback() {
   return {
     notice: computed(() => currentNotice.value),
     undoPending: computed(() => undoPending.value),
+    confirmationPending: computed(() => confirmationPending.value),
     dismiss: dismissMutationNotice,
     undoLatest: undoLatestMutation,
+    confirmChange: confirmMutationChange,
   };
 }
