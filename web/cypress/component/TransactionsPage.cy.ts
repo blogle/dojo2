@@ -1,9 +1,12 @@
+import { defineComponent, h } from "vue";
 import { mount } from "cypress/vue";
 import { createRouter, createMemoryHistory } from "vue-router";
 import { VueQueryPlugin } from "@tanstack/vue-query";
 
 import TransactionsPage from "../../src/dojo/pages/TransactionsPage.vue";
+import MutationFeedbackHost from "../../src/dojo/layouts/MutationFeedbackHost.vue";
 import { createDojoQueryClient } from "../../src/dojo/queryClient";
+import { useMutationFeedback } from "../../src/dojo/state/mutationFeedback";
 
 const router = createRouter({
   history: createMemoryHistory(),
@@ -112,11 +115,15 @@ const mockTransactions = [
 ];
 
 function stubFetch(
-  override?: (path: string, init?: RequestInit) => Response | undefined,
+  override?: (
+    path: string,
+    init?: RequestInit,
+    requestUrl?: string,
+  ) => Response | undefined,
 ) {
   cy.stub(window, "fetch").callsFake((url: string, init?: RequestInit) => {
     const path = new URL(url, "http://localhost").pathname;
-    const overridden = override?.(path, init);
+    const overridden = override?.(path, init, url);
     if (overridden) return Promise.resolve(overridden);
 
     if (path === "/api/bootstrap") {
@@ -219,18 +226,118 @@ function typeFreeformMemo(label: string, value: string) {
 }
 
 function mountPage(
-  override?: (path: string, init?: RequestInit) => Response | undefined,
+  override?: (
+    path: string,
+    init?: RequestInit,
+    requestUrl?: string,
+  ) => Response | undefined,
+  stubs: Record<string, unknown> = {},
+  includeFeedbackHost = false,
 ) {
   stubFetch(override);
   const queryClient = createDojoQueryClient();
-  return mount(TransactionsPage, {
+  const component = includeFeedbackHost
+    ? TransactionsPageWithFeedback
+    : TransactionsPage;
+  return mount(component, {
     global: {
       plugins: [router, [VueQueryPlugin, { queryClient }]],
+      stubs,
     },
   });
 }
 
+const createdTransactionPayload = {
+  date: currentDate,
+  account_id: "acc1",
+  amount_minor: -1200,
+  category_id: "c1",
+  system_category: null,
+  status: "PENDING" as const,
+  memo: "Undo test transaction",
+};
+
+// This root keeps the global feedback host and the page in the same test app.
+// eslint-disable-next-line vue/one-component-per-file
+const TransactionsPageWithFeedback = defineComponent({
+  name: "TransactionsPageWithFeedback",
+  setup: () => () => h("div", [h(TransactionsPage), h(MutationFeedbackHost)]),
+});
+
+// These lightweight children isolate the page's mutation wiring from its input and ledger components.
+// eslint-disable-next-line vue/one-component-per-file
+const entryFormMutationStub = defineComponent({
+  name: "TransactionEntryForm",
+  emits: ["submit"],
+  setup(_props, { emit, expose }) {
+    expose({ resetForm: () => undefined });
+    return () =>
+      h(
+        "button",
+        {
+          "data-cy": "test-create-transaction",
+          onClick: () => emit("submit", createdTransactionPayload),
+        },
+        "Create test transaction",
+      );
+  },
+});
+
+// eslint-disable-next-line vue/one-component-per-file
+const ledgerMutationStub = defineComponent({
+  name: "TransactionLedger",
+  props: { transactions: { type: Array, default: () => [] } },
+  emits: ["commit", "remove", "loadMore"],
+  setup(props, { emit }) {
+    return () => {
+      const transaction = (props.transactions as typeof mockTransactions)[0];
+      return h("div", [
+        h(
+          "button",
+          {
+            "data-cy": "test-edit-transaction",
+            onClick: () =>
+              emit(
+                "commit",
+                "t1",
+                { ...createdTransactionPayload, memo: "Edited transaction" },
+                () => undefined,
+              ),
+          },
+          "Edit test transaction",
+        ),
+        h(
+          "button",
+          {
+            "data-cy": "test-remove-transaction",
+            onClick: () => emit("remove", transaction, () => undefined),
+          },
+          "Remove test transaction",
+        ),
+      ]);
+    };
+  },
+});
+
+function clearMutationFeedback() {
+  const feedback = useMutationFeedback();
+  while (feedback.notice.value) feedback.dismiss();
+}
+
+function feedbackNotice() {
+  return useMutationFeedback().notice.value;
+}
+
+function jsonResponse(payload: unknown, status = 200): Response {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
 describe("TransactionsPage", () => {
+  beforeEach(clearMutationFeedback);
+
   it("renders the page and header without owning navigation", () => {
     mountPage();
     cy.get("[data-cy=transactions-page-root]").should("be.visible");
@@ -521,6 +628,123 @@ describe("TransactionsPage", () => {
         .parent()
         .find("[data-cy=memo-autocomplete-input]")
         .should("have.value", "Keep this draft");
+    });
+  });
+
+  it("undoes a created transaction using the version returned by the API", () => {
+    const deleteUrls: URL[] = [];
+    mountPage(
+      (path, init, requestUrl) => {
+        if (path === "/api/transactions" && init?.method === "POST") {
+          return jsonResponse({
+            transaction_id: "created-transaction",
+            version: "created-version",
+          });
+        }
+        if (
+          path === "/api/transactions/created-transaction" &&
+          init?.method === "DELETE"
+        ) {
+          deleteUrls.push(new URL(requestUrl ?? path, "http://localhost"));
+          return jsonResponse({ ok: true });
+        }
+        return undefined;
+      },
+      { TransactionEntryForm: entryFormMutationStub },
+      true,
+    );
+
+    cy.get("[data-cy=test-create-transaction]").click();
+    cy.get('[data-cy="mutation-feedback"]')
+      .should("contain.text", "Transaction added")
+      .find("button")
+      .contains("Undo")
+      .click();
+
+    cy.wrap(null).should(() => {
+      expect(deleteUrls[0]?.searchParams.get("expected_version")).to.equal(
+        "created-version",
+      );
+      expect(feedbackNotice()?.message).to.equal("Transaction addition undone");
+    });
+  });
+
+  it("undoes an edit with the latest persisted version", () => {
+    const updateRequests: Array<Record<string, unknown>> = [];
+    mountPage(
+      (path, init) => {
+        if (path === "/api/transactions/t1" && init?.method === "PUT") {
+          updateRequests.push(JSON.parse(String(init.body)));
+          return jsonResponse({
+            transaction_id: "t1",
+            version:
+              updateRequests.length === 1 ? "edited-version" : "undo-version",
+          });
+        }
+        return undefined;
+      },
+      { TransactionLedger: ledgerMutationStub },
+      true,
+    );
+
+    cy.get("[data-cy=test-edit-transaction]").click();
+    cy.get('[data-cy="mutation-feedback"]')
+      .should("contain.text", "Transaction updated")
+      .find("button")
+      .contains("Undo")
+      .click();
+
+    cy.wrap(null).should(() => {
+      expect(updateRequests).to.have.length(2);
+      expect(updateRequests[0]).to.include({
+        expected_version: mockTransactions[0]?.version,
+        memo: "Edited transaction",
+      });
+      expect(updateRequests[1]).to.include({
+        expected_version: "edited-version",
+        memo: "Market",
+        acknowledge_reconciled_history_change: true,
+      });
+      expect(feedbackNotice()?.message).to.equal("Transaction edit undone");
+    });
+  });
+
+  it("restores a removed transaction only from its deleted version", () => {
+    const restoreBodies: Array<Record<string, unknown>> = [];
+    mountPage(
+      (path, init, requestUrl) => {
+        if (path === "/api/transactions/t1" && init?.method === "DELETE") {
+          expect(requestUrl).to.include("expected_version=");
+          return jsonResponse({ ok: true });
+        }
+        if (
+          path === "/api/transactions/t1/restore" &&
+          init?.method === "POST"
+        ) {
+          restoreBodies.push(JSON.parse(String(init.body)));
+          return jsonResponse({
+            transaction_id: "t1",
+            version: "restored-version",
+          });
+        }
+        return undefined;
+      },
+      { TransactionLedger: ledgerMutationStub },
+      true,
+    );
+
+    cy.get("[data-cy=test-remove-transaction]").click();
+    cy.get('[data-cy="mutation-feedback"]')
+      .should("contain.text", "Transaction removed")
+      .find("button")
+      .contains("Undo")
+      .click();
+
+    cy.wrap(null).should(() => {
+      expect(restoreBodies).to.deep.equal([
+        { expected_version: mockTransactions[0]?.version },
+      ]);
+      expect(feedbackNotice()?.message).to.equal("Transaction removal undone");
     });
   });
 });

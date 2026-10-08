@@ -1,4 +1,5 @@
 import { VueQueryPlugin } from "@tanstack/vue-query";
+import { defineComponent, h } from "vue";
 import { mount } from "cypress/vue";
 import { createMemoryHistory, createRouter } from "vue-router";
 
@@ -81,9 +82,17 @@ const transactions = [
   },
 ];
 
-function stubFetch() {
+function stubFetch(
+  override?: (
+    path: string,
+    init?: RequestInit,
+    requestUrl?: string,
+  ) => Response | undefined,
+) {
   cy.stub(window, "fetch").callsFake((url: string, init?: RequestInit) => {
     const path = new URL(url, "http://localhost").pathname;
+    const overridden = override?.(path, init, url);
+    if (overridden) return Promise.resolve(overridden);
 
     if (path === "/api/accounts") {
       return Promise.resolve(
@@ -297,8 +306,16 @@ function stubFetch() {
   });
 }
 
-function mountPage() {
-  stubFetch();
+function mountPage(
+  override?: (
+    path: string,
+    init?: RequestInit,
+    requestUrl?: string,
+  ) => Response | undefined,
+  stubs: Record<string, unknown> = {},
+  includeFeedbackHost = false,
+) {
+  stubFetch(override);
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [
@@ -310,10 +327,102 @@ function mountPage() {
   cy.wrap(router.isReady());
 
   const queryClient = createDojoQueryClient();
-  mount(AccountDetailPage, {
+  const component = includeFeedbackHost
+    ? AccountDetailPageWithFeedback
+    : AccountDetailPage;
+  mount(component, {
     global: {
       plugins: [router, [VueQueryPlugin, { queryClient }]],
+      stubs,
     },
+  });
+}
+
+// This root keeps the global feedback host and page in the same test app.
+// eslint-disable-next-line vue/one-component-per-file
+const AccountDetailPageWithFeedback = defineComponent({
+  name: "AccountDetailPageWithFeedback",
+  setup: () => () => h("div", [h(AccountDetailPage), h(MutationFeedbackHost)]),
+});
+
+// eslint-disable-next-line vue/one-component-per-file
+const accountEntryMutationStub = defineComponent({
+  name: "TransactionEntryForm",
+  emits: ["submit"],
+  setup(_props, { emit, expose }) {
+    expose({ resetForm: () => undefined });
+    return () =>
+      h(
+        "button",
+        {
+          "data-cy": "test-create-account-transaction",
+          onClick: () => emit("submit", accountEntryPayload),
+        },
+        "Create account transaction",
+      );
+  },
+});
+
+// These lightweight children isolate the page's mutation wiring from its input and ledger components.
+// eslint-disable-next-line vue/one-component-per-file
+const accountLedgerMutationStub = defineComponent({
+  name: "TransactionLedger",
+  props: { transactions: { type: Array, default: () => [] } },
+  emits: ["commit", "remove", "loadMore"],
+  setup(props, { emit }) {
+    return () => {
+      const transaction = (props.transactions as typeof transactions)[0];
+      return h("div", [
+        h(
+          "button",
+          {
+            "data-cy": "test-edit-account-transaction",
+            onClick: () =>
+              emit(
+                "commit",
+                "txn-1",
+                { ...accountEntryPayload, memo: "Edited account transaction" },
+                () => undefined,
+              ),
+          },
+          "Edit account transaction",
+        ),
+        h(
+          "button",
+          {
+            "data-cy": "test-remove-account-transaction",
+            onClick: () => emit("remove", transaction, () => undefined),
+          },
+          "Remove account transaction",
+        ),
+      ]);
+    };
+  },
+});
+
+const accountEntryPayload = {
+  date: "2026-06-26",
+  account_id: budgetAccount.account_id,
+  amount_minor: -3200,
+  category_id: "cat-groceries",
+  system_category: null,
+  status: "PENDING" as const,
+  memo: "New account transaction",
+};
+
+function clearMutationFeedback() {
+  const feedback = useMutationFeedback();
+  while (feedback.notice.value) feedback.dismiss();
+}
+
+function feedbackNotice() {
+  return useMutationFeedback().notice.value;
+}
+
+function jsonResponse(payload: unknown, status = 200): Response {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: { "Content-Type": "application/json" },
   });
 }
 
@@ -603,6 +712,124 @@ describe("AccountDetailPage", () => {
       const body = JSON.parse(updateCall?.args[1]?.body as string);
       expect(body).to.include({ institution: "Chase" });
       expect(body).not.to.have.property("include_in_net_worth");
+    });
+  });
+});
+
+describe("AccountDetailPage transaction Undo", () => {
+  beforeEach(clearMutationFeedback);
+
+  it("undoes an added transaction using the version returned by the API", () => {
+    const deleteUrls: URL[] = [];
+    mountPage(
+      (path, init, requestUrl) => {
+        if (path === "/api/transactions" && init?.method === "POST") {
+          return jsonResponse({
+            transaction_id: "account-created-transaction",
+            version: "created-version",
+          });
+        }
+        if (
+          path === "/api/transactions/account-created-transaction" &&
+          init?.method === "DELETE"
+        ) {
+          deleteUrls.push(new URL(requestUrl ?? path, "http://localhost"));
+          return jsonResponse({ ok: true });
+        }
+        return undefined;
+      },
+      { TransactionEntryForm: accountEntryMutationStub },
+      true,
+    );
+
+    cy.get("[data-cy=test-create-account-transaction]").click();
+    cy.get('[data-cy="mutation-feedback"]')
+      .should("contain.text", "Transaction added")
+      .find("button")
+      .contains("Undo")
+      .click();
+
+    cy.wrap(null).should(() => {
+      expect(deleteUrls[0]?.searchParams.get("expected_version")).to.equal(
+        "created-version",
+      );
+      expect(feedbackNotice()?.message).to.equal("Transaction addition undone");
+    });
+  });
+
+  it("undoes an account-ledger edit with the latest persisted version", () => {
+    const updateRequests: Array<Record<string, unknown>> = [];
+    mountPage(
+      (path, init) => {
+        if (path === "/api/transactions/txn-1" && init?.method === "PUT") {
+          updateRequests.push(JSON.parse(String(init.body)));
+          return jsonResponse({
+            transaction_id: "txn-1",
+            version:
+              updateRequests.length === 1 ? "edited-version" : "undo-version",
+          });
+        }
+        return undefined;
+      },
+      { TransactionLedger: accountLedgerMutationStub },
+      true,
+    );
+
+    cy.get("[data-cy=test-edit-account-transaction]").click();
+    cy.get('[data-cy="mutation-feedback"]')
+      .should("contain.text", "Transaction updated")
+      .find("button")
+      .contains("Undo")
+      .click();
+
+    cy.wrap(null).should(() => {
+      expect(updateRequests).to.have.length(2);
+      expect(updateRequests[0]).to.include({
+        expected_version: "version-1",
+        memo: "Edited account transaction",
+      });
+      expect(updateRequests[1]).to.include({
+        expected_version: "edited-version",
+        memo: "Whole Foods",
+        acknowledge_reconciled_history_change: true,
+      });
+      expect(feedbackNotice()?.message).to.equal("Transaction edit undone");
+    });
+  });
+
+  it("restores a removed account-ledger transaction from its deleted version", () => {
+    const restoreBodies: Array<Record<string, unknown>> = [];
+    mountPage(
+      (path, init) => {
+        if (path === "/api/transactions/txn-1" && init?.method === "DELETE") {
+          return jsonResponse({ ok: true });
+        }
+        if (
+          path === "/api/transactions/txn-1/restore" &&
+          init?.method === "POST"
+        ) {
+          restoreBodies.push(JSON.parse(String(init.body)));
+          return jsonResponse({
+            transaction_id: "txn-1",
+            version: "restored-version",
+          });
+        }
+        return undefined;
+      },
+      { TransactionLedger: accountLedgerMutationStub },
+      true,
+    );
+
+    cy.get("[data-cy=test-remove-account-transaction]").click();
+    cy.get('[data-cy="mutation-feedback"]')
+      .should("contain.text", "Transaction removed")
+      .find("button")
+      .contains("Undo")
+      .click();
+
+    cy.wrap(null).should(() => {
+      expect(restoreBodies).to.deep.equal([{ expected_version: "version-1" }]);
+      expect(feedbackNotice()?.message).to.equal("Transaction removal undone");
     });
   });
 });
