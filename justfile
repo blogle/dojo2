@@ -35,6 +35,9 @@ airship:
 	fi; \
 	pnpm exec airship "$${args[@]}"
 
+unship:
+	cd web && pnpm exec unship
+
 dev-api:
 	just api
 
