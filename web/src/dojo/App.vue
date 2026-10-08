@@ -3,6 +3,7 @@ import { onMounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { useAppState } from "./state/app";
+import MutationFeedbackHost from "./layouts/MutationFeedbackHost.vue";
 
 const router = useRouter();
 const route = useRoute();
@@ -19,4 +20,5 @@ onMounted(async () => {
 
 <template>
   <router-view />
+  <MutationFeedbackHost />
 </template>

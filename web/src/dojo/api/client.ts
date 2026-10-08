@@ -426,18 +426,28 @@ export async function updateTransaction(
   transactionId: string,
   payload: TransactionPayload,
   expectedVersion: string,
+  options: { acknowledgeReconciledHistoryChange?: boolean } = {},
 ): Promise<{ transaction_id: string; version: string }> {
   return request(`/api/transactions/${transactionId}`, {
     method: "PUT",
-    body: JSON.stringify({ ...payload, expected_version: expectedVersion }),
+    body: JSON.stringify({
+      ...payload,
+      expected_version: expectedVersion,
+      acknowledge_reconciled_history_change:
+        options.acknowledgeReconciledHistoryChange ?? false,
+    }),
   });
 }
 
 export async function deleteTransaction(
   transactionId: string,
   expectedVersion: string,
+  options: { acknowledgeReconciledHistoryChange?: boolean } = {},
 ): Promise<void> {
   const params = new URLSearchParams({ expected_version: expectedVersion });
+  if (options.acknowledgeReconciledHistoryChange) {
+    params.set("acknowledge_reconciled_history_change", "true");
+  }
   await request(`/api/transactions/${transactionId}?${params}`, {
     method: "DELETE",
   });
@@ -445,9 +455,11 @@ export async function deleteTransaction(
 
 export async function restoreTransaction(
   transactionId: string,
+  expectedVersion: string,
 ): Promise<{ transaction_id: string; version: string }> {
   return request(`/api/transactions/${transactionId}/restore`, {
     method: "POST",
+    body: JSON.stringify({ expected_version: expectedVersion }),
   });
 }
 
@@ -761,6 +773,20 @@ export async function applyReconciliation(
   return request(`/api/reconciliations/${reconciliationId}/apply`, {
     method: "POST",
     body: JSON.stringify(payload),
+  });
+}
+
+export async function undoLastReconciliation(
+  accountId: string,
+  expectedReconciliationId: string,
+  clientOperationId: string,
+): Promise<Record<string, unknown>> {
+  return request(`/api/accounts/${accountId}/reconciliations/undo`, {
+    method: "POST",
+    body: JSON.stringify({
+      client_operation_id: clientOperationId,
+      expected_reconciliation_id: expectedReconciliationId,
+    }),
   });
 }
 

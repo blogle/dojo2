@@ -39,6 +39,7 @@ const emit = defineEmits<{
         :value="modelValue"
         :disabled="disabled"
         :name="name"
+        :aria-invalid="error ? 'true' : undefined"
         @change="
           emit('update:modelValue', ($event.target as HTMLSelectElement).value)
         "
@@ -57,6 +58,7 @@ const emit = defineEmits<{
     <span
       v-if="error"
       class="select-field__message select-field__message--error"
+      role="alert"
       >{{ error }}</span
     >
     <span

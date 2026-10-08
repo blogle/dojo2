@@ -120,6 +120,8 @@ sections:
   - id: transactions
     title: Transactions
     entries:
+      - component: TransactionEntryForm
+        fixture: transactions/TransactionEntryForm.fixtures.ts
       - component: TransactionLedger
         fixture: transactions/TransactionLedger.fixtures.ts
 

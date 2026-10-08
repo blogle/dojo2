@@ -148,6 +148,14 @@ def _validate_development_database(path: Path) -> None:
         )
         if transaction_count is None or not 200 <= transaction_count["count"] < 1_000:
             raise RuntimeError("Development fixture has an unexpected transaction count")
+        invalid_transaction_categories = service.db.fetch_one(
+            "SELECT COUNT(*) AS count FROM transactions "
+            "WHERE (category_id IS NULL) = (system_category IS NULL)"
+        )
+        if invalid_transaction_categories is None or invalid_transaction_categories["count"]:
+            raise RuntimeError(
+                "Development fixture contains transactions without one category target"
+            )
         required_frequencies = {"MONTHLY", "YEARLY", "EVERY_6_MONTHS"}
         configured_frequencies = {
             category["goal_frequency"]

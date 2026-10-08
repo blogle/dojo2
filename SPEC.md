@@ -727,17 +727,23 @@ The ledger supports:
 8. The logical transaction remains in the same entry position
 9. Status is toggled via an inline pill (Pending / Cleared)
 
+If an update fails, the row remains in edit mode with its values intact. The row receives an inline, assertively announced reason and the app shows a non-blocking error notice. A transaction with no category and no system category is invalid; repair it by choosing a category or Uncategorized before saving.
+
+Every successful transaction add, edit, status toggle, or removal shows one bottom-right confirmation with Undo. Undo issues a persisted inverse mutation guarded by the version created by the original mutation. Rapid changes replace the visible notice and queue their inverses newest-first; Undo then exposes the preceding available action. A stale inverse fails visibly and never overwrites newer data.
+
+Every persisted transaction has exactly one categorization target: a normal category or a system category. A missing source category during import is normalized to the canonical `Uncategorized` system category. The API rejects transaction creates and updates with either no target or multiple targets. If an older database contains a corrupted row with no target, the ledger identifies the missing category and asks the user to choose a category or Uncategorized before saving any other edit; the invalid row remains unchanged until repaired.
+
 ### Remove and Undo
 
 1. Select a row
 2. Select the delete action at the right edge of the active row
 3. The current record becomes inactive
-4. A toast appears at the bottom right:
+4. The shared bottom-right mutation notice appears:
 
    * Transaction removed
    * Undo
 
-Selecting Undo restores the transaction through the versioned record model.
+Selecting Undo restores the transaction through the versioned record model and only if its deleted version is still the latest version.
 
 ### Unreconciled Working Set
 
@@ -1336,6 +1342,8 @@ For budget accounts, the user reviews the difference between:
 Budget-account manual evidence is entered using Cleared, Pending, and Actual. The user supplies any two values and dojo visibly derives the third. Cleared, Pending, and Actual deltas are signed source-minus-dojo differences; Actual delta is the sum of Cleared and Pending deltas. Certification requires both Cleared and Pending deltas to be zero. An Actual-only match cannot certify the account.
 
 When both independent balances match, Reconcile account commits the complete current canonical account state directly. When either differs, Review differences opens the normal account ledger with a single reconciliation summary and Changes since last reconciliation selected by default. All transactions remains available with the existing filters. Transaction edits, additions, and removals persist immediately; source evidence remains temporary until certification. Exiting without canonical edits is silent. When canonical edits occurred, the user is told they are already saved and the account remains unreconciled.
+
+Undo on a successful reconciliation reverses only the reconciliation commit/active baseline. Canonical transaction edits made during the attempt remain saved and retain their independent transaction Undo actions.
 
 The ledger keeps Pending/Cleared settlement Status separate from reconciliation Change provenance. Change labels are Added, Edited, and Removed. Pending transactions carried from the last reconciliation remain visible as settlement context. Reconciliation never introduces a balance plug, row acknowledgement, include/exclude decision, or shadow transaction editor.
 

@@ -36,12 +36,14 @@ import {
   fetchTransactionsPage,
   reconcileInvestmentStatement,
   reconcileLoanStatement,
+  restoreTransaction,
   setAccountBudgetLink,
   type TransactionFilters,
   type BudgetReconciliationAttempt,
   type TrackingCutoverSuccessor,
   updateAccount,
   updateTransaction,
+  undoLastReconciliation,
 } from "@/dojo/api/client";
 import Button from "@/dojo/components/actions/Button.vue";
 import DropdownButton from "@/dojo/components/actions/DropdownButton.vue";
@@ -65,6 +67,12 @@ import TransactionEntryForm from "@/dojo/components/transactions/TransactionEntr
 import type { Transaction, TransactionPayload } from "@/dojo/types";
 import { formatCurrency } from "@/dojo/utils/currency";
 import { institutionSuggestions } from "@/dojo/utils/institutions";
+import {
+  mutationErrorMessage,
+  notifyMutationError,
+  notifyMutationSuccess,
+  notifyVersionedMutationSuccess,
+} from "@/dojo/state/mutationFeedback";
 
 const route = useRoute();
 const router = useRouter();
@@ -708,26 +716,29 @@ const metricItems = computed((): MetricStripItem[] => {
         key: "balance",
         label: "Current balance",
         value: formatCurrency(account.value.display_balance_minor),
-        auxValue: investigatingReconciliation.value && budgetAttempt.value
-          ? `Source ${formatCurrency(budgetAttempt.value.source.actual_minor)} · Δ ${formatCurrency(budgetAttempt.value.deltas.actual_delta_minor)}`
-          : `As of ${formatDateShort()}`,
+        auxValue:
+          investigatingReconciliation.value && budgetAttempt.value
+            ? `Source ${formatCurrency(budgetAttempt.value.source.actual_minor)} · Δ ${formatCurrency(budgetAttempt.value.deltas.actual_delta_minor)}`
+            : `As of ${formatDateShort()}`,
       },
       {
         key: "pending",
         label: "Pending",
         value: formatCurrency(account.value.pending_balance_minor),
-        auxValue: investigatingReconciliation.value && budgetAttempt.value
-          ? `Source ${formatCurrency(budgetAttempt.value.source.pending_minor)} · Δ ${formatCurrency(budgetAttempt.value.deltas.pending_delta_minor)}`
-          : `${transactionStatusCounts.value.PENDING} transactions`,
+        auxValue:
+          investigatingReconciliation.value && budgetAttempt.value
+            ? `Source ${formatCurrency(budgetAttempt.value.source.pending_minor)} · Δ ${formatCurrency(budgetAttempt.value.deltas.pending_delta_minor)}`
+            : `${transactionStatusCounts.value.PENDING} transactions`,
         status: { label: "", variant: "warning" as const },
       },
       {
         key: "cleared",
         label: "Cleared",
         value: formatCurrency(account.value.cleared_balance_minor),
-        auxValue: investigatingReconciliation.value && budgetAttempt.value
-          ? `Source ${formatCurrency(budgetAttempt.value.source.cleared_minor)} · Δ ${formatCurrency(budgetAttempt.value.deltas.cleared_delta_minor)}`
-          : `${transactionStatusCounts.value.CLEARED} transactions`,
+        auxValue:
+          investigatingReconciliation.value && budgetAttempt.value
+            ? `Source ${formatCurrency(budgetAttempt.value.source.cleared_minor)} · Δ ${formatCurrency(budgetAttempt.value.deltas.cleared_delta_minor)}`
+            : `${transactionStatusCounts.value.CLEARED} transactions`,
         status: { label: "", variant: "positive" as const },
       },
       {
@@ -741,16 +752,20 @@ const metricItems = computed((): MetricStripItem[] => {
         label: investigatingReconciliation.value
           ? "Reconciliation · In progress"
           : "Reconciliation",
-        value: investigatingReconciliation.value && budgetAttempt.value
-          ? certificationAllowed.value ? "Balances match" : "Review differences"
-          : account.value.reconciliation_status === "CURRENT"
-            ? "Recorded"
-            : "Not reconciled",
-        auxValue: investigatingReconciliation.value && budgetAttempt.value
-          ? `As of ${budgetAttempt.value.cutoff}`
-          : account.value.reconciliation_status === "CURRENT"
-            ? "A reconciliation is on record"
-            : "No reconciliation recorded",
+        value:
+          investigatingReconciliation.value && budgetAttempt.value
+            ? certificationAllowed.value
+              ? "Balances match"
+              : "Review differences"
+            : account.value.reconciliation_status === "CURRENT"
+              ? "Recorded"
+              : "Not reconciled",
+        auxValue:
+          investigatingReconciliation.value && budgetAttempt.value
+            ? `As of ${budgetAttempt.value.cutoff}`
+            : account.value.reconciliation_status === "CURRENT"
+              ? "A reconciliation is on record"
+              : "No reconciliation recorded",
         status: {
           label: investigatingReconciliation.value ? "Active" : "",
           variant: investigatingReconciliation.value
@@ -1124,7 +1139,10 @@ const updateTransactionMutation = useMutation({
     id: string;
     payload: TransactionPayload;
     expectedVersion: string;
-  }) => updateTransaction(id, payload, expectedVersion),
+  }) =>
+    updateTransaction(id, payload, expectedVersion, {
+      acknowledgeReconciledHistoryChange: investigatingReconciliation.value,
+    }),
   onSuccess: () => {
     transactionMutationError.value = "";
     invalidateAccountDetailQueries();
@@ -1134,8 +1152,7 @@ const updateTransactionMutation = useMutation({
     }
   },
   onError: (error) => {
-    transactionMutationError.value =
-      error instanceof Error ? error.message : "Transaction change failed.";
+    transactionMutationError.value = mutationErrorMessage(error);
   },
 });
 
@@ -1146,7 +1163,10 @@ const deleteTransactionMutation = useMutation({
   }: {
     id: string;
     expectedVersion: string;
-  }) => deleteTransaction(id, expectedVersion),
+  }) =>
+    deleteTransaction(id, expectedVersion, {
+      acknowledgeReconciledHistoryChange: investigatingReconciliation.value,
+    }),
   onSuccess: () => {
     invalidateAccountDetailQueries();
     if (investigatingReconciliation.value) {
@@ -1178,6 +1198,7 @@ const updateAccountMutation = useMutation({
     showConfigurationModal.value = false;
     queryClient.invalidateQueries({ queryKey: ["account-budget-links"] });
     invalidateAccountDetailQueries();
+    notifyMutationSuccess("Account updated");
   },
 });
 const createValueMutation = useMutation({
@@ -1195,6 +1216,9 @@ const createValueMutation = useMutation({
     queryClient.invalidateQueries({ queryKey: ["tracking-snapshots"] });
     queryClient.invalidateQueries({ queryKey: ["tangible-valuations"] });
     invalidateAccountDetailQueries();
+    notifyMutationSuccess(
+      isTrackingAccount.value ? "Snapshot recorded" : "Valuation recorded",
+    );
   },
 });
 const cutoverMutation = useMutation({
@@ -1216,6 +1240,7 @@ const cutoverMutation = useMutation({
       }
     }
     invalidateAccountDetailQueries();
+    notifyMutationSuccess("Tracking account replaced");
   },
 });
 const reconcileInvestmentMutation = useMutation({
@@ -1225,6 +1250,7 @@ const reconcileInvestmentMutation = useMutation({
     showInvestmentStatementModal.value = false;
     queryClient.invalidateQueries({ queryKey: ["investment-statement"] });
     invalidateAccountDetailQueries();
+    notifyMutationSuccess("Investment statement recorded");
   },
 });
 const investmentTransferMutation = useMutation({
@@ -1234,6 +1260,7 @@ const investmentTransferMutation = useMutation({
     showInvestmentTransferModal.value = false;
     queryClient.invalidateQueries({ queryKey: ["account-budget-links"] });
     invalidateAccountDetailQueries();
+    notifyMutationSuccess("Investment transfer recorded");
   },
 });
 const creditCardPaymentMutation = useMutation({
@@ -1242,6 +1269,7 @@ const creditCardPaymentMutation = useMutation({
   onSuccess: () => {
     showCreditCardPaymentModal.value = false;
     invalidateAccountDetailQueries();
+    notifyMutationSuccess("Card payment recorded");
   },
 });
 const loanPaymentMutation = useMutation({
@@ -1252,6 +1280,7 @@ const loanPaymentMutation = useMutation({
     queryClient.invalidateQueries({ queryKey: ["loan-payments"] });
     queryClient.invalidateQueries({ queryKey: ["account-budget-links"] });
     invalidateAccountDetailQueries();
+    notifyMutationSuccess("Loan payment recorded");
   },
 });
 const loanStatementMutation = useMutation({
@@ -1261,6 +1290,7 @@ const loanStatementMutation = useMutation({
     showLoanStatementModal.value = false;
     queryClient.invalidateQueries({ queryKey: ["loan-snapshots"] });
     invalidateAccountDetailQueries();
+    notifyMutationSuccess("Loan statement recorded");
   },
 });
 const reconciliationDraftMutation = useMutation({
@@ -1287,10 +1317,25 @@ const reconciliationApplyMutation = useMutation({
       client_operation_id: reconciliationOperationId.value,
     });
   },
-  onSuccess: () => {
+  onSuccess: (result) => {
+    const reconciledAccountId = accountId.value;
     showReconciliationModal.value = false;
     reconciliationDraft.value = null;
     invalidateAccountDetailQueries();
+    notifyMutationSuccess("Account reconciled", {
+      undoneMessage: "Reconciliation undone",
+      run: async () => {
+        if (typeof result.reconciliation_id !== "string") {
+          throw new Error("The reconciliation can no longer be undone.");
+        }
+        await undoLastReconciliation(
+          reconciledAccountId,
+          result.reconciliation_id,
+          crypto.randomUUID(),
+        );
+        invalidateAccountDetailQueries();
+      },
+    });
   },
 });
 const budgetAttemptMutation = useMutation({
@@ -1315,18 +1360,31 @@ const budgetAttemptMutation = useMutation({
       reconciliationMutationError.value = "Could not prepare budget balances.";
   },
   onError: (error) => {
-    reconciliationMutationError.value =
-      error instanceof Error ? error.message : "Could not compare balances.";
+    reconciliationMutationError.value = mutationErrorMessage(error);
   },
 });
 let budgetAttemptTimeout: ReturnType<typeof setTimeout> | undefined;
 watch(
-  [sourceCleared, sourcePending, sourceActual, sourceAsOfDate, sourceEntryReady],
+  [
+    sourceCleared,
+    sourcePending,
+    sourceActual,
+    sourceAsOfDate,
+    sourceEntryReady,
+  ],
   () => {
     clearTimeout(budgetAttemptTimeout);
     budgetAttempt.value = null;
-    if (!showReconciliationModal.value || !isBudgetAccount.value || !sourceEntryReady.value) return;
-    budgetAttemptTimeout = setTimeout(() => budgetAttemptMutation.mutate(), 350);
+    if (
+      !showReconciliationModal.value ||
+      !isBudgetAccount.value ||
+      !sourceEntryReady.value
+    )
+      return;
+    budgetAttemptTimeout = setTimeout(
+      () => budgetAttemptMutation.mutate(),
+      350,
+    );
   },
 );
 const budgetApplyMutation = useMutation({
@@ -1337,18 +1395,29 @@ const budgetApplyMutation = useMutation({
     });
   },
   onSuccess: () => {
+    const reconciliationId = budgetAttempt.value?.reconciliation_id;
+    const reconciledAccountId = accountId.value;
     showReconciliationModal.value = false;
     budgetAttempt.value = null;
     investigatingReconciliation.value = false;
     persistentEditsDuringAttempt.value = false;
     sourceBalancesBeforeEdit.value = null;
     invalidateAccountDetailQueries();
+    if (!reconciliationId) return;
+    notifyMutationSuccess("Account reconciled", {
+      undoneMessage: "Reconciliation undone",
+      run: async () => {
+        await undoLastReconciliation(
+          reconciledAccountId,
+          reconciliationId,
+          crypto.randomUUID(),
+        );
+        invalidateAccountDetailQueries();
+      },
+    });
   },
   onError: (error) => {
-    reconciliationMutationError.value =
-      error instanceof Error
-        ? error.message
-        : "Reconciliation could not be saved.";
+    reconciliationMutationError.value = mutationErrorMessage(error);
   },
 });
 const configurationSaving = computed(
@@ -1508,6 +1577,7 @@ function handleAccountEntry(
       .then(() => {
         accountEntryForm.value?.resetForm();
         invalidateAccountDetailQueries();
+        notifyMutationSuccess("Transfer added");
         const affectsAccount =
           transfer.from_account_id === accountId.value ||
           transfer.to_account_id === accountId.value;
@@ -1517,17 +1587,32 @@ function handleAccountEntry(
         }
       })
       .catch((error: unknown) => {
-        actionMessage.value =
-          error instanceof Error
-            ? error.message
-            : "Transaction could not be saved.";
+        notifyMutationError(error);
       });
     return;
   }
   void createTransaction(payload as TransactionPayload)
-    .then(() => {
+    .then((created) => {
       accountEntryForm.value?.resetForm();
       invalidateAccountDetailQueries();
+      notifyVersionedMutationSuccess(
+        "Transaction added",
+        "Transaction addition undone",
+        {
+          key: `transaction:${created.transaction_id}`,
+          version: created.version,
+          run: async (expectedVersion) => {
+            await deleteTransaction(created.transaction_id, expectedVersion, {
+              acknowledgeReconciledHistoryChange: true,
+            });
+            invalidateAccountDetailQueries();
+            if (investigatingReconciliation.value) {
+              persistentEditsDuringAttempt.value = true;
+              await refreshReconciliationAfterMutation();
+            }
+          },
+        },
+      );
       if (
         investigatingReconciliation.value &&
         (payload as TransactionPayload).account_id === accountId.value
@@ -1537,10 +1622,7 @@ function handleAccountEntry(
       }
     })
     .catch((error: unknown) => {
-      actionMessage.value =
-        error instanceof Error
-          ? error.message
-          : "Transaction could not be saved.";
+      notifyMutationError(error);
     });
 }
 
@@ -1777,24 +1859,107 @@ const investmentStatementCanSave = computed(() => {
   );
 });
 
-function handleCommitEdit(id: string, payload: TransactionPayload) {
+function handleCommitEdit(
+  id: string,
+  payload: TransactionPayload,
+  complete: (
+    result: { success: true } | { success: false; message: string },
+  ) => void,
+) {
   const transaction = transactions.value.find(
     (item) => item.transaction_id === id,
   );
-  if (transaction) {
-    updateTransactionMutation.mutate({
-      id,
-      payload,
-      expectedVersion: transaction.version,
+  if (!transaction) {
+    complete({
+      success: false,
+      message: "This transaction is no longer available.",
     });
+    return;
   }
+  const previous: TransactionPayload = {
+    date: transaction.date,
+    account_id: transaction.account_id,
+    amount_minor: transaction.amount_minor,
+    category_id: transaction.category_id,
+    system_category: transaction.system_category,
+    status: transaction.status,
+    memo: transaction.memo,
+  };
+  updateTransactionMutation.mutate(
+    { id, payload, expectedVersion: transaction.version },
+    {
+      onSuccess: (result) => {
+        complete({ success: true });
+        notifyVersionedMutationSuccess(
+          "Transaction updated",
+          "Transaction edit undone",
+          {
+            key: `transaction:${id}`,
+            version: result.version,
+            run: async (expectedVersion) => {
+              const restored = await updateTransaction(
+                id,
+                previous,
+                expectedVersion,
+                { acknowledgeReconciledHistoryChange: true },
+              );
+              invalidateAccountDetailQueries();
+              if (investigatingReconciliation.value) {
+                persistentEditsDuringAttempt.value = true;
+                await refreshReconciliationAfterMutation();
+              }
+              return restored.version;
+            },
+          },
+        );
+      },
+      onError: (error) => {
+        complete({ success: false, message: mutationErrorMessage(error) });
+      },
+    },
+  );
 }
 
-function handleRemoveTransaction(transaction: Transaction) {
-  deleteTransactionMutation.mutate({
-    id: transaction.transaction_id,
-    expectedVersion: transaction.version,
-  });
+function handleRemoveTransaction(
+  transaction: Transaction,
+  complete: (
+    result: { success: true } | { success: false; message: string },
+  ) => void,
+) {
+  deleteTransactionMutation.mutate(
+    {
+      id: transaction.transaction_id,
+      expectedVersion: transaction.version,
+    },
+    {
+      onSuccess: () => {
+        complete({ success: true });
+        notifyVersionedMutationSuccess(
+          "Transaction removed",
+          "Transaction removal undone",
+          {
+            key: `transaction:${transaction.transaction_id}`,
+            version: transaction.version,
+            run: async (expectedVersion) => {
+              const restored = await restoreTransaction(
+                transaction.transaction_id,
+                expectedVersion,
+              );
+              invalidateAccountDetailQueries();
+              if (investigatingReconciliation.value) {
+                persistentEditsDuringAttempt.value = true;
+                await refreshReconciliationAfterMutation();
+              }
+              return restored.version;
+            },
+          },
+        );
+      },
+      onError: (error) => {
+        complete({ success: false, message: mutationErrorMessage(error) });
+      },
+    },
+  );
 }
 
 function loadMoreTransactions() {
@@ -3015,9 +3180,24 @@ function formatTaxTreatment(value: string | null | undefined): string {
                 <strong>{{
                   certificationAllowed ? "Balances match" : "Differences found"
                 }}</strong>
-                <span>Cleared Δ {{ formatCurrency(budgetAttempt.deltas.cleared_delta_minor) }}</span>
-                <span>Pending Δ {{ formatCurrency(budgetAttempt.deltas.pending_delta_minor) }}</span>
-                <span>Actual Δ {{ formatCurrency(budgetAttempt.deltas.actual_delta_minor) }}</span>
+                <span
+                  >Cleared Δ
+                  {{
+                    formatCurrency(budgetAttempt.deltas.cleared_delta_minor)
+                  }}</span
+                >
+                <span
+                  >Pending Δ
+                  {{
+                    formatCurrency(budgetAttempt.deltas.pending_delta_minor)
+                  }}</span
+                >
+                <span
+                  >Actual Δ
+                  {{
+                    formatCurrency(budgetAttempt.deltas.actual_delta_minor)
+                  }}</span
+                >
               </div>
               <p
                 v-if="reconciliationMutationError"
@@ -3079,7 +3259,7 @@ function formatTaxTreatment(value: string | null | undefined): string {
         >
           <p>
             Your transaction edits have already been saved. Exiting will leave
-            this account unreconciled.
+            no reconciliation recorded for this account.
           </p>
         </FormModal>
 

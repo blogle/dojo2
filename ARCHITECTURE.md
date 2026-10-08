@@ -11,6 +11,8 @@ The frontend routes normal application pages through `web/src/dojo/layouts/AppSh
 
 The backend persists application state in DuckDB. The frontend treats the backend as the system of record and fetches small bootstrap data first, then budget, transactions, accounts, categories, and net-worth data on demand.
 
+`web/src/dojo/App.vue` mounts `MutationFeedbackHost.vue` once for the application. The Vue Query `MutationCache` reports asynchronous mutation failures through the shared notice store; mutations with safe inverses enqueue version-guarded undo callbacks there. Undo invokes ordinary persisted API operations rather than restoring client-only state.
+
 ## Domain Boundaries
 
 - `api/src/dojo/api/`: HTTP entrypoints, request parsing, and app wiring
@@ -42,6 +44,8 @@ The backend intentionally does not run migrations as a side effect of Python imp
 - The current implementation uses one process-local connection protected by an `RLock`.
 - There is no custom read/write lock and no claimed concurrent-read support yet.
 - Transaction writes use the current SCD2 physical `row_id` as an opaque API version. Updates and deletes conditionally close exactly that version, so a stale browser receives HTTP 409 instead of replacing a newer edit.
+- Transaction rows target exactly one category: a normal `category_id` or a `system_category`, including `TX_UNCATEGORIZED` for imported rows whose source category is blank. Fresh-schema CHECKs and API/service parsing enforce the XOR. Legacy databases may retain invalid historical null/null rows; mutation boundaries reject those payloads without rewriting history, and the ledger asks the user to repair the category target before saving other edits.
+- Restoring a removed transaction requires its expected closed `row_id`; reconciliation Undo names its expected commit. These guards prevent a delayed undo action from restoring or voiding a newer version.
 
 ## Backup And Recovery
 

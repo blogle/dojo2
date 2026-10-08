@@ -13,6 +13,10 @@ import { useRoute, useRouter } from "vue-router";
 
 import { useAppState } from "../state/app";
 import {
+  notifyMutationError,
+  notifyMutationSuccess,
+} from "../state/mutationFeedback";
+import {
   ApiError,
   configureBackupFolder,
   fetchBackupSettings,
@@ -123,8 +127,13 @@ function getLowConfidenceCount(): number {
 }
 
 async function handleStartEmpty() {
-  await beginEmptyOnboarding();
-  await showBackupSetup();
+  try {
+    await beginEmptyOnboarding();
+    notifyMutationSuccess("Workspace created");
+    await showBackupSetup();
+  } catch (error) {
+    notifyMutationError(error);
+  }
 }
 
 async function handleSubmitSheet() {
@@ -153,6 +162,7 @@ async function handleSubmitSheet() {
     ) {
       errorMessage.value =
         err instanceof Error ? err.message : "Import failed. Please try again.";
+      notifyMutationError(err);
       step.value = "migrate-form";
       return;
     }
@@ -188,7 +198,9 @@ async function handleCommitImport(confirmed: boolean) {
   try {
     await commitSheetImport(decisions, confirmed);
     step.value = "complete";
+    notifyMutationSuccess("Import complete");
   } catch (err) {
+    notifyMutationError(err);
     errorMessage.value =
       err instanceof Error ? err.message : "Import failed. Please try again.";
     step.value = "net-worth-review";
@@ -227,6 +239,7 @@ async function showBackupSetup() {
     backupReauthorizationRequired.value = settings.reauthorization_required;
     backupFolderName.value = settings.configuration?.folder_name ?? "";
   } catch (error) {
+    notifyMutationError(error);
     backupError.value =
       error instanceof Error ? error.message : "Backup setup could not load.";
   }
@@ -239,6 +252,7 @@ async function connectGoogleDrive() {
     await beginGoogleOnboarding("backup");
     await showBackupSetup();
   } catch (error) {
+    notifyMutationError(error);
     backupError.value =
       error instanceof Error
         ? error.message
@@ -268,7 +282,9 @@ async function chooseBackupFolder() {
       settings.configuration?.folder_name ?? selected.name;
     backupFolderConfigured.value = true;
     backupAuthorized.value = true;
+    notifyMutationSuccess("Backup folder set");
   } catch (error) {
+    notifyMutationError(error);
     if (
       error instanceof ApiError &&
       error.code === "google_drive_reauthorization_required"

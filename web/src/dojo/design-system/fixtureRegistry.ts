@@ -45,6 +45,7 @@ import largeDetailModal from "@/dojo/components/overlays/LargeDetailModal.fixtur
 import hierarchicalCategoryTable from "@/dojo/components/tables/HierarchicalCategoryTable.fixtures";
 import tableShell from "@/dojo/components/tables/TableShell.fixtures";
 import transactionLedger from "@/dojo/components/transactions/TransactionLedger.fixtures";
+import transactionEntryForm from "@/dojo/components/transactions/TransactionEntryForm.fixtures";
 
 export const fixtureRegistry: Record<string, ComponentFixtureSet> = {
   "actions/Button.fixtures.ts": button,
@@ -92,4 +93,5 @@ export const fixtureRegistry: Record<string, ComponentFixtureSet> = {
   "tables/HierarchicalCategoryTable.fixtures.ts": hierarchicalCategoryTable,
   "tables/TableShell.fixtures.ts": tableShell,
   "transactions/TransactionLedger.fixtures.ts": transactionLedger,
+  "transactions/TransactionEntryForm.fixtures.ts": transactionEntryForm,
 };

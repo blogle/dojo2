@@ -46,7 +46,9 @@ from dojo.constants import (
     SYSTEM_CATEGORY_BALANCE_ADJUSTMENT,
     SYSTEM_CATEGORY_STARTING_BALANCE,
     SYSTEM_CATEGORY_TRANSFER,
+    SYSTEM_CATEGORY_UNCATEGORIZED,
     SYSTEM_CREDIT_CARD_GROUP_ID,
+    TRANSACTION_CATEGORY_TARGET_ERROR,
 )
 from dojo.database import Database, json_dumps
 from dojo.google import GOOGLE_DRIVE_FILE_SCOPE
@@ -131,8 +133,11 @@ class ReconciledHistoryChangeConfirmationRequired(ValueError):
 class ReconciliationUndoUnavailableError(ValueError):
     code = "reconciliation_undo_unavailable"
 
-    def __init__(self) -> None:
-        super().__init__(self.code)
+    def __init__(
+        self,
+        message: str = "No reconciliation is currently eligible for undo.",
+    ) -> None:
+        super().__init__(message)
 
 
 _TREND_DAYS = {"7d": 7, "1m": 31, "3m": 93, "6m": 186, "1y": 366, "all": 36500}
@@ -861,6 +866,8 @@ class DojoService:
                     if transaction.category_name
                     else None
                 )
+                if (category_id is None) == (transaction.system_category is None):
+                    raise ValueError(TRANSACTION_CATEGORY_TARGET_ERROR)
                 tx_rows.append(
                     {
                         "row_id": str(uuid4()),
@@ -3159,7 +3166,7 @@ class DojoService:
         return {"transaction_id": transaction_id, "version": version}
 
     def update_transaction(self, transaction_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        self._validate_transaction_payload(payload, allow_uncategorized=True)
+        self._validate_transaction_payload(payload)
         now = self.clock.now()
         with self.db.transaction() as connection:
             cursor = connection.execute(
@@ -3283,7 +3290,9 @@ class DojoService:
             ):
                 raise TransactionVersionConflictError("Transaction version conflict")
 
-    def restore_transaction(self, transaction_id: str) -> dict[str, Any]:
+    def restore_transaction(
+        self, transaction_id: str, expected_deleted_version: str
+    ) -> dict[str, Any]:
         now = self.clock.now()
         with self.db.transaction() as connection:
             # Check if already has current version
@@ -3309,6 +3318,8 @@ class DojoService:
                 raise ValueError("Transaction not found or not deleted")
 
             latest_closed = rows[0]
+            if str(latest_closed["row_id"]) != str(expected_deleted_version):
+                raise TransactionVersionConflictError("Transaction version conflict")
             restore_at = max(
                 now,
                 latest_closed["valid_to"] + timedelta(microseconds=1),
@@ -4749,6 +4760,13 @@ class DojoService:
             undoable = state["undoable_reconciliation"]
             if undoable is None:
                 raise ReconciliationUndoUnavailableError()
+            expected_reconciliation_id = values.get("expected_reconciliation_id")
+            if expected_reconciliation_id is not None and str(undoable["reconciliation_id"]) != str(
+                expected_reconciliation_id
+            ):
+                raise ReconciliationUndoUnavailableError(
+                    "A newer reconciliation exists. Refresh before undoing this reconciliation."
+                )
             void = self.reconciliation_repository.void_commit(
                 reconciliation_id=str(undoable["reconciliation_id"]),
                 entity_id=account_id,
@@ -6411,17 +6429,18 @@ class DojoService:
         )
 
     def _validate_transaction_payload(
-        self,
-        payload: dict[str, Any],
-        *,
-        new_entry: bool = False,
-        allow_uncategorized: bool = False,
+        self, payload: dict[str, Any], *, new_entry: bool = False
     ) -> None:
         has_category = payload.get("category_id") is not None
         has_system = payload.get("system_category") is not None
-        is_uncategorized = not has_category and not has_system
-        if has_category == has_system and not (allow_uncategorized and is_uncategorized):
-            raise ValueError("Exactly one of category_id or system_category must be set")
+        if has_category == has_system:
+            raise ValueError(TRANSACTION_CATEGORY_TARGET_ERROR)
+        if (
+            has_category
+            and self.db.fetch_one(load_sql("queries/category_id_exists"), (payload["category_id"],))
+            is None
+        ):
+            raise ValueError("Choose a category that exists in Dojo.")
         if not new_entry:
             return
 
@@ -6437,6 +6456,8 @@ class DojoService:
         if account_class != ACCOUNT_CLASS_BUDGET:
             raise ValueError("Only budget accounts can use categories or Available to budget")
         if system_category == SYSTEM_CATEGORY_ATB:
+            return
+        if system_category == SYSTEM_CATEGORY_UNCATEGORIZED:
             return
         if system_category is not None:
             raise ValueError("This system category is not available for new entries")

@@ -216,15 +216,22 @@ def _migrate_legacy_transaction_constraint(connection: duckdb.DuckDBPyConnection
         return
     sql = str(transaction_table[0] or "")
     normalized_sql = " ".join(sql.split()).casefold()
-    has_legacy_constraint = (
+    has_exact_category_target_constraint = (
         "category_id is not null" in normalized_sql
         and "system_category is null" in normalized_sql
         and "category_id is null" in normalized_sql
         and "system_category is not null" in normalized_sql
-        and "not (category_id is not null and system_category is not null)" not in normalized_sql
     )
-    if has_legacy_constraint:
-        connection.execute(load_sql("schema/migrations/legacy_transactions_constraint"))
+    has_legacy_at_most_one_constraint = (
+        "category_id is not null" in normalized_sql
+        and "system_category is not null" in normalized_sql
+        and "system_category is null" not in normalized_sql
+    )
+    if has_exact_category_target_constraint or has_legacy_at_most_one_constraint:
+        return
+    # Keep legacy physical rows untouched; current schemas enforce XOR and the service rejects
+    # invalid transaction writes when upgrading a database that already contains null/null rows.
+    connection.execute(load_sql("schema/migrations/legacy_transactions_constraint"))
 
 
 def _migrate_transaction_entry_order(connection: duckdb.DuckDBPyConnection) -> None:

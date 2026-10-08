@@ -473,6 +473,7 @@ def test_undo_latest_reconciliation_restores_effective_baseline_without_mutation
     )["transaction_id"]
     second = _commit_budget_baseline(service, account_id)
     before_commit = service.reconciliation_repository.read_commit(second["reconciliation_id"])
+    _update_transaction(service, first_transaction_id, amount_minor=125)
     before_transactions = service.db.fetch_all(
         "SELECT transaction_id, row_id, amount_minor FROM current_transactions "
         "WHERE account_id = ? ORDER BY transaction_id",
@@ -480,7 +481,12 @@ def test_undo_latest_reconciliation_restores_effective_baseline_without_mutation
     )
 
     result = service.undo_last_reconciliation(
-        account_id, {"client_operation_id": str(uuid4()), "reason": "Wrong source"}
+        account_id,
+        {
+            "client_operation_id": str(uuid4()),
+            "expected_reconciliation_id": second["reconciliation_id"],
+            "reason": "Wrong source",
+        },
     )
 
     assert result["effective_reconciliation"]["reconciliation_id"] == first["reconciliation_id"]
@@ -506,9 +512,12 @@ def test_undo_latest_reconciliation_restores_effective_baseline_without_mutation
         service.reconciliation_working_set(account_id)["items"][0]["transaction_id"]
         == second_transaction_id
     )
-    assert first_transaction_id not in {
-        item["transaction_id"] for item in service.reconciliation_working_set(account_id)["items"]
+    working_set_by_id = {
+        item["transaction_id"]: item
+        for item in service.reconciliation_working_set(account_id)["items"]
     }
+    assert working_set_by_id[first_transaction_id]["classification"] == "EDITED"
+    assert working_set_by_id[first_transaction_id]["current"]["amount_minor"] == 125
     with pytest.raises(ValueError, match="latest successful reconciliation"):
         service.void_reconciliation_commit(account_id, first["reconciliation_id"])
 
@@ -522,7 +531,7 @@ def test_undo_first_reconciliation_returns_never_reconciled_and_cannot_chain(ser
     assert result["never_reconciled"] is True
     assert result["effective_reconciliation"] is None
     assert result["undo"]["available"] is False
-    with pytest.raises(ValueError, match="reconciliation_undo_unavailable"):
+    with pytest.raises(ValueError, match="No reconciliation is currently eligible for undo"):
         service.undo_last_reconciliation(account_id)
     assert (
         service.reconciliation_repository.read_commit(commit["reconciliation_id"])[
@@ -873,6 +882,17 @@ def _update_transaction(
 
 def test_working_set_classifies_logical_changes_and_ignores_metadata(service) -> None:
     account_id = _budget_account(service)
+    group_id = service.create_category_group(
+        {"name": "Test Group", "sort_order": 1, "is_hidden": False}
+    )["group_id"]
+    category_id = service.create_category(
+        {
+            "group_id": group_id,
+            "name": "Test Category",
+            "category_kind": "STANDARD",
+            "sort_order": 1,
+        }
+    )["category_id"]
     cleared_id = service.create_transaction(
         {
             "date": date(2026, 2, 1),
@@ -903,7 +923,7 @@ def test_working_set_classifies_logical_changes_and_ignores_metadata(service) ->
     _update_transaction(
         service,
         cleared_id,
-        category_id=str(uuid4()),
+        category_id=category_id,
         system_category=None,
         memo="metadata only",
     )
@@ -1010,7 +1030,7 @@ def test_working_set_backdated_create_removed_and_restored(service) -> None:
 
     _commit_budget_baseline(service, account_id)
     service.clock.advance(minutes=1)
-    service.restore_transaction(original_id)
+    service.restore_transaction(original_id, str(original["row_id"]))
     restored = service.reconciliation_working_set(account_id)["items"]
     restored_by_id = {item["transaction_id"]: item for item in restored}
     assert restored_by_id[original_id]["classification"] == "RESTORED"
@@ -1060,7 +1080,7 @@ def test_delete_and_restore_at_same_clock_time_is_restored(service) -> None:
     service.clock.advance(microseconds=1)
     _commit_budget_baseline(service, account_id)
     service.clock.advance(microseconds=-1)
-    service.restore_transaction(transaction_id)
+    service.restore_transaction(transaction_id, str(current["row_id"]))
 
     items = service.reconciliation_working_set(account_id)["items"]
     assert len(items) == 1
@@ -1095,7 +1115,7 @@ def test_post_baseline_create_remove_restore_is_restored_not_new(service) -> Non
         str(current["row_id"]),
         acknowledge_reconciled_history_change=True,
     )
-    service.restore_transaction(transaction_id)
+    service.restore_transaction(transaction_id, str(current["row_id"]))
 
     items = service.reconciliation_working_set(account_id)["items"]
     assert len(items) == 1

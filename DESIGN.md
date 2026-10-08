@@ -1375,23 +1375,19 @@ Multi-step wizard with sidebar progress.
 ### 8.7 Feedback Components
 
 #### `undo-toast`
-Toast notification system with 4 semantic variants, undo action, hover-to-pause, auto-dismiss.
+Application-level mutation feedback with one visible notification and a LIFO Undo queue. Actionable success notifications remain visible until the user undoes, dismisses, or replaces the latest mutation. Confirmation-only notices are also dismissible; errors use assertive announcements. No notification depends on a short timeout for access to Undo.
 
-**Exposed methods via `defineExpose`:** `addToast(toast)`, `removeToast(id)`, `toasts`
+**Behavior:** the app-level host announces success politely and errors assertively. Keyboard and pointer users can activate Undo or dismiss the current notice. Undo invokes a persisted inverse operation and reveals the next available undo when one remains.
 
-**Interface `Omit<ToastItem, 'id' | '_timer'>`:**
+**Interface `MutationNotice`:**
 - `message` (string) — Toast text
-- `variant?` (`'info' | 'positive' | 'warning' | 'error'`) — defaults to `'info'`
-- `undoAction?` (function) — Undo callback
-- `undoLabel?` (string) — defaults to `'Undo'`
-- `timeout?` (number) — defaults to `4000ms`
+- `kind` (`'success' | 'error'`)
+- `undo?` — one persisted inverse action for the latest reversible mutation
 
 **States:**
-- **Info** — `{colors.on-surface}` background, `{colors.surface}` text
-- **Positive** — `{colors.positive}` background, `{colors.on-primary}` text
-- **Warning** — `{colors.warning}` background, `{colors.on-primary}` text
+- **Success** — `{colors.positive}` background, `{colors.on-primary}` text
 - **Error** — `{colors.error}` background, `{colors.on-primary}` text
-- **Hover** — timer pauses
+- **Undo** — one primary action; keyboard focus and dismissal are supported
 - **Enter** — slide in from right (translateX 20px → 0, 160ms)
 - **Leave** — slide out to right (0 → translateX 20px, 120ms)
 

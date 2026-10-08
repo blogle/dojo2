@@ -440,7 +440,7 @@ Aspire transaction named ranges can contain structural, reconciliation, pending-
 
 ### Decision
 
-Classify transaction rows before validation. Skip blank, break, reconciliation, helper, and pending staged rows that do not represent committed ledger movement. For real amount-bearing rows, keep strict validation, but allow uncategorized transactions, allow inherited dates from the most recent prior real transaction when the sheet leaves the date cell blank, and continue reading system labels from consumed scalar named ranges.
+Classify transaction rows before validation. Skip blank, break, reconciliation, helper, and pending staged rows that do not represent committed ledger movement. For real amount-bearing rows, keep strict validation and represent a blank source category with the canonical `TX_UNCATEGORIZED` system category. Also allow inherited dates from the most recent prior real transaction when the sheet leaves the date cell blank, and continue reading system labels from consumed scalar named ranges.
 
 ### Consequence
 

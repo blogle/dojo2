@@ -4,7 +4,9 @@ import { createMemoryHistory, createRouter } from "vue-router";
 
 import AccountDetailPage from "../../src/dojo/pages/AccountDetailPage.vue";
 import AssetsLiabilitiesPage from "../../src/dojo/pages/AssetsLiabilitiesPage.vue";
+import MutationFeedbackHost from "../../src/dojo/layouts/MutationFeedbackHost.vue";
 import { createDojoQueryClient } from "../../src/dojo/queryClient";
+import { useMutationFeedback } from "../../src/dojo/state/mutationFeedback";
 
 const budgetAccount = {
   account_id: "acct-checking-1234",
@@ -47,6 +49,20 @@ const transactions = [
     system_category: null,
     status: "PENDING",
     memo: "Household items",
+    is_hidden_entity: false,
+  },
+  {
+    transaction_id: "txn-uncategorized-legacy",
+    version: "version-legacy",
+    date: "2026-06-26",
+    account_id: budgetAccount.account_id,
+    account_name: budgetAccount.name,
+    amount_minor: -3200,
+    category_id: null,
+    category_name: null,
+    system_category: null,
+    status: "PENDING",
+    memo: "Uncategorized market purchase",
     is_hidden_entity: false,
   },
   {
@@ -163,6 +179,23 @@ function stubFetch() {
           status: 200,
           headers: { "Content-Type": "application/json" },
         }),
+      );
+    }
+
+    if (
+      path ===
+        `/api/accounts/${budgetAccount.account_id}/reconciliations/undo` &&
+      init?.method === "POST"
+    ) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            account_id: budgetAccount.account_id,
+            effective_reconciliation_id: null,
+            items: [],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
       );
     }
 
@@ -341,6 +374,61 @@ describe("AccountDetailPage", () => {
     cy.get("[data-cy=balance-trend-chart]").should("be.visible");
   });
 
+  it("keeps a legacy missing-category transaction unchanged until categorized", () => {
+    mountPage();
+    cy.contains(".ledger__row", "Uncategorized market purchase").click();
+    cy.get(".ledger__row--editing .ledger__status-pill").click();
+    cy.get("[data-cy=page-header-root]").click();
+
+    cy.get(".ledger__row--editing .ledger__status-pill").should(
+      "contain.text",
+      "Cleared",
+    );
+    cy.get("[data-cy=transaction-ledger]")
+      .find('[role="alert"]')
+      .should(
+        "contain.text",
+        "Choose a category or select Uncategorized before saving.",
+      );
+    cy.window().then((win) => {
+      const calls = (
+        win.fetch as unknown as {
+          getCalls: () => Array<{ args: [string, RequestInit?] }>;
+        }
+      ).getCalls();
+      expect(
+        calls.some(
+          (call) =>
+            new URL(call.args[0], "http://localhost").pathname ===
+              `/api/transactions/txn-uncategorized-legacy` &&
+            call.args[1]?.method === "PUT",
+        ),
+      ).to.equal(false);
+    });
+
+    cy.get(".ledger__row--editing select").first().select("__uncategorized__");
+    cy.get("[data-cy=page-header-root]").click();
+    cy.get(".ledger__row--editing").should("not.exist");
+    cy.window().then((win) => {
+      const calls = (
+        win.fetch as unknown as {
+          getCalls: () => Array<{ args: [string, RequestInit?] }>;
+        }
+      ).getCalls();
+      const update = calls.find(
+        (call) =>
+          new URL(call.args[0], "http://localhost").pathname ===
+            `/api/transactions/txn-uncategorized-legacy` &&
+          call.args[1]?.method === "PUT",
+      );
+      expect(JSON.parse(update?.args[1]?.body as string)).to.include({
+        category_id: null,
+        system_category: "TX_UNCATEGORIZED",
+        status: "CLEARED",
+      });
+    });
+  });
+
   it("opens the account-local reconciliation balance action", () => {
     mountPage();
 
@@ -360,7 +448,10 @@ describe("AccountDetailPage", () => {
   });
 
   it("derives the third source balance and commits an instant match", () => {
+    const feedback = useMutationFeedback();
+    while (feedback.notice.value) feedback.dismiss();
     mountPage();
+    mount(MutationFeedbackHost);
     cy.get("[data-cy=account-detail-reconcile]").click();
     cy.get('input[name="source-cleared"]').type("6716.75");
     cy.get('input[name="source-pending"]').type("125.43");
@@ -374,6 +465,32 @@ describe("AccountDetailPage", () => {
     );
     cy.get("[data-cy=form-modal-root]").contains("Reconcile account").click();
     cy.get("[data-cy=form-modal-root]").should("not.exist");
+    cy.get('[data-cy="mutation-feedback"]')
+      .should("contain.text", "Account reconciled")
+      .and("contain.text", "Undo");
+    cy.get(".mutation-feedback__undo").click();
+    cy.get('[data-cy="mutation-feedback"]').should(
+      "contain.text",
+      "Reconciliation undone",
+    );
+    cy.window().then((win) => {
+      const calls = (
+        win.fetch as unknown as {
+          getCalls: () => Array<{ args: [string, RequestInit?] }>;
+        }
+      ).getCalls();
+      const undoCall = calls.find((call) => {
+        const requestUrl = new URL(call.args[0], "http://localhost");
+        return (
+          requestUrl.pathname ===
+            `/api/accounts/${budgetAccount.account_id}/reconciliations/undo` &&
+          call.args[1]?.method === "POST"
+        );
+      });
+      expect(JSON.parse(undoCall?.args[1]?.body as string)).to.include({
+        expected_reconciliation_id: "attempt-1",
+      });
+    });
   });
 
   it("keeps an equal-and-opposite discrepancy blocked and opens the investigation ledger", () => {

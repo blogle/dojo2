@@ -14,6 +14,7 @@ import DatePicker from "@/dojo/components/forms/DatePicker.vue";
 import InstitutionCombobox from "@/dojo/components/forms/InstitutionCombobox.vue";
 import SelectField from "@/dojo/components/forms/SelectField.vue";
 import TextField from "@/dojo/components/forms/TextField.vue";
+import { notifyMutationSuccess } from "@/dojo/state/mutationFeedback";
 import { institutionSuggestions } from "@/dojo/utils/institutions";
 
 type EntityType =
@@ -110,7 +111,6 @@ const selectedType = ref<EntityType | null>(
     : null,
 );
 const step = ref<1 | 2 | 3>(1);
-const submitError = ref<string | null>(null);
 
 const form = reactive({
   name: "",
@@ -323,16 +323,12 @@ const createAccountMutation = useMutation({
       queryClient.invalidateQueries({ queryKey: ["net-worth"] }),
     ]);
     await router.push(`/assets-liabilities/${account_id}`);
-  },
-  onError: (error) => {
-    submitError.value =
-      error instanceof Error ? error.message : "Unable to add item.";
+    notifyMutationSuccess("Account added");
   },
 });
 
 const selectType = (type: EntityType) => {
   selectedType.value = type;
-  submitError.value = null;
   router.replace({ path: "/assets-liabilities/add", query: { type } });
 };
 
@@ -341,7 +337,6 @@ const closeWizard = () => {
 };
 
 const continueWizard = () => {
-  submitError.value = null;
   if (step.value === 1 && selectedType.value) {
     step.value = 2;
   } else if (step.value === 2) {
@@ -350,7 +345,6 @@ const continueWizard = () => {
 };
 
 const backWizard = () => {
-  submitError.value = null;
   if (step.value === 2) {
     step.value = 1;
   } else {
@@ -701,14 +695,6 @@ const backWizard = () => {
               />
             </template>
           </div>
-
-          <p
-            v-if="submitError"
-            class="add-item-modal__error"
-            data-cy="add-item-error"
-          >
-            {{ submitError }}
-          </p>
         </form>
 
         <footer class="add-item-modal__footer">

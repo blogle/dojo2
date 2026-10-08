@@ -20,6 +20,7 @@ from dojo.constants import (
     SYSTEM_CATEGORY_BALANCE_ADJUSTMENT,
     SYSTEM_CATEGORY_STARTING_BALANCE,
     SYSTEM_CATEGORY_TRANSFER,
+    SYSTEM_CATEGORY_UNCATEGORIZED,
 )
 from dojo.fixture_data import DEFAULT_FIXTURE
 from dojo.money import parse_money_value, parse_signed_amount
@@ -1050,6 +1051,8 @@ def parse_transactions_named_ranges(access: NamedRangeAccess) -> list[ParsedTran
         amount_minor = parse_signed_amount(inflow, outflow)
         system_category = map_system_category(category_raw, labels)
         category_name = _none_if_blank(category_raw)
+        if category_name is None and system_category is None:
+            system_category = SYSTEM_CATEGORY_UNCATEGORIZED
         if system_category is not None:
             category_name = None
         last_transaction_date_raw = date_raw

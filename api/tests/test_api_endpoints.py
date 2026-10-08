@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 import dojo.api.main as main_module
 import dojo.api.routes as routes_module
 from dojo.api.settings import get_settings
+from dojo.constants import SYSTEM_CATEGORY_UNCATEGORIZED
 from dojo.drive_backup import GoogleAccessToken, VerifiedDriveFolder
 from dojo.fixture_data import DEFAULT_FIXTURE
 from dojo.migrations import provision_database
@@ -769,6 +770,13 @@ def test_delete_then_restore_preserves_transaction_id(monkeypatch, tmp_path) -> 
         assert delete_resp.status_code == 200
         assert delete_resp.json()["ok"] is True
 
+        stale_restore = client.post(
+            f"/api/transactions/{tx_id}/restore",
+            json={"expected_version": str(uuid4())},
+        )
+        assert stale_restore.status_code == 409
+        assert stale_restore.json()["detail"]["code"] == "transaction_version_conflict"
+
         # Verify deleted
         page_after_delete = client.get(
             "/api/transactions",
@@ -777,7 +785,10 @@ def test_delete_then_restore_preserves_transaction_id(monkeypatch, tmp_path) -> 
         assert all(t["transaction_id"] != tx_id for t in page_after_delete.json()["items"])
 
         # Restore it
-        restore_resp = client.post(f"/api/transactions/{tx_id}/restore")
+        restore_resp = client.post(
+            f"/api/transactions/{tx_id}/restore",
+            json={"expected_version": tx["version"]},
+        )
         assert restore_resp.status_code == 200
         assert restore_resp.json()["transaction_id"] == tx_id
 
@@ -808,7 +819,10 @@ def test_restore_missing_transaction_returns_404(monkeypatch, tmp_path) -> None:
 
         # Try to restore a non-existent transaction (use valid UUID format)
         non_existent_id = "00000000-0000-0000-0000-000000000000"
-        restore_resp = client.post(f"/api/transactions/{non_existent_id}/restore")
+        restore_resp = client.post(
+            f"/api/transactions/{non_existent_id}/restore",
+            json={"expected_version": "00000000-0000-0000-0000-000000000001"},
+        )
         assert restore_resp.status_code == 404
         assert "Transaction not found" in restore_resp.json()["detail"]
 
@@ -833,7 +847,10 @@ def test_restore_already_active_transaction_returns_400(monkeypatch, tmp_path) -
         tx_id = tx["transaction_id"]
 
         # Try to restore an already active transaction
-        restore_resp = client.post(f"/api/transactions/{tx_id}/restore")
+        restore_resp = client.post(
+            f"/api/transactions/{tx_id}/restore",
+            json={"expected_version": tx["version"]},
+        )
         assert restore_resp.status_code == 400
         assert "already active" in restore_resp.json()["detail"]
 
@@ -1000,6 +1017,69 @@ def test_transaction_update_rejects_stale_version(monkeypatch, tmp_path) -> None
         assert updated["memo"] == "first edit"
 
 
+def test_transaction_edit_undo_restores_prior_persisted_version(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("SESSION_SECRET", "test-secret")
+    monkeypatch.setenv(
+        "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/onboarding/google/callback"
+    )
+    provisioned_main_module(monkeypatch, tmp_path, "transaction-edit-undo-api-test.duckdb")
+
+    with TestClient(main_module.app) as client:
+        assert import_test_sheet(client, monkeypatch).status_code == 200
+        tx = client.get("/api/transactions", params={"show_hidden": "true", "limit": 1}).json()[
+            "items"
+        ][0]
+        original = {
+            key: tx[key]
+            for key in (
+                "date",
+                "account_id",
+                "amount_minor",
+                "category_id",
+                "system_category",
+                "status",
+                "memo",
+            )
+        }
+        edited_payload = original | {"memo": "User corrected the merchant name"}
+        edited = client.put(
+            f"/api/transactions/{tx['transaction_id']}",
+            json=edited_payload | {"expected_version": tx["version"]},
+        )
+        assert edited.status_code == 200
+
+        undone = client.put(
+            f"/api/transactions/{tx['transaction_id']}",
+            json=original
+            | {
+                "expected_version": edited.json()["version"],
+                "acknowledge_reconciled_history_change": True,
+            },
+        )
+        assert undone.status_code == 200
+        current = next(
+            item
+            for item in client.get(
+                "/api/transactions",
+                params={"show_hidden": "true", "limit": 100},
+            ).json()["items"]
+            if item["transaction_id"] == tx["transaction_id"]
+        )
+        assert current["memo"] == original["memo"]
+        assert current["version"] == undone.json()["version"]
+
+        stale_undo = client.put(
+            f"/api/transactions/{tx['transaction_id']}",
+            json=original
+            | {
+                "expected_version": edited.json()["version"],
+                "acknowledge_reconciled_history_change": True,
+            },
+        )
+        assert stale_undo.status_code == 409
+        assert stale_undo.json()["detail"]["code"] == "transaction_version_conflict"
+
+
 def test_uncategorized_pending_transaction_can_clear_during_reconciliation(
     monkeypatch, tmp_path
 ) -> None:
@@ -1023,9 +1103,9 @@ def test_uncategorized_pending_transaction_can_clear_during_reconciliation(
 
         with service.db.transaction() as connection:
             connection.execute(
-                "UPDATE transactions SET category_id = NULL, system_category = NULL, "
+                "UPDATE transactions SET category_id = NULL, system_category = ?, "
                 "status = 'PENDING' WHERE row_id = ?",
-                (imported["version"],),
+                (SYSTEM_CATEGORY_UNCATEGORIZED, imported["version"]),
             )
 
         uncategorized = next(
@@ -1053,7 +1133,7 @@ def test_uncategorized_pending_transaction_can_clear_during_reconciliation(
             "account_id": uncategorized["account_id"],
             "amount_minor": uncategorized["amount_minor"],
             "category_id": None,
-            "system_category": None,
+            "system_category": SYSTEM_CATEGORY_UNCATEGORIZED,
             "status": "CLEARED",
             "memo": uncategorized["memo"],
             "expected_version": uncategorized["version"],
@@ -1061,9 +1141,57 @@ def test_uncategorized_pending_transaction_can_clear_during_reconciliation(
 
         rejected_create = client.post(
             "/api/transactions",
-            json={key: value for key, value in update_payload.items() if key != "expected_version"},
+            json=update_payload | {"system_category": None, "expected_version": None},
         )
         assert rejected_create.status_code == 422
+        ambiguous_create = client.post(
+            "/api/transactions",
+            json=update_payload
+            | {
+                "category_id": imported["category_id"],
+                "expected_version": None,
+            },
+        )
+        assert ambiguous_create.status_code == 422
+
+        missing_target_update = client.put(
+            f"/api/transactions/{uncategorized['transaction_id']}",
+            json=update_payload | {"system_category": None},
+        )
+        assert missing_target_update.status_code == 422
+        assert (
+            missing_target_update.json()["detail"][0]["msg"]
+            == "Value error, Choose a category or select Uncategorized before saving."
+        )
+        unchanged = next(
+            item
+            for item in client.get(
+                "/api/transactions",
+                params={
+                    "show_hidden": "true",
+                    "limit": 10_000,
+                    "account_id": imported["account_id"],
+                },
+            ).json()["items"]
+            if item["transaction_id"] == uncategorized["transaction_id"]
+        )
+        assert unchanged["status"] == "PENDING"
+        assert unchanged["version"] == uncategorized["version"]
+        ambiguous_target_update = client.put(
+            f"/api/transactions/{uncategorized['transaction_id']}",
+            json=update_payload | {"category_id": imported["category_id"]},
+        )
+        assert ambiguous_target_update.status_code == 422
+        unknown_category_update = client.put(
+            f"/api/transactions/{uncategorized['transaction_id']}",
+            json=update_payload
+            | {
+                "category_id": "00000000-0000-0000-0000-000000000099",
+                "system_category": None,
+            },
+        )
+        assert unknown_category_update.status_code == 400
+        assert unknown_category_update.json()["detail"] == "Choose a category that exists in Dojo."
 
         updated = client.put(
             f"/api/transactions/{uncategorized['transaction_id']}", json=update_payload
@@ -1084,7 +1212,7 @@ def test_uncategorized_pending_transaction_can_clear_during_reconciliation(
         assert len(versions) == 2
         assert [row["status"] for row in versions] == ["PENDING", "CLEARED"]
         assert all(row["category_id"] is None for row in versions)
-        assert all(row["system_category"] is None for row in versions)
+        assert all(row["system_category"] == SYSTEM_CATEGORY_UNCATEGORIZED for row in versions)
         assert versions[0]["valid_to"] == versions[1]["valid_from"]
         assert [
             str(item["reconciliation_id"])
@@ -1414,11 +1542,29 @@ def test_reconciliation_undo_endpoint_is_latest_only(monkeypatch, tmp_path) -> N
                 "status": "CLEARED",
             },
         )
-        commit_api_budget_baseline(service, account["account_id"])
+        second = commit_api_budget_baseline(service, account["account_id"])
+
+        stale_undo = client.post(
+            f"/api/accounts/{account['account_id']}/reconciliations/undo",
+            json={
+                "client_operation_id": str(uuid4()),
+                "expected_reconciliation_id": first["reconciliation_id"],
+            },
+        )
+        assert stale_undo.status_code == 409
+        assert stale_undo.json()["detail"]["code"] == "reconciliation_undo_unavailable"
+        assert (
+            service.reconciliation_working_set(account["account_id"])["baseline_reconciliation_id"]
+            == second["reconciliation_id"]
+        )
 
         undone = client.post(
             f"/api/accounts/{account['account_id']}/reconciliations/undo",
-            json={"client_operation_id": str(uuid4()), "reason": "Latest-only API test"},
+            json={
+                "client_operation_id": str(uuid4()),
+                "expected_reconciliation_id": second["reconciliation_id"],
+                "reason": "Latest-only API test",
+            },
         )
         assert undone.status_code == 200
         assert undone.json()["effective_reconciliation_id"] == first["reconciliation_id"]

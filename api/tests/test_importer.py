@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from dojo.constants import SYSTEM_CATEGORY_UNCATEGORIZED
 from dojo.fixture_data import DEFAULT_FIXTURE, column, scalar
 from dojo.importer import (
     CONTRACT_BY_LOGICAL_NAME,
@@ -367,7 +368,7 @@ def test_amount_bearing_transaction_with_blank_category_imports_as_uncategorized
     transactions = parse_transactions_named_ranges(access)
 
     assert transactions[0].category_name is None
-    assert transactions[0].system_category is None
+    assert transactions[0].system_category == SYSTEM_CATEGORY_UNCATEGORIZED
 
 
 def test_amount_bearing_transaction_with_blank_date_uses_previous_transaction_date() -> None:

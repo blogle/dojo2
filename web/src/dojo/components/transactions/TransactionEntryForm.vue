@@ -57,6 +57,7 @@ const toAccountMemo = ref("");
 const toAccountOverrides = ref({ date: false, status: false, memo: false });
 const memoSuggestions = ref<string[]>([]);
 const toAccountMemoSuggestions = ref<string[]>([]);
+const validationError = ref("");
 let memoSearchVersion = 0;
 let toAccountMemoSearchVersion = 0;
 
@@ -94,30 +95,44 @@ watch(
   { immediate: true },
 );
 
+watch([date, accountId, categoryId, toAccountId, amount], () => {
+  validationError.value = "";
+});
+
 resetForm();
 
 function handleSubmit() {
-  if (!date.value || !accountId.value || !amount.value) return;
+  validationError.value = "";
+  if (!date.value || !accountId.value || !amount.value) {
+    validationError.value = "Enter a date, account, and amount.";
+    return;
+  }
   if (
     !accountOptions.value.some((option) => option.value === accountId.value)
   ) {
+    validationError.value = "Choose an active account.";
     return;
   }
   if (
     mode.value === "transaction" &&
     !categoryOptions.value.some((option) => option.value === categoryId.value)
   ) {
+    validationError.value = "Choose a category or Uncategorized.";
     return;
   }
   if (
     mode.value === "transfer" &&
     !toAccountOptions.value.some((option) => option.value === toAccountId.value)
   ) {
+    validationError.value = "Choose a destination account.";
     return;
   }
 
   const amountMinor = parseMoneyInput(amount.value);
-  if (amountMinor === null || amountMinor === 0) return;
+  if (amountMinor === null || amountMinor === 0) {
+    validationError.value = "Enter a valid amount greater than zero.";
+    return;
+  }
 
   if (mode.value === "transfer") {
     emit("submit", {
@@ -141,7 +156,9 @@ function handleSubmit() {
   const systemCategory: TransactionSystemCategory | null =
     categoryId.value === "__available_to_budget__"
       ? "TX_AVAILABLE_TO_BUDGET"
-      : null;
+      : categoryId.value === "__uncategorized__"
+        ? "TX_UNCATEGORIZED"
+        : null;
   emit("submit", {
     date: date.value,
     account_id: accountId.value,
@@ -181,6 +198,7 @@ const accountOptions = computed(() =>
 
 const categoryOptions = computed(() => [
   { value: "__available_to_budget__", label: "Available to budget" },
+  { value: "__uncategorized__", label: "Uncategorized" },
   ...props.categories
     .filter(
       (c) => c.category_kind === "STANDARD" && c.is_active && !c.is_hidden,
@@ -311,6 +329,9 @@ function setMode(nextMode: "transaction" | "transfer") {
     data-cy="transaction-entry-form"
     @keydown="handleKeyDown"
   >
+    <p v-if="validationError" class="entry-form__validation-error" role="alert">
+      {{ validationError }}
+    </p>
     <div class="entry-form__mode" role="group" aria-label="Entry mode">
       <Button
         :variant="mode === 'transaction' ? 'primary' : 'tertiary'"
@@ -438,6 +459,13 @@ function setMode(nextMode: "transaction" | "transfer") {
   display: flex;
   gap: var(--space-xs);
   margin-bottom: var(--space-md);
+}
+
+.entry-form__validation-error {
+  margin: 0 0 var(--space-md);
+  color: var(--color-error);
+  font-family: var(--text-body-sm-font-family);
+  font-size: var(--text-body-sm-font-size);
 }
 
 .entry-form__row {
