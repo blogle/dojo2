@@ -373,6 +373,7 @@ const accountLedgerMutationStub = defineComponent({
   setup(props, { emit }) {
     return () => {
       const transaction = (props.transactions as typeof transactions)[0];
+      if (!transaction) return h("div", { "data-cy": "test-ledger-loading" });
       return h("div", [
         h(
           "button",
@@ -469,10 +470,7 @@ describe("AccountDetailPage", () => {
     );
     cy.get("[data-cy=transaction-filter-bar]").should("be.visible");
     cy.get("[data-cy=transaction-ledger]").should("be.visible");
-    cy.get("[data-cy=account-details-section]").should(
-      "not.contain.text",
-      "View budgeting details",
-    );
+    cy.get("[data-cy=account-details-section]").should("not.exist");
     cy.get("[data-cy=reconciliation-section]").should("not.exist");
     cy.get("[data-cy=transaction-entry-form]").should("be.visible");
     cy.get("[data-cy=history-section]").should("not.exist");

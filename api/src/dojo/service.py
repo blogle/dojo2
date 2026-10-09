@@ -1592,9 +1592,7 @@ class DojoService:
             value = values[account_id]
             last_reconciliation_date = None
             if account["account_class"] in {ACCOUNT_CLASS_BUDGET, ACCOUNT_CLASS_INVESTMENT}:
-                reconciliation = self._reconciliation_state(account_id)[
-                    "effective_reconciliation"
-                ]
+                reconciliation = self._reconciliation_state(account_id)["effective_reconciliation"]
                 reconciliation_status = (
                     "CURRENT" if reconciliation is not None else "NOT_RECONCILED"
                 )

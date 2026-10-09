@@ -291,6 +291,7 @@ const ledgerMutationStub = defineComponent({
   setup(props, { emit }) {
     return () => {
       const transaction = (props.transactions as typeof mockTransactions)[0];
+      if (!transaction) return h("div", { "data-cy": "test-ledger-loading" });
       return h("div", [
         h(
           "button",

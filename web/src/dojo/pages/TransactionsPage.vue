@@ -262,12 +262,9 @@ function handleCommitEdit(
         ) {
           notifyReconciledHistoryConfirmation(
             async () => {
-              const result = await updateTransaction(
-                id,
-                payload,
-                tx.version,
-                { acknowledgeReconciledHistoryChange: true },
-              );
+              const result = await updateTransaction(id, payload, tx.version, {
+                acknowledgeReconciledHistoryChange: true,
+              });
               complete({ success: true });
               invalidateRelatedQueries();
               notifyVersionedMutationSuccess(

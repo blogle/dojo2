@@ -75,15 +75,12 @@ describe("shared mutation feedback", () => {
     mount(MutationFeedbackHost);
 
     cy.get('[data-cy="mutation-feedback"]')
-      .should(
-        "contain.text",
-        "The completed reconciliation is preserved",
-      )
+      .should("contain.text", "The completed reconciliation is preserved")
       .and("contain.text", "Apply anyway");
     cy.get(".mutation-feedback__confirm").click();
 
     cy.wrap(null).should(() => {
-      expect(confirm).to.have.been.calledOnce;
+      expect(confirm.callCount).to.equal(1);
       expect(feedback.notice.value?.message).to.equal("Transaction updated");
     });
   });
@@ -101,12 +98,9 @@ describe("shared mutation feedback", () => {
 
   it("keeps cancellation available if applying the change fails", () => {
     const cancel = cy.stub();
-    notifyReconciledHistoryConfirmation(
-      async () => {
-        throw new Error("Retry failed");
-      },
-      cancel,
-    );
+    notifyReconciledHistoryConfirmation(async () => {
+      throw new Error("Retry failed");
+    }, cancel);
     mount(MutationFeedbackHost);
 
     cy.get(".mutation-feedback__confirm").click();

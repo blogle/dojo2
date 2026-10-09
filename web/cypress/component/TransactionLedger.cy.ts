@@ -92,14 +92,12 @@ describe("TransactionLedger", () => {
       .and("contain.text", "Edited");
     cy.get(".ledger__row")
       .eq(1)
-      .find("details")
-      .should("not.have.attr", "open");
-    cy.get(".ledger__row").eq(1).find("summary").click();
-    cy.get(".ledger__row").eq(1).find("details").should("have.attr", "open");
-    cy.get(".ledger__row")
-      .eq(1)
-      .find("details")
-      .should("contain.text", "amount_minor, status");
+      .find(".ledger__cell--change span")
+      .should(
+        "have.attr",
+        "title",
+        "Last reconciled → Current: amount_minor, status",
+      );
     cy.get(".ledger__row")
       .eq(2)
       .should("contain.text", "Removed purchase")
@@ -279,15 +277,17 @@ describe("TransactionLedger", () => {
       | { cancelled: true }
       | { success: false; message: string };
     let finish: ((result: Completion) => void) | undefined;
-    const onCommit = cy.stub().callsFake(
-      (
-        _id: string,
-        _payload: unknown,
-        complete: (result: Completion) => void,
-      ) => {
-        finish = complete;
-      },
-    );
+    const onCommit = cy
+      .stub()
+      .callsFake(
+        (
+          _id: string,
+          _payload: unknown,
+          complete: (result: Completion) => void,
+        ) => {
+          finish = complete;
+        },
+      );
     mount(TransactionLedger, {
       props: {
         transactions: mockTransactions,
@@ -298,7 +298,9 @@ describe("TransactionLedger", () => {
     });
 
     cy.get(".ledger__row").first().click();
-    cy.get('.ledger__row--editing input[placeholder="Memo"]').clear().type("Edited");
+    cy.get('.ledger__row--editing input[placeholder="Memo"]')
+      .clear()
+      .type("Edited");
     cy.get("body").click(10, 10);
     cy.wrap(onCommit).should("have.been.calledOnce");
     cy.then(() => finish?.({ cancelled: true }));
@@ -445,9 +447,11 @@ describe("TransactionLedger", () => {
     cy.get(".ledger__row").first().click();
     cy.get(".ledger__remove-btn").click();
 
-    cy.get(".ledger__row--editing")
-      .should("exist")
-      .and("contain.text", "Market");
+    cy.get(".ledger__row--editing").should("exist");
+    cy.get('.ledger__row--editing input[placeholder="Memo"]').should(
+      "have.value",
+      "Market",
+    );
     cy.get('[data-cy="transaction-ledger"] [role="alert"]')
       .should("contain.text", "changed elsewhere")
       .and("be.visible");

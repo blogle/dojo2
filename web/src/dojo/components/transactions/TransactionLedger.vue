@@ -525,7 +525,9 @@ function systemCategoryLabel(value: string | null): string {
                   {{
                     isRemovedTransaction(tx)
                       ? "—"
-                      : formatCurrency(runningBalances?.[tx.transaction_id] ?? 0)
+                      : formatCurrency(
+                          runningBalances?.[tx.transaction_id] ?? 0,
+                        )
                   }}
                 </td>
               </template>
@@ -600,7 +602,8 @@ function systemCategoryLabel(value: string | null): string {
                   >
                     <span
                       :title="reconciliationChanges[tx.transaction_id]?.details"
-                    >Edited</span>
+                      >Edited</span
+                    >
                   </template>
                   <span v-else>{{
                     reconciliationChanges[tx.transaction_id]?.label ?? "—"

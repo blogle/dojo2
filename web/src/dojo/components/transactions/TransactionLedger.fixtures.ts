@@ -33,6 +33,7 @@ export default defineFixtures<TransactionLedgerProps>({
           "transaction-edited": {
             label: "Edited",
             changedFields: ["amount_minor", "status"],
+            details: "Last reconciled → Current: amount_minor, status",
           },
           "transaction-removed": {
             label: "Removed",

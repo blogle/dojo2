@@ -65,10 +65,7 @@ import TableShell from "@/dojo/components/tables/TableShell.vue";
 import TransactionFilterBar from "@/dojo/components/transactions/TransactionFilterBar.vue";
 import TransactionLedger from "@/dojo/components/transactions/TransactionLedger.vue";
 import TransactionEntryForm from "@/dojo/components/transactions/TransactionEntryForm.vue";
-import type {
-  Transaction,
-  TransactionPayload,
-} from "@/dojo/types";
+import type { Transaction, TransactionPayload } from "@/dojo/types";
 import { formatCurrency } from "@/dojo/utils/currency";
 import { institutionSuggestions } from "@/dojo/utils/institutions";
 import {
@@ -307,35 +304,38 @@ const reconciliationChanges = computed(() =>
               ? "Removed"
               : null;
       return label
-       ? [
-           [
-             item.transaction_id,
+        ? [
+            [
+              item.transaction_id,
               {
                 label,
                 changedFields: item.changed_fields,
                 removed: item.classification === "REMOVED",
-               details: item.changed_fields
-                 .map((field) => {
-                   const formatValue = (value: unknown) => {
-                     if (value == null) return "—";
-                     if (field === "amount_minor" && typeof value === "number") {
-                       return formatCurrency(value);
-                     }
-                     return String(value);
-                   };
-                   const fieldLabel =
-                     field === "amount_minor"
-                       ? "Amount"
-                       : field === "status"
-                         ? "Status"
-                         : field;
-                   return `${fieldLabel}: ${formatValue(item.baseline?.[field])} → ${formatValue(item.current?.[field])}`;
-                 })
-                 .join("; "),
-             },
-           ],
-         ]
-         : [];
+                details: item.changed_fields
+                  .map((field) => {
+                    const formatValue = (value: unknown) => {
+                      if (value == null) return "—";
+                      if (
+                        field === "amount_minor" &&
+                        typeof value === "number"
+                      ) {
+                        return formatCurrency(value);
+                      }
+                      return String(value);
+                    };
+                    const fieldLabel =
+                      field === "amount_minor"
+                        ? "Amount"
+                        : field === "status"
+                          ? "Status"
+                          : field;
+                    return `${fieldLabel}: ${formatValue(item.baseline?.[field])} → ${formatValue(item.current?.[field])}`;
+                  })
+                  .join("; "),
+              },
+            ],
+          ]
+        : [];
     }),
   ),
 );
@@ -350,15 +350,16 @@ const removedReconciliationTransactions = computed(() =>
     const transactionAccountId = String(baseline.account_id ?? accountId.value);
     const categoryId =
       typeof baseline.category_id === "string" ? baseline.category_id : null;
-    const systemCategory = (
-      [
-        "TX_AVAILABLE_TO_BUDGET",
-        "TX_ACCOUNT_TRANSFER",
-        "TX_STARTING_BALANCE",
-        "TX_BALANCE_ADJUSTMENT",
-        "TX_UNCATEGORIZED",
-      ] as const
-    ).find((candidate) => candidate === baseline.system_category) ?? null;
+    const systemCategory =
+      (
+        [
+          "TX_AVAILABLE_TO_BUDGET",
+          "TX_ACCOUNT_TRANSFER",
+          "TX_STARTING_BALANCE",
+          "TX_BALANCE_ADJUSTMENT",
+          "TX_UNCATEGORIZED",
+        ] as const
+      ).find((candidate) => candidate === baseline.system_category) ?? null;
 
     return [
       {
@@ -373,8 +374,9 @@ const removedReconciliationTransactions = computed(() =>
         amount_minor: Number(baseline.amount_minor ?? 0),
         category_id: categoryId,
         category_name:
-          categories.value.find((category) => category.category_id === categoryId)
-            ?.name ?? null,
+          categories.value.find(
+            (category) => category.category_id === categoryId,
+          )?.name ?? null,
         system_category: systemCategory,
         status: baseline.status === "PENDING" ? "PENDING" : "CLEARED",
         memo: String(baseline.memo ?? ""),
