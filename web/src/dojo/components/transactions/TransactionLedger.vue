@@ -28,6 +28,15 @@ const props = withDefaults(
     showTransferProvenance?: boolean;
     runningBalances?: Record<string, number>;
     lockedAccountId?: string;
+    reconciliationChanges?: Record<
+      string,
+      {
+        label: string;
+        changedFields: string[];
+        details?: string;
+        removed?: boolean;
+      }
+    >;
   }>(),
   {
     totalCount: undefined,
@@ -38,12 +47,22 @@ const props = withDefaults(
     showTransferProvenance: false,
     runningBalances: () => ({}),
     lockedAccountId: undefined,
+    reconciliationChanges: () => ({}),
   },
 );
 
+type EditCompletion =
+  | { success: true }
+  | { cancelled: true }
+  | { success: false; message: string };
+
 const emit = defineEmits<{
-  commit: [id: string, payload: TransactionPayload];
-  remove: [tx: Transaction];
+  commit: [
+    id: string,
+    payload: TransactionPayload,
+    complete: (result: EditCompletion) => void,
+  ];
+  remove: [tx: Transaction, complete: (result: EditCompletion) => void];
   loadMore: [];
 }>();
 
@@ -55,6 +74,8 @@ const editAmount = ref("");
 const editDirection = ref("outflow");
 const editStatus = ref<"PENDING" | "CLEARED">("PENDING");
 const editMemo = ref("");
+const editError = ref("");
+const editSaving = ref(false);
 const scrollElement = ref<HTMLElement | null>(null);
 const rowRefs = ref<Map<string, HTMLTableRowElement>>(new Map());
 
@@ -82,10 +103,14 @@ const virtualTransactionRows = computed<
 );
 
 function startEdit(tx: Transaction) {
+  if (isRemovedTransaction(tx)) return;
+  if (editSaving.value && editingId.value !== tx.transaction_id) return;
   editingId.value = tx.transaction_id;
+  editError.value = "";
+  editSaving.value = false;
   editDate.value = tx.date;
   editAccountId.value = props.lockedAccountId ?? tx.account_id;
-  editCategoryId.value = tx.category_id ?? "";
+  editCategoryId.value = transactionCategorySelection(tx);
   const absAmount = Math.abs(tx.amount_minor) / 100;
   editAmount.value = absAmount > 0 ? absAmount.toFixed(2) : "";
   editDirection.value = tx.amount_minor >= 0 ? "inflow" : "outflow";
@@ -93,30 +118,59 @@ function startEdit(tx: Transaction) {
   editMemo.value = tx.memo;
 }
 
+function isRemovedTransaction(tx: Transaction): boolean {
+  return props.reconciliationChanges?.[tx.transaction_id]?.removed === true;
+}
+
+function transactionCategorySelection(tx: Transaction): string {
+  if (tx.category_id) return tx.category_id;
+  if (tx.system_category === "TX_UNCATEGORIZED") return "__uncategorized__";
+  if (tx.system_category) return "__current_system_category__";
+  return "";
+}
+
 function buildPayload(tx: Transaction): TransactionPayload | null {
   const amountMinor = parseMoneyInput(editAmount.value);
   if (amountMinor === null) return null;
   const finalAmount =
     editDirection.value === "outflow" ? -amountMinor : amountMinor;
+  const systemCategory =
+    editCategoryId.value === "__uncategorized__"
+      ? "TX_UNCATEGORIZED"
+      : editCategoryId.value === "__current_system_category__"
+        ? tx.system_category
+        : null;
   return {
     date: editDate.value,
     account_id: props.lockedAccountId ?? editAccountId.value,
     amount_minor: finalAmount,
-    category_id: editCategoryId.value || null,
-    system_category: tx.system_category,
+    category_id: systemCategory ? null : editCategoryId.value || null,
+    system_category: systemCategory,
     status: editStatus.value,
     memo: editMemo.value,
   };
 }
 
 function commitEdit() {
-  if (!editingId.value) return;
+  if (!editingId.value || editSaving.value) return;
   const tx = props.transactions.find(
     (t) => t.transaction_id === editingId.value,
   );
   if (!tx) return;
+  if (!editDate.value) {
+    editError.value = "Choose a transaction date before saving.";
+    return;
+  }
   const payload = buildPayload(tx);
-  if (!payload) return;
+  if (!payload) {
+    editError.value = "Enter a valid amount before saving.";
+    return;
+  }
+  if (payload.category_id === null && payload.system_category === null) {
+    editError.value =
+      "Choose a category or select Uncategorized before saving.";
+    return;
+  }
   if (
     payload.date === tx.date &&
     payload.account_id === tx.account_id &&
@@ -126,14 +180,40 @@ function commitEdit() {
     payload.memo === tx.memo
   ) {
     editingId.value = null;
+    editError.value = "";
     return;
   }
-  emit("commit", editingId.value, payload);
-  editingId.value = null;
+  editSaving.value = true;
+  emit("commit", editingId.value, payload, completeEditMutation);
+}
+
+function completeEditMutation(result: EditCompletion) {
+  editSaving.value = false;
+  if ("cancelled" in result) {
+    editingId.value = null;
+    editError.value = "";
+    return;
+  }
+  if (result.success) {
+    editingId.value = null;
+    editError.value = "";
+  } else {
+    editError.value = result.message;
+  }
+}
+
+function removeTransaction(tx: Transaction) {
+  if (isRemovedTransaction(tx)) return;
+  if (editSaving.value) return;
+  editSaving.value = true;
+  emit("remove", tx, completeEditMutation);
 }
 
 function cancelEdit() {
+  if (editSaving.value) return;
   editingId.value = null;
+  editError.value = "";
+  editSaving.value = false;
 }
 
 function isEscape(event: KeyboardEvent): boolean {
@@ -234,7 +314,19 @@ const accountOptions = computed(() =>
 );
 
 const categoryOptions = computed(() => [
-  { value: "", label: "None" },
+  { value: "", label: "Choose a category…", disabled: true },
+  { value: "__uncategorized__", label: "Uncategorized" },
+  ...props.transactions
+    .filter(
+      (tx) =>
+        tx.transaction_id === editingId.value &&
+        tx.system_category !== null &&
+        tx.system_category !== "TX_UNCATEGORIZED",
+    )
+    .map((tx) => ({
+      value: "__current_system_category__",
+      label: systemCategoryLabel(tx.system_category),
+    })),
   ...props.categories
     .filter((c) => c.is_active && !c.is_hidden)
     .map((c) => ({ value: c.category_id, label: c.name })),
@@ -259,6 +351,23 @@ function transferProvenance(tx: Transaction): string {
     ? `${counterparty} → ${tx.account_name}`
     : `${tx.account_name} → ${counterparty}`;
 }
+
+function systemCategoryLabel(value: string | null): string {
+  switch (value) {
+    case "TX_AVAILABLE_TO_BUDGET":
+      return "Available to budget";
+    case "TX_STARTING_BALANCE":
+      return "Starting balance";
+    case "TX_ACCOUNT_TRANSFER":
+      return "Transfer";
+    case "TX_BALANCE_ADJUSTMENT":
+      return "Balance adjustment";
+    case "TX_UNCATEGORIZED":
+      return "Uncategorized";
+    default:
+      return "System transaction";
+  }
+}
 </script>
 
 <template>
@@ -271,6 +380,8 @@ function transferProvenance(tx: Transaction): string {
             :class="{
               'ledger__header-row--no-account': !showAccountColumn,
               'ledger__header-row--with-balance': showRunningBalance,
+              'ledger__header-row--with-reconciliation':
+                Object.keys(reconciliationChanges).length > 0,
             }"
           >
             <th class="ledger__head ledger__head--check">
@@ -284,6 +395,12 @@ function transferProvenance(tx: Transaction): string {
             <th class="ledger__head">Direction</th>
             <th class="ledger__head ledger__head--end">Amount</th>
             <th class="ledger__head">Status</th>
+            <th
+              v-if="Object.keys(reconciliationChanges).length"
+              class="ledger__head"
+            >
+              Change
+            </th>
             <th
               v-if="showRunningBalance"
               class="ledger__head ledger__head--end"
@@ -306,21 +423,29 @@ function transferProvenance(tx: Transaction): string {
                 'ledger__row--editing': editingId === tx.transaction_id,
                 'ledger__row--no-account': !showAccountColumn,
                 'ledger__row--with-balance': showRunningBalance,
+                'ledger__row--with-reconciliation':
+                  Object.keys(reconciliationChanges).length > 0,
+                'ledger__row--removed': isRemovedTransaction(tx),
               }"
               :style="{
                 transform: `translateY(${virtualRow.start}px)`,
               }"
               data-cy="transaction-row"
-              @click="editingId !== tx.transaction_id && startEdit(tx)"
-              tabindex="0"
+              @click="
+                !isRemovedTransaction(tx) &&
+                editingId !== tx.transaction_id &&
+                startEdit(tx)
+              "
+              :tabindex="isRemovedTransaction(tx) ? -1 : 0"
             >
               <td class="ledger__cell ledger__cell--check">
                 <template v-if="editingId === tx.transaction_id">
                   <button
                     class="ledger__remove-btn"
-                    @click.stop="emit('remove', tx)"
+                    @click.stop="removeTransaction(tx)"
                     type="button"
                     title="Remove transaction"
+                    :disabled="editSaving"
                   >
                     ×
                   </button>
@@ -335,11 +460,12 @@ function transferProvenance(tx: Transaction): string {
 
               <template v-if="editingId === tx.transaction_id">
                 <td class="ledger__cell">
-                  <DatePicker v-model="editDate" />
+                  <DatePicker v-model="editDate" :disabled="editSaving" />
                 </td>
                 <td v-if="showAccountColumn" class="ledger__cell">
                   <SelectField
                     v-model="editAccountId"
+                    :disabled="editSaving"
                     :options="accountOptions"
                   />
                 </td>
@@ -349,20 +475,31 @@ function transferProvenance(tx: Transaction): string {
                 <td class="ledger__cell">
                   <SelectField
                     v-model="editCategoryId"
+                    :disabled="editSaving"
                     :options="categoryOptions"
+                    @update:model-value="editError = ''"
                   />
                 </td>
                 <td class="ledger__cell">
-                  <TextField v-model="editMemo" placeholder="Memo" />
+                  <TextField
+                    v-model="editMemo"
+                    placeholder="Memo"
+                    :disabled="editSaving"
+                  />
                 </td>
                 <td class="ledger__cell">
                   <SelectField
                     v-model="editDirection"
+                    :disabled="editSaving"
                     :options="directionOptions"
                   />
                 </td>
                 <td class="ledger__cell ledger__cell--end">
-                  <CurrencyField v-model="editAmount" placeholder="0.00" />
+                  <CurrencyField
+                    v-model="editAmount"
+                    placeholder="0.00"
+                    :disabled="editSaving"
+                  />
                 </td>
                 <td class="ledger__cell">
                   <button
@@ -370,16 +507,27 @@ function transferProvenance(tx: Transaction): string {
                     :class="`ledger__status-pill--${editStatus.toLowerCase()}`"
                     @click.stop="toggleStatus"
                     type="button"
+                    :disabled="editSaving"
                   >
                     {{ editStatus === "CLEARED" ? "Cleared" : "Pending" }}
                   </button>
+                </td>
+                <td
+                  v-if="Object.keys(reconciliationChanges).length"
+                  class="ledger__cell ledger__cell--change"
+                >
+                  —
                 </td>
                 <td
                   v-if="showRunningBalance"
                   class="ledger__cell ledger__cell--end ledger__cell--amount"
                 >
                   {{
-                    formatCurrency(runningBalances?.[tx.transaction_id] ?? 0)
+                    isRemovedTransaction(tx)
+                      ? "—"
+                      : formatCurrency(
+                          runningBalances?.[tx.transaction_id] ?? 0,
+                        )
                   }}
                 </td>
               </template>
@@ -405,9 +553,18 @@ function transferProvenance(tx: Transaction): string {
                     v-else-if="tx.system_category"
                     class="ledger__system-category"
                   >
-                    {{ tx.system_category }}
+                    {{ systemCategoryLabel(tx.system_category) }}
                   </span>
-                  <span v-else class="ledger__no-category">—</span>
+                  <span
+                    v-else
+                    class="ledger__no-category ledger__no-category--invalid"
+                    :title="
+                      editError ||
+                      'Choose a category to repair this transaction.'
+                    "
+                  >
+                    Category missing
+                  </span>
                 </td>
                 <td class="ledger__cell ledger__cell--muted">{{ tx.memo }}</td>
                 <td class="ledger__cell">
@@ -434,6 +591,25 @@ function transferProvenance(tx: Transaction): string {
                   </StateBadge>
                 </td>
                 <td
+                  v-if="Object.keys(reconciliationChanges).length"
+                  class="ledger__cell ledger__cell--change"
+                >
+                  <template
+                    v-if="
+                      reconciliationChanges[tx.transaction_id]?.label ===
+                      'Edited'
+                    "
+                  >
+                    <span
+                      :title="reconciliationChanges[tx.transaction_id]?.details"
+                      >Edited</span
+                    >
+                  </template>
+                  <span v-else>{{
+                    reconciliationChanges[tx.transaction_id]?.label ?? "—"
+                  }}</span>
+                </td>
+                <td
                   v-if="showRunningBalance"
                   class="ledger__cell ledger__cell--end ledger__cell--amount"
                 >
@@ -449,6 +625,9 @@ function transferProvenance(tx: Transaction): string {
     </div>
 
     <div class="ledger__footer">
+      <p v-if="editingId && editError" class="ledger__edit-error" role="alert">
+        {{ editError }}
+      </p>
       <span v-if="transactions.length === 0" class="ledger__empty">
         No transactions found.
       </span>
@@ -506,12 +685,40 @@ function transferProvenance(tx: Transaction): string {
     minmax(70px, 0.6fr) minmax(80px, 0.7fr) minmax(76px, 0.6fr);
 }
 
+.ledger__header-row--no-account.ledger__header-row--with-reconciliation,
+.ledger__row--no-account.ledger__row--with-reconciliation {
+  grid-template-columns:
+    28px minmax(78px, 0.6fr) minmax(110px, 0.9fr) minmax(150px, 1.2fr)
+    minmax(70px, 0.6fr) minmax(80px, 0.7fr) minmax(76px, 0.6fr)
+    minmax(74px, 0.6fr);
+}
+.ledger__header-row:not(
+    .ledger__header-row--no-account
+  ).ledger__header-row--with-reconciliation,
+.ledger__row:not(.ledger__row--no-account).ledger__row--with-reconciliation {
+  grid-template-columns:
+    28px minmax(70px, 0.6fr) minmax(70px, 0.8fr) minmax(80px, 0.9fr)
+    minmax(90px, 1.1fr) minmax(60px, 0.6fr) minmax(70px, 0.6fr) minmax(
+      60px,
+      0.5fr
+    )
+    minmax(74px, 0.6fr);
+}
+
 .ledger__header-row--no-account.ledger__header-row--with-balance,
 .ledger__row--no-account.ledger__row--with-balance {
   grid-template-columns:
     28px minmax(78px, 0.6fr) minmax(110px, 0.9fr) minmax(150px, 1.2fr)
     minmax(70px, 0.6fr) minmax(80px, 0.7fr) minmax(76px, 0.6fr)
     minmax(90px, 0.7fr);
+}
+
+.ledger__header-row--no-account.ledger__header-row--with-balance.ledger__header-row--with-reconciliation,
+.ledger__row--no-account.ledger__row--with-balance.ledger__row--with-reconciliation {
+  grid-template-columns:
+    28px minmax(78px, 0.6fr) minmax(110px, 0.9fr) minmax(150px, 1.2fr)
+    minmax(70px, 0.6fr) minmax(80px, 0.7fr) minmax(76px, 0.6fr)
+    minmax(74px, 0.6fr) minmax(90px, 0.7fr);
 }
 
 .ledger__body {
@@ -604,6 +811,32 @@ function transferProvenance(tx: Transaction): string {
     "zero" 1;
 }
 
+.ledger__cell--change {
+  color: var(--color-on-surface-muted);
+  font-family: var(--text-label-sm-font-family);
+  font-size: var(--text-label-sm-font-size);
+}
+.ledger__cell--change details {
+  position: relative;
+}
+.ledger__cell--change summary {
+  cursor: pointer;
+  color: var(--color-on-surface);
+}
+.ledger__cell--change details span {
+  position: absolute;
+  z-index: 3;
+  width: max-content;
+  max-width: 280px;
+  padding: var(--space-sm);
+  border: 1px solid var(--color-outline);
+  border-radius: var(--radius-all);
+  background: var(--color-surface-raised);
+  color: var(--color-on-surface-muted);
+  box-shadow: var(--shadow-popover);
+  white-space: normal;
+}
+
 .ledger__row--editing .ledger__cell {
   padding: 0 6px;
 }
@@ -646,6 +879,10 @@ function transferProvenance(tx: Transaction): string {
 .ledger__system-category {
   color: var(--color-on-surface-muted);
   font-style: italic;
+}
+
+.ledger__no-category--invalid {
+  color: var(--color-error);
 }
 
 .ledger__no-category {
@@ -734,6 +971,11 @@ function transferProvenance(tx: Transaction): string {
 .ledger__footer {
   padding: var(--space-sm) var(--space-lg);
   border-top: 1px solid var(--color-outline);
+}
+
+.ledger__edit-error {
+  margin: 0 0 var(--space-sm);
+  color: var(--color-error);
 }
 
 .ledger__count,

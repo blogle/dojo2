@@ -46,7 +46,7 @@ export type Transaction = {
   amount_minor: number;
   category_id: string | null;
   category_name: string | null;
-  system_category: string | null;
+  system_category: TransactionSystemCategory | null;
   status: "PENDING" | "CLEARED";
   memo: string;
   is_hidden_entity: boolean;
@@ -108,6 +108,7 @@ export type Account = {
     | "NOT_RECONCILED"
     | "REOPENED"
     | "PROVISIONAL";
+  last_reconciliation_date?: string | null;
   provisional_value_minor?: number;
   investment_self_managed?: boolean | null;
   investment_tax_treatment?: string | null;
@@ -367,14 +368,15 @@ export type TransactionSystemCategory =
   | "TX_AVAILABLE_TO_BUDGET"
   | "TX_ACCOUNT_TRANSFER"
   | "TX_STARTING_BALANCE"
-  | "TX_BALANCE_ADJUSTMENT";
+  | "TX_BALANCE_ADJUSTMENT"
+  | "TX_UNCATEGORIZED";
 
 export type TransactionPayload = {
   date: string;
   account_id: string;
   amount_minor: number;
   category_id: string | null;
-  system_category: string | null;
+  system_category: TransactionSystemCategory | null;
   status: "PENDING" | "CLEARED";
   memo: string;
 };

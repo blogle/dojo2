@@ -348,7 +348,8 @@ CREATE TABLE IF NOT EXISTS transactions (
     created_at TIMESTAMPTZ NOT NULL,
     created_by_user_id UUID,
     CHECK (
-        NOT (category_id IS NOT NULL AND system_category IS NOT NULL)
+        (category_id IS NOT NULL AND system_category IS NULL)
+        OR (category_id IS NULL AND system_category IS NOT NULL)
     )
 );
 

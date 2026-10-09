@@ -1,6 +1,7 @@
 import { mount } from "cypress/vue";
 
 import TransactionLedger from "../../src/dojo/components/transactions/TransactionLedger.vue";
+import ledgerFixtures from "../../src/dojo/components/transactions/TransactionLedger.fixtures";
 
 const currentMonth = new Date().toISOString().slice(0, 7);
 
@@ -74,6 +75,40 @@ const mockTransactions = [
 ];
 
 describe("TransactionLedger", () => {
+  it("renders reconciliation provenance independently from settlement status", () => {
+    const scenario = ledgerFixtures.scenarios[0];
+    mount(TransactionLedger, { props: scenario?.props ?? {} });
+
+    cy.get(".ledger__header-row")
+      .should("contain.text", "Status")
+      .and("contain.text", "Change");
+    cy.get(".ledger__row")
+      .eq(0)
+      .should("contain.text", "Cleared")
+      .and("contain.text", "Added");
+    cy.get(".ledger__row")
+      .eq(1)
+      .should("contain.text", "Pending")
+      .and("contain.text", "Edited");
+    cy.get(".ledger__row")
+      .eq(1)
+      .find(".ledger__cell--change span")
+      .should(
+        "have.attr",
+        "title",
+        "Last reconciled → Current: amount_minor, status",
+      );
+    cy.get(".ledger__row")
+      .eq(2)
+      .should("contain.text", "Removed purchase")
+      .and("contain.text", "Removed");
+    cy.get(".ledger__row")
+      .eq(3)
+      .should("contain.text", "Pending")
+      .and("contain.text", "Uncategorized")
+      .and("not.contain.text", "Category missing");
+  });
+
   it("renders transaction rows", () => {
     mount(TransactionLedger, {
       props: {
@@ -125,6 +160,163 @@ describe("TransactionLedger", () => {
     cy.get(".ledger__row--editing").should("have.length", 1);
     // Editing row shows form fields — the memo field retains the original value
     cy.get(".ledger__row--editing input").should("exist");
+  });
+
+  it("keeps an invalid legacy row in edit mode and asks for a category target", () => {
+    mount(TransactionLedger, {
+      props: {
+        transactions: [
+          {
+            ...mockTransactions[1],
+            transaction_id: "legacy-no-category",
+            version: "version-1",
+            date: "2026-06-26",
+            category_id: null,
+            category_name: null,
+            system_category: null,
+            memo: "Uncategorized market purchase",
+          },
+        ],
+        accounts: mockAccounts,
+        categories: mockCategories,
+      },
+    });
+
+    cy.get(".ledger__row").click();
+    cy.get(".ledger__row--editing .ledger__status-pill").click();
+    cy.get("body").click(10, 10);
+    cy.get(".ledger__row--editing").should("exist");
+    cy.get('[data-cy="transaction-ledger"] [role="alert"]')
+      .should("contain.text", "Choose a category or select Uncategorized")
+      .and("be.visible");
+  });
+
+  it("keeps a canonical Uncategorized target while editing settlement status", () => {
+    const completed = cy
+      .stub()
+      .callsFake(
+        (
+          _id: string,
+          _payload: unknown,
+          finish: (result: { success: true }) => void,
+        ) => finish({ success: true }),
+      );
+    mount(TransactionLedger, {
+      props: {
+        transactions: [
+          {
+            ...mockTransactions[1],
+            transaction_id: "canonical-uncategorized",
+            version: "version-1",
+            date: "2026-06-26",
+            category_id: null,
+            category_name: null,
+            system_category: "TX_UNCATEGORIZED",
+            memo: "Uncategorized market purchase",
+          },
+        ],
+        accounts: mockAccounts,
+        categories: mockCategories,
+        onCommit: completed,
+      },
+    });
+
+    cy.get(".ledger__row").click();
+    cy.get(".ledger__row--editing .ledger__status-pill").click();
+    cy.get("body").click(10, 10);
+    cy.get(".ledger__row--editing").should("not.exist");
+    cy.wrap(completed).should("have.been.calledOnce");
+    cy.wrap(completed).its("firstCall.args.1").should("include", {
+      category_id: null,
+      system_category: "TX_UNCATEGORIZED",
+      status: "CLEARED",
+    });
+  });
+
+  it("preserves row edit values and reports a failed asynchronous save", () => {
+    const onCommit = cy
+      .stub()
+      .callsFake(
+        (
+          _id: string,
+          _payload: unknown,
+          complete: (result: { success: false; message: string }) => void,
+        ) =>
+          complete({
+            success: false,
+            message: "Transaction changed elsewhere.",
+          }),
+      );
+    mount(TransactionLedger, {
+      props: {
+        transactions: mockTransactions,
+        accounts: mockAccounts,
+        categories: mockCategories,
+        onCommit,
+      },
+    });
+
+    cy.get(".ledger__row").first().click();
+    cy.get('.ledger__row--editing input[placeholder="Memo"]')
+      .clear()
+      .type("Keep this edit");
+    cy.get("body").click(10, 10);
+
+    cy.get('.ledger__row--editing input[placeholder="Memo"]').should(
+      "have.value",
+      "Keep this edit",
+    );
+    cy.get('[data-cy="transaction-ledger"] [role="alert"]')
+      .should("contain.text", "Transaction changed elsewhere")
+      .and("be.visible");
+  });
+
+  it("deselects an edit when its confirmation is cancelled", () => {
+    type Completion =
+      | { success: true }
+      | { cancelled: true }
+      | { success: false; message: string };
+    let finish: ((result: Completion) => void) | undefined;
+    const onCommit = cy
+      .stub()
+      .callsFake(
+        (
+          _id: string,
+          _payload: unknown,
+          complete: (result: Completion) => void,
+        ) => {
+          finish = complete;
+        },
+      );
+    mount(TransactionLedger, {
+      props: {
+        transactions: mockTransactions,
+        accounts: mockAccounts,
+        categories: mockCategories,
+        onCommit,
+      },
+    });
+
+    cy.get(".ledger__row").first().click();
+    cy.get('.ledger__row--editing input[placeholder="Memo"]')
+      .clear()
+      .type("Edited");
+    cy.get("body").click(10, 10);
+    cy.wrap(onCommit).should("have.been.calledOnce");
+    cy.then(() => finish?.({ cancelled: true }));
+    cy.get(".ledger__row--editing").should("not.exist");
+  });
+
+  it("shows removed reconciliation rows without allowing edits", () => {
+    const scenario = ledgerFixtures.scenarios[0];
+    mount(TransactionLedger, {
+      props: scenario?.props ?? {},
+    });
+
+    cy.contains(".ledger__row", "Removed purchase")
+      .should("contain.text", "Removed")
+      .click();
+    cy.get(".ledger__row--editing").should("not.exist");
   });
 
   it("commits edit on click outside the table", () => {
@@ -207,11 +399,18 @@ describe("TransactionLedger", () => {
   });
 
   it("shows remove button in edit mode and emits remove on click", () => {
+    const onRemove = cy
+      .stub()
+      .callsFake(
+        (_tx: unknown, complete: (result: { success: true }) => void) =>
+          complete({ success: true }),
+      );
     mount(TransactionLedger, {
       props: {
         transactions: mockTransactions,
         accounts: mockAccounts,
         categories: mockCategories,
+        onRemove,
       },
     }).as("wrapper");
     cy.get(".ledger__row").first().click();
@@ -219,5 +418,42 @@ describe("TransactionLedger", () => {
     // The × button replaces the status dot in the check column
     cy.get(".ledger__row--editing .ledger__remove-btn").should("be.visible");
     cy.get(".ledger__row--editing .ledger__remove-btn").click();
+    cy.wrap(onRemove).should("have.been.calledOnce");
+    cy.get(".ledger__row--editing").should("not.exist");
+  });
+
+  it("keeps a failed removal attributable to its transaction row", () => {
+    const onRemove = cy
+      .stub()
+      .callsFake(
+        (
+          _tx: unknown,
+          complete: (result: { success: false; message: string }) => void,
+        ) =>
+          complete({
+            success: false,
+            message: "This transaction changed elsewhere.",
+          }),
+      );
+    mount(TransactionLedger, {
+      props: {
+        transactions: mockTransactions,
+        accounts: mockAccounts,
+        categories: mockCategories,
+        onRemove,
+      },
+    });
+
+    cy.get(".ledger__row").first().click();
+    cy.get(".ledger__remove-btn").click();
+
+    cy.get(".ledger__row--editing").should("exist");
+    cy.get('.ledger__row--editing input[placeholder="Memo"]').should(
+      "have.value",
+      "Market",
+    );
+    cy.get('[data-cy="transaction-ledger"] [role="alert"]')
+      .should("contain.text", "changed elsewhere")
+      .and("be.visible");
   });
 });

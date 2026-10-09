@@ -3,6 +3,7 @@ from __future__ import annotations
 from importlib import reload
 
 import duckdb
+import pytest
 
 import dojo.api.main as main_module
 from dojo.api.settings import get_settings
@@ -85,6 +86,51 @@ def test_current_migration_set_provisions_fresh_database(tmp_path) -> None:
         }
         assert "instrument_id" in price_columns
         assert "ticker" not in price_columns
+    finally:
+        database.close()
+
+
+def test_fresh_transaction_schema_requires_exactly_one_category_target(tmp_path) -> None:
+    duckdb_path = tmp_path / "transaction-category-invariant.duckdb"
+    provision_database(str(duckdb_path))
+    database = Database(str(duckdb_path))
+    insert = """INSERT INTO transactions
+        (row_id, transaction_id, date, account_id, amount_minor, category_id,
+         system_category, status, memo, entry_order, record_order, valid_from,
+         valid_to, created_at, created_by_user_id)
+        VALUES (?, ?, DATE '2026-10-01', ?, -100, ?, ?, 'PENDING', '', 1, 1,
+                TIMESTAMPTZ '2026-10-01 00:00:00+00',
+                TIMESTAMPTZ '9999-12-31 23:59:59+00',
+                TIMESTAMPTZ '2026-10-01 00:00:00+00', NULL)"""
+    try:
+        for suffix, category_id, system_category in (
+            ("missing", None, None),
+            ("ambiguous", "00000000-0000-0000-0000-000000000001", "TX_UNCATEGORIZED"),
+        ):
+            with pytest.raises(duckdb.ConstraintException):
+                database.connection.execute(
+                    insert,
+                    (
+                        f"00000000-0000-0000-0000-00000000000{2 if suffix == 'missing' else 3}",
+                        f"00000000-0000-0000-0000-00000000001{2 if suffix == 'missing' else 3}",
+                        "00000000-0000-0000-0000-000000000004",
+                        category_id,
+                        system_category,
+                    ),
+                )
+        database.connection.execute(
+            insert,
+            (
+                "00000000-0000-0000-0000-000000000005",
+                "00000000-0000-0000-0000-000000000015",
+                "00000000-0000-0000-0000-000000000004",
+                None,
+                "TX_UNCATEGORIZED",
+            ),
+        )
+        assert database.fetch_one("SELECT COUNT(*) AS count FROM current_transactions") == {
+            "count": 1
+        }
     finally:
         database.close()
 
@@ -401,6 +447,21 @@ def test_existing_database_receives_rich_account_schema(tmp_path) -> None:
     connection = duckdb.connect(str(duckdb_path))
     try:
         connection.execute(load_sql("tests/create_pre_rich_account_tables"))
+        connection.execute(
+            """INSERT INTO transactions
+               (row_id, transaction_id, transfer_id, date, account_id, amount_minor,
+                category_id, system_category, status, memo, entry_order, valid_from,
+                valid_to, created_at, created_by_user_id)
+               VALUES (
+                 '30000000-0000-0000-0000-000000000001',
+                 '30000000-0000-0000-0000-000000000002', NULL,
+                 DATE '2026-06-26', '30000000-0000-0000-0000-000000000003', -3200,
+                 NULL, NULL, 'PENDING', 'Uncategorized legacy market row', 1,
+                 TIMESTAMPTZ '2026-10-01 12:00:00+00',
+                 TIMESTAMPTZ '9999-12-31 23:59:59+00',
+                 TIMESTAMPTZ '2026-10-01 12:00:00+00', NULL
+               )"""
+        )
     finally:
         connection.close()
 
@@ -441,6 +502,10 @@ def test_existing_database_receives_rich_account_schema(tmp_path) -> None:
                 ("investment_cash_snapshots",),
             )
         }
+        assert database.fetch_one(
+            "SELECT category_id, system_category, status FROM current_transactions "
+            "WHERE transaction_id = '30000000-0000-0000-0000-000000000002'"
+        ) == {"category_id": None, "system_category": None, "status": "PENDING"}
         assert {
             "record_order",
         } <= {
@@ -456,7 +521,7 @@ def test_existing_database_receives_rich_account_schema(tmp_path) -> None:
         assert {"tracking_cutovers", "tracking_cutover_successors"} <= tables
         null_orders = database.fetch_one(load_sql("queries/null_financial_event_order_counts"))
         assert null_orders == {"cash_snapshot_count": 0, "transaction_count": 0}
-        assert len(database.fetch_all(load_sql("queries/current_financial_event_orders"))) == 2
+        assert len(database.fetch_all(load_sql("queries/current_financial_event_orders"))) == 3
         assert database.fetch_one(load_sql("queries/next_financial_event_order")) is not None
     finally:
         database.close()

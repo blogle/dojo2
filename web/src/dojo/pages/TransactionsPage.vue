@@ -1,8 +1,12 @@
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted } from "vue";
+import { computed, ref } from "vue";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/vue-query";
 
-import type { Transaction, TransactionPayload } from "../types";
+import type {
+  Transaction,
+  TransactionPayload,
+  TransactionSystemCategory,
+} from "../types";
 import { formatCurrency, formatMonth } from "../utils/currency";
 import {
   fetchTransactionsPage,
@@ -16,19 +20,23 @@ import {
   restoreTransaction,
   ApiError,
 } from "../api/client";
+import {
+  notifyMutationSuccess,
+  notifyVersionedMutationSuccess,
+  notifyMutationError,
+  notifyReconciledHistoryConfirmation,
+  mutationErrorMessage,
+} from "../state/mutationFeedback";
 
 import PageHeader from "../components/data/PageHeader.vue";
 import MetricStrip from "../components/data/MetricStrip.vue";
 import type { MetricStripItem } from "../components/data/MetricStrip.vue";
-import Button from "../components/actions/Button.vue";
 import TransactionEntryForm from "../components/transactions/TransactionEntryForm.vue";
 import TransactionFilterBar from "../components/transactions/TransactionFilterBar.vue";
 import TransactionLedger from "../components/transactions/TransactionLedger.vue";
-import PersistentWarningBanner from "../components/feedback/PersistentWarningBanner.vue";
 
 const queryClient = useQueryClient();
 const entryForm = ref<InstanceType<typeof TransactionEntryForm> | null>(null);
-const mutationError = ref("");
 
 const PAGE_SIZE = 10_000;
 const QUERY_KEYS = {
@@ -41,18 +49,6 @@ const QUERY_KEYS = {
   categoryActivity: ["category-activity"] as const,
 } as const;
 
-type UndoEntry =
-  | {
-      kind: "edit";
-      id: string;
-      previous: TransactionPayload;
-      expectedVersion: string;
-    }
-  | { kind: "remove"; snapshot: Transaction };
-
-const undoStack = ref<UndoEntry[]>([]);
-const showUndoToast = ref(false);
-const lastRemovedSnapshot = ref<Transaction | null>(null);
 const accountFilter = ref("all");
 const dateFilter = ref("all");
 const categoryFilter = ref("all");
@@ -118,12 +114,24 @@ function invalidateRelatedQueries() {
 
 const createMutation = useMutation({
   mutationFn: createTransaction,
-  onMutate: () => (mutationError.value = ""),
-  onSuccess: () => {
+  onSuccess: (created) => {
     entryForm.value?.resetForm();
     invalidateRelatedQueries();
+    notifyVersionedMutationSuccess(
+      "Transaction added",
+      "Transaction addition undone",
+      {
+        key: `transaction:${created.transaction_id}`,
+        version: created.version,
+        run: async (expectedVersion) => {
+          await deleteTransaction(created.transaction_id, expectedVersion, {
+            acknowledgeReconciledHistoryChange: true,
+          });
+          invalidateRelatedQueries();
+        },
+      },
+    );
   },
-  onError: (error) => handleMutationError(error),
 });
 
 const updateMutation = useMutation({
@@ -136,9 +144,7 @@ const updateMutation = useMutation({
     payload: Parameters<typeof updateTransaction>[1];
     expectedVersion: string;
   }) => updateTransaction(id, payload, expectedVersion),
-  onMutate: () => (mutationError.value = ""),
   onSuccess: () => invalidateRelatedQueries(),
-  onError: (error) => handleMutationError(error),
 });
 
 const deleteMutation = useMutation({
@@ -149,29 +155,8 @@ const deleteMutation = useMutation({
     id: string;
     expectedVersion: string;
   }) => deleteTransaction(id, expectedVersion),
-  onMutate: () => (mutationError.value = ""),
   onSuccess: () => invalidateRelatedQueries(),
-  onError: (error) => handleMutationError(error),
 });
-
-const restoreMutation = useMutation({
-  mutationFn: (id: string) => restoreTransaction(id),
-  onMutate: () => (mutationError.value = ""),
-  onSuccess: () => invalidateRelatedQueries(),
-  onError: (error) => handleMutationError(error),
-});
-
-function handleMutationError(error: unknown) {
-  mutationError.value =
-    error instanceof ApiError && error.status === 409
-      ? "This transaction changed elsewhere. Refreshing to resolve the conflict."
-      : error instanceof Error
-        ? error.message
-        : "Transaction change failed.";
-  if (error instanceof ApiError && error.status === 409) {
-    invalidateRelatedQueries();
-  }
-}
 
 const inflow = computed(() =>
   transactions.value
@@ -219,9 +204,21 @@ const metrics = computed<MetricStripItem[]>(() => [
 function handleCommitEdit(
   id: string,
   payload: Parameters<typeof updateTransaction>[1],
+  complete: (
+    result:
+      | { success: true }
+      | { cancelled: true }
+      | { success: false; message: string },
+  ) => void,
 ) {
   const tx = transactions.value.find((t) => t.transaction_id === id);
-  if (!tx) return;
+  if (!tx) {
+    complete({
+      success: false,
+      message: "This transaction is no longer available.",
+    });
+    return;
+  }
   const previous: TransactionPayload = {
     date: tx.date,
     account_id: tx.account_id,
@@ -235,12 +232,65 @@ function handleCommitEdit(
     { id, payload, expectedVersion: tx.version },
     {
       onSuccess: (result) => {
-        undoStack.value.push({
-          kind: "edit",
-          id,
-          previous,
-          expectedVersion: result.version,
-        });
+        complete({ success: true });
+        notifyVersionedMutationSuccess(
+          "Transaction updated",
+          "Transaction edit undone",
+          {
+            key: `transaction:${id}`,
+            version: result.version,
+            run: async (expectedVersion) => {
+              const restored = await updateTransaction(
+                id,
+                previous,
+                expectedVersion,
+                { acknowledgeReconciledHistoryChange: true },
+              );
+              invalidateRelatedQueries();
+              return restored.version;
+            },
+          },
+        );
+      },
+      onError: (error) => {
+        if (error instanceof ApiError && error.status === 409) {
+          invalidateRelatedQueries();
+        }
+        if (
+          error instanceof ApiError &&
+          error.code === "reconciled_history_change_requires_confirmation"
+        ) {
+          notifyReconciledHistoryConfirmation(
+            async () => {
+              const result = await updateTransaction(id, payload, tx.version, {
+                acknowledgeReconciledHistoryChange: true,
+              });
+              complete({ success: true });
+              invalidateRelatedQueries();
+              notifyVersionedMutationSuccess(
+                "Transaction updated",
+                "Transaction edit undone",
+                {
+                  key: `transaction:${id}`,
+                  version: result.version,
+                  run: async (expectedVersion) => {
+                    const restored = await updateTransaction(
+                      id,
+                      previous,
+                      expectedVersion,
+                      { acknowledgeReconciledHistoryChange: true },
+                    );
+                    invalidateRelatedQueries();
+                    return restored.version;
+                  },
+                },
+              );
+            },
+            () => complete({ cancelled: true }),
+          );
+          return;
+        }
+        complete({ success: false, message: mutationErrorMessage(error) });
       },
     },
   );
@@ -253,7 +303,7 @@ function handleSubmit(
         account_id: string;
         amount_minor: number;
         category_id: string | null;
-        system_category: string | null;
+        system_category: TransactionSystemCategory | null;
         status: "PENDING" | "CLEARED";
         memo: string;
       }
@@ -288,69 +338,86 @@ function handleSubmit(
       .then(() => {
         entryForm.value?.resetForm();
         invalidateRelatedQueries();
+        notifyMutationSuccess("Transfer added");
       })
-      .catch(handleMutationError);
+      .catch(notifyMutationError);
     return;
   }
   createMutation.mutate(payload);
 }
 
-function handleRemove(tx: Transaction) {
+function handleRemove(
+  tx: Transaction,
+  complete: (
+    result:
+      | { success: true }
+      | { cancelled: true }
+      | { success: false; message: string },
+  ) => void,
+) {
   deleteMutation.mutate(
     { id: tx.transaction_id, expectedVersion: tx.version },
     {
       onSuccess: () => {
-        undoStack.value.push({ kind: "remove", snapshot: { ...tx } });
-        lastRemovedSnapshot.value = { ...tx };
-        showUndoToast.value = true;
-        setTimeout(() => (showUndoToast.value = false), 8000);
+        complete({ success: true });
+        invalidateRelatedQueries();
+        notifyVersionedMutationSuccess(
+          "Transaction removed",
+          "Transaction removal undone",
+          {
+            key: `transaction:${tx.transaction_id}`,
+            version: tx.version,
+            run: async (expectedVersion) => {
+              const restored = await restoreTransaction(
+                tx.transaction_id,
+                expectedVersion,
+              );
+              invalidateRelatedQueries();
+              return restored.version;
+            },
+          },
+        );
+      },
+      onError: (error) => {
+        if (error instanceof ApiError && error.status === 409) {
+          invalidateRelatedQueries();
+        }
+        if (
+          error instanceof ApiError &&
+          error.code === "reconciled_history_change_requires_confirmation"
+        ) {
+          notifyReconciledHistoryConfirmation(
+            async () => {
+              await deleteTransaction(tx.transaction_id, tx.version, {
+                acknowledgeReconciledHistoryChange: true,
+              });
+              complete({ success: true });
+              invalidateRelatedQueries();
+              notifyVersionedMutationSuccess(
+                "Transaction removed",
+                "Transaction removal undone",
+                {
+                  key: `transaction:${tx.transaction_id}`,
+                  version: tx.version,
+                  run: async (expectedVersion) => {
+                    const restored = await restoreTransaction(
+                      tx.transaction_id,
+                      expectedVersion,
+                    );
+                    invalidateRelatedQueries();
+                    return restored.version;
+                  },
+                },
+              );
+            },
+            () => complete({ cancelled: true }),
+          );
+          return;
+        }
+        complete({ success: false, message: mutationErrorMessage(error) });
       },
     },
   );
-}
-
-function handleUndoRemove() {
-  if (!lastRemovedSnapshot.value) return;
-  const tx = lastRemovedSnapshot.value;
-  restoreMutation.mutate(tx.transaction_id, {
-    onSuccess: () => {
-      if (undoStack.value[undoStack.value.length - 1]?.kind === "remove") {
-        undoStack.value.pop();
-      }
-      showUndoToast.value = false;
-      lastRemovedSnapshot.value = null;
-    },
-  });
-}
-
-function handleUndo() {
-  const entry = undoStack.value[undoStack.value.length - 1];
-  if (!entry) return;
-  if (entry.kind === "edit") {
-    updateMutation.mutate(
-      {
-        id: entry.id,
-        payload: entry.previous,
-        expectedVersion: entry.expectedVersion,
-      },
-      { onSuccess: () => undoStack.value.pop() },
-    );
-  } else if (entry.kind === "remove") {
-    const tx = entry.snapshot;
-    restoreMutation.mutate(tx.transaction_id, {
-      onSuccess: () => undoStack.value.pop(),
-    });
-  }
-  showUndoToast.value = false;
-  lastRemovedSnapshot.value = null;
-}
-
-function handleGlobalKeydown(event: KeyboardEvent) {
-  const isMod = event.metaKey || event.ctrlKey;
-  if (isMod && event.key === "z" && !event.shiftKey) {
-    event.preventDefault();
-    handleUndo();
-  }
 }
 
 function datePresetToFilter(
@@ -388,14 +455,6 @@ function amountPresetToFilter(
   if (value === "500+") return { amountMinMinor: 50_000 };
   return {};
 }
-
-onMounted(() => {
-  document.addEventListener("keydown", handleGlobalKeydown);
-});
-
-onUnmounted(() => {
-  document.removeEventListener("keydown", handleGlobalKeydown);
-});
 </script>
 
 <template>
@@ -416,15 +475,6 @@ onUnmounted(() => {
         :accounts="accounts ?? []"
         :categories="categories"
         @submit="handleSubmit"
-      />
-
-      <PersistentWarningBanner
-        v-if="mutationError"
-        severity="error"
-        title="Transaction change failed"
-        :description="mutationError"
-        dismissible
-        @dismiss="mutationError = ''"
       />
 
       <TransactionFilterBar
@@ -452,18 +502,6 @@ onUnmounted(() => {
         @commit="handleCommitEdit"
         @remove="handleRemove"
       />
-
-      <Transition name="toast">
-        <div v-if="showUndoToast" class="transactions-page__toast">
-          <span>Transaction removed</span>
-          <Button variant="tertiary" size="sm" @click="handleUndoRemove">
-            Undo
-          </Button>
-          <Button variant="tertiary" size="sm" @click="showUndoToast = false">
-            ✕
-          </Button>
-        </div>
-      </Transition>
     </main>
   </div>
 </template>
@@ -503,34 +541,6 @@ onUnmounted(() => {
   font-size: var(--text-body-md-font-size);
   font-weight: var(--text-body-md-font-weight);
   color: var(--color-on-surface);
-}
-
-.transactions-page__toast {
-  position: fixed;
-  bottom: var(--space-lg);
-  right: var(--space-lg);
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  padding: var(--space-sm) var(--space-md);
-  background: var(--color-on-surface);
-  color: var(--color-surface);
-  border-radius: var(--radius-md);
-  font-family: var(--text-body-md-font-family);
-  font-size: var(--text-body-md-font-size);
-  z-index: 1001;
-  box-shadow: var(--shadow-modal);
-}
-
-.toast-enter-active,
-.toast-leave-active {
-  transition: all var(--transition-normal) var(--transition-ease-out);
-}
-
-.toast-enter-from,
-.toast-leave-to {
-  opacity: 0;
-  transform: translateY(var(--space-md));
 }
 
 @media (max-width: 720px) {

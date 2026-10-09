@@ -16,6 +16,10 @@ import {
   writeNavigationExpanded,
 } from "../state/navigation";
 import { useAppState } from "../state/app";
+import {
+  notifyMutationError,
+  notifyMutationSuccess,
+} from "../state/mutationFeedback";
 
 const route = useRoute();
 const router = useRouter();
@@ -121,8 +125,10 @@ async function retryBackups(): Promise<void> {
     retryRunId.value = response.run_id;
     retryRunStatus.value = "RUNNING";
     retryRunPhase.value = "QUEUED";
+    notifyMutationSuccess("Backup retry queued");
     scheduleRetryStatusRefresh();
   } catch (error) {
+    notifyMutationError(error);
     retryQueued.value = false;
     retryRunId.value = null;
     retryRunStatus.value = null;

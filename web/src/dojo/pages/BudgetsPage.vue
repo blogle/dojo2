@@ -42,6 +42,10 @@ import CategoryDetailModal from "../components/budget/CategoryDetailModal.vue";
 import MoveFundsModal from "../components/budget/MoveFundsModal.vue";
 import FundGroupModal from "../components/budget/FundGroupModal.vue";
 import FundingModal from "../components/budget/FundingModal.vue";
+import {
+  notifyMutationError,
+  notifyMutationSuccess,
+} from "../state/mutationFeedback";
 
 const queryClient = useQueryClient();
 const route = useRoute();
@@ -71,7 +75,6 @@ const reorderChanges = ref<
 >([]);
 type ReorderGroup = { groupId: string; categoryIds: string[] };
 const reorderDraft = ref<ReorderGroup[]>([]);
-const mutationError = ref("");
 const activeModal = ref<
   | null
   | "add-group"
@@ -200,10 +203,11 @@ const categoryMutation = useMutation({
     "categoryId" in request
       ? updateCategory(request.categoryId!, request.payload)
       : createCategory(request.payload),
-  onSuccess: () => invalidateBudgetQueries(),
-  onError: (error) => {
-    mutationError.value =
-      error instanceof Error ? error.message : "Category change failed.";
+  onSuccess: (_result, request) => {
+    invalidateBudgetQueries();
+    notifyMutationSuccess(
+      "categoryId" in request ? "Category updated" : "Category added",
+    );
   },
 });
 
@@ -216,10 +220,11 @@ const categoryGroupMutation = useMutation({
     "groupId" in request
       ? updateCategoryGroup(request.groupId!, request.payload)
       : createCategoryGroup(request.payload),
-  onSuccess: () => invalidateBudgetQueries(),
-  onError: (error) => {
-    mutationError.value =
-      error instanceof Error ? error.message : "Category group change failed.";
+  onSuccess: (_result, request) => {
+    invalidateBudgetQueries();
+    notifyMutationSuccess(
+      "groupId" in request ? "Category group updated" : "Category group added",
+    );
   },
 });
 
@@ -241,6 +246,7 @@ const fundCategoryMutation = useMutation({
   onSuccess: () => {
     invalidateBudgetQueries();
     closeModal();
+    notifyMutationSuccess("Category funded");
   },
 });
 
@@ -401,7 +407,6 @@ const firstUnconfiguredGoalCategory = computed(
 // --- Actions ---
 
 function restoreCategory(categoryId: string) {
-  mutationError.value = "";
   categoryMutation.mutate(
     { payload: { is_hidden: false }, categoryId },
     {
@@ -460,7 +465,6 @@ function cancelReorder() {
 }
 
 async function saveReorder() {
-  mutationError.value = "";
   const groupById = new Map(
     categoryGroups.value.map((group) => [group.group_id, group]),
   );
@@ -492,9 +496,9 @@ async function saveReorder() {
     }
     invalidateBudgetQueries();
     cancelReorder();
+    notifyMutationSuccess("Categories reordered");
   } catch (error) {
-    mutationError.value =
-      error instanceof Error ? error.message : "Reordering failed.";
+    notifyMutationError(error);
   }
 }
 
@@ -598,7 +602,6 @@ function closeModal() {
 
 function submitAddGroup() {
   if (!groupName.value.trim()) return;
-  mutationError.value = "";
   const sortOrder =
     Math.max(
       -1,
@@ -680,7 +683,6 @@ async function submitMoveFunds(payload: {
   const fromCat = categories.value.find((c) => c.category_id === payload.from);
   const toCat = categories.value.find((c) => c.category_id === payload.to);
   if (!fromCat || !toCat) return;
-  mutationError.value = "";
   if (!moveOperationId.value) moveOperationId.value = crypto.randomUUID();
   try {
     await createAllocation(
@@ -696,16 +698,15 @@ async function submitMoveFunds(payload: {
     );
     invalidateBudgetQueries();
     closeModal();
+    notifyMutationSuccess("Funds moved");
   } catch (error) {
-    mutationError.value =
-      error instanceof Error ? error.message : "Move funds failed.";
+    notifyMutationError(error);
   }
 }
 
 async function submitFundGroup(
   items: Array<{ categoryId: string; monthlyGoalMinor: number }>,
 ) {
-  mutationError.value = "";
   if (!groupFundingOperationId.value) {
     groupFundingOperationId.value = crypto.randomUUID();
   }
@@ -722,9 +723,9 @@ async function submitFundGroup(
     });
     invalidateBudgetQueries();
     closeModal();
+    notifyMutationSuccess("Group funded");
   } catch (error) {
-    mutationError.value =
-      error instanceof Error ? error.message : "Group funding failed.";
+    notifyMutationError(error);
   }
 }
 </script>
@@ -732,14 +733,6 @@ async function submitFundGroup(
 <template>
   <div class="budgets-page" data-cy="budgets-page-root">
     <main class="budgets-page__main">
-      <PersistentWarningBanner
-        v-if="mutationError"
-        severity="error"
-        title="Budget change failed"
-        :description="mutationError"
-        dismissible
-        @dismiss="mutationError = ''"
-      />
       <PersistentWarningBanner
         v-if="unconfiguredGoalCount > 0"
         severity="warning"

@@ -426,18 +426,28 @@ export async function updateTransaction(
   transactionId: string,
   payload: TransactionPayload,
   expectedVersion: string,
+  options: { acknowledgeReconciledHistoryChange?: boolean } = {},
 ): Promise<{ transaction_id: string; version: string }> {
   return request(`/api/transactions/${transactionId}`, {
     method: "PUT",
-    body: JSON.stringify({ ...payload, expected_version: expectedVersion }),
+    body: JSON.stringify({
+      ...payload,
+      expected_version: expectedVersion,
+      acknowledge_reconciled_history_change:
+        options.acknowledgeReconciledHistoryChange ?? false,
+    }),
   });
 }
 
 export async function deleteTransaction(
   transactionId: string,
   expectedVersion: string,
+  options: { acknowledgeReconciledHistoryChange?: boolean } = {},
 ): Promise<void> {
   const params = new URLSearchParams({ expected_version: expectedVersion });
+  if (options.acknowledgeReconciledHistoryChange) {
+    params.set("acknowledge_reconciled_history_change", "true");
+  }
   await request(`/api/transactions/${transactionId}?${params}`, {
     method: "DELETE",
   });
@@ -445,9 +455,11 @@ export async function deleteTransaction(
 
 export async function restoreTransaction(
   transactionId: string,
+  expectedVersion: string,
 ): Promise<{ transaction_id: string; version: string }> {
   return request(`/api/transactions/${transactionId}/restore`, {
     method: "POST",
+    body: JSON.stringify({ expected_version: expectedVersion }),
   });
 }
 
@@ -691,6 +703,26 @@ export type ReconciliationDraft = {
   classifications: Record<string, unknown>;
 };
 
+export type BudgetReconciliationAttempt = {
+  reconciliation_id: string;
+  account_id: string;
+  state: "READY";
+  cutoff: string;
+  source: {
+    cleared_minor: number;
+    pending_minor: number;
+    actual_minor: number;
+    derived: "cleared" | "pending" | "actual";
+  };
+  dojo: { cleared_minor: number; pending_minor: number; actual_minor: number };
+  deltas: {
+    cleared_delta_minor: number;
+    pending_delta_minor: number;
+    actual_delta_minor: number;
+  };
+  certification_allowed: boolean;
+};
+
 export async function createReconciliationDraft(
   accountId: string,
   payload: {
@@ -700,26 +732,61 @@ export async function createReconciliationDraft(
       | "INVESTMENT_STATEMENT";
     period_start?: string;
     cutoff: string;
-    source_ending_value_minor: number;
+    source_ending_value_minor?: number;
+    source_cleared_minor?: number;
+    source_pending_minor?: number;
+    source_actual_minor?: number;
     source_records?: ReconciliationSourceRecord[];
   },
 ): Promise<ReconciliationDraft> {
-  return request(`/api/accounts/${accountId}/reconciliations/draft`, {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
+  return request<ReconciliationDraft>(
+    `/api/accounts/${accountId}/reconciliations/draft`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export async function createBudgetReconciliationAttempt(
+  accountId: string,
+  payload: {
+    source_kind: "BANK_STATEMENT" | "CREDIT_CARD_STATEMENT";
+    cutoff: string;
+    source_cleared_minor?: number;
+    source_pending_minor?: number;
+    source_actual_minor?: number;
+  },
+): Promise<BudgetReconciliationAttempt> {
+  return request<BudgetReconciliationAttempt>(
+    `/api/accounts/${accountId}/reconciliations/draft`,
+    { method: "POST", body: JSON.stringify(payload) },
+  );
 }
 
 export async function applyReconciliation(
   reconciliationId: string,
   payload: {
     client_operation_id: string;
-    balance_adjustment_minor?: number | null;
   },
 ): Promise<Record<string, unknown>> {
   return request(`/api/reconciliations/${reconciliationId}/apply`, {
     method: "POST",
     body: JSON.stringify(payload),
+  });
+}
+
+export async function undoLastReconciliation(
+  accountId: string,
+  expectedReconciliationId: string,
+  clientOperationId: string,
+): Promise<Record<string, unknown>> {
+  return request(`/api/accounts/${accountId}/reconciliations/undo`, {
+    method: "POST",
+    body: JSON.stringify({
+      client_operation_id: clientOperationId,
+      expected_reconciliation_id: expectedReconciliationId,
+    }),
   });
 }
 

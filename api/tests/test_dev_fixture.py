@@ -10,6 +10,7 @@ import dojo.dev_fixture as dev_fixture
 from dojo.api.main import create_app
 from dojo.api.settings import Settings
 from dojo.clock import FrozenClock
+from dojo.constants import SYSTEM_CATEGORY_UNCATEGORIZED
 from dojo.database import Database
 from dojo.dev_fixture import build_development_database, development_fixture_fingerprint
 from dojo.service import DojoService
@@ -55,6 +56,17 @@ def test_development_fixture_is_deterministic_and_financially_coherent(tmp_path)
                FROM current_net_worth_valuations ORDER BY effective_date, raw_name"""
         )
         assert 200 <= len(first_rows) < 1_000
+        assert all(
+            (row["category_id"] is None) != (row["system_category"] is None) for row in first_rows
+        )
+        uncategorized_market = first.fetch_one(
+            "SELECT category_id, system_category FROM current_transactions "
+            "WHERE memo = 'Uncategorized market purchase'"
+        )
+        assert uncategorized_market == {
+            "category_id": None,
+            "system_category": SYSTEM_CATEGORY_UNCATEGORIZED,
+        }
         assert {row["date"].strftime("%Y-%m") for row in first_rows} == {
             "2026-01",
             "2026-02",

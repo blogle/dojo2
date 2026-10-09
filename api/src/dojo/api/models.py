@@ -6,6 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
 
+from dojo.constants import TRANSACTION_CATEGORY_TARGET_ERROR
 from dojo.investment import total_cost_basis_minor
 
 Date = date
@@ -35,6 +36,7 @@ SystemCategory = Literal[
     "TX_STARTING_BALANCE",
     "TX_ACCOUNT_TRANSFER",
     "TX_BALANCE_ADJUSTMENT",
+    "TX_UNCATEGORIZED",
 ]
 CategoryKind = Literal["STANDARD", "CREDIT_CARD_PAYMENT"]
 
@@ -140,27 +142,39 @@ class FundGroupRequest(BaseModel):
     items: list[GroupFundingItem] = Field(min_length=1)
 
 
-class TransactionPayload(BaseModel):
+class _TransactionFields(BaseModel):
     date: date
     account_id: str
     amount_minor: int
-    category_id: str | None = None
+    category_id: UUID | None = None
     system_category: SystemCategory | None = None
     status: TransactionStatus
     memo: str = ""
     insert_after_transaction_id: str | None = None
     loan_account_id: str | None = None
 
+
+class TransactionPayload(_TransactionFields):
     @model_validator(mode="after")
     def validate_category_choice(self) -> "TransactionPayload":
         if (self.category_id is None) == (self.system_category is None):
-            raise ValueError("Exactly one of category_id or system_category must be set")
+            raise ValueError(TRANSACTION_CATEGORY_TARGET_ERROR)
         return self
 
 
-class TransactionUpdatePayload(TransactionPayload):
+class TransactionUpdatePayload(_TransactionFields):
     expected_version: UUID
     acknowledge_reconciled_history_change: bool = False
+
+    @model_validator(mode="after")
+    def validate_category_choice(self) -> "TransactionUpdatePayload":
+        if (self.category_id is None) == (self.system_category is None):
+            raise ValueError(TRANSACTION_CATEGORY_TARGET_ERROR)
+        return self
+
+
+class TransactionRestorePayload(BaseModel):
+    expected_version: UUID
 
 
 class TransferPayload(BaseModel):
@@ -626,3 +640,4 @@ class ReconciliationApplyPayload(BaseModel):
 class ReconciliationUndoPayload(BaseModel):
     client_operation_id: UUID
     reason: str | None = None
+    expected_reconciliation_id: UUID | None = None

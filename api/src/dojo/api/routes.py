@@ -44,6 +44,7 @@ from dojo.api.models import (
     TrackingAccountSnapshotPayload,
     TrackingCutoverPayload,
     TransactionPayload,
+    TransactionRestorePayload,
     TransactionUpdatePayload,
     TransferPayload,
 )
@@ -724,9 +725,21 @@ def delete_transaction(
 
 
 @router.post("/transactions/{transaction_id}/restore")
-def restore_transaction(request: Request, transaction_id: str) -> dict[str, Any]:
+def restore_transaction(
+    request: Request, transaction_id: str, payload: TransactionRestorePayload
+) -> dict[str, Any]:
     try:
-        return get_service(request).restore_transaction(transaction_id)
+        return get_service(request).restore_transaction(
+            transaction_id, str(payload.expected_version)
+        )
+    except TransactionVersionConflictError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "transaction_version_conflict",
+                "message": "This transaction changed after it was removed.",
+            },
+        ) from exc
     except ValueError as exc:
         detail = str(exc)
         if "not found" in detail.lower():
@@ -913,7 +926,7 @@ def undo_last_reconciliation(
             status_code=409,
             detail={
                 "code": exc.code,
-                "message": "No reconciliation is currently eligible for undo.",
+                "message": str(exc),
             },
         ) from exc
     except ValueError as exc:

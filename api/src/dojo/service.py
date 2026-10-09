@@ -46,7 +46,9 @@ from dojo.constants import (
     SYSTEM_CATEGORY_BALANCE_ADJUSTMENT,
     SYSTEM_CATEGORY_STARTING_BALANCE,
     SYSTEM_CATEGORY_TRANSFER,
+    SYSTEM_CATEGORY_UNCATEGORIZED,
     SYSTEM_CREDIT_CARD_GROUP_ID,
+    TRANSACTION_CATEGORY_TARGET_ERROR,
 )
 from dojo.database import Database, json_dumps
 from dojo.google import GOOGLE_DRIVE_FILE_SCOPE
@@ -131,8 +133,11 @@ class ReconciledHistoryChangeConfirmationRequired(ValueError):
 class ReconciliationUndoUnavailableError(ValueError):
     code = "reconciliation_undo_unavailable"
 
-    def __init__(self) -> None:
-        super().__init__(self.code)
+    def __init__(
+        self,
+        message: str = "No reconciliation is currently eligible for undo.",
+    ) -> None:
+        super().__init__(message)
 
 
 _TREND_DAYS = {"7d": 7, "1m": 31, "3m": 93, "6m": 186, "1y": 366, "all": 36500}
@@ -861,6 +866,8 @@ class DojoService:
                     if transaction.category_name
                     else None
                 )
+                if (category_id is None) == (transaction.system_category is None):
+                    raise ValueError(TRANSACTION_CATEGORY_TARGET_ERROR)
                 tx_rows.append(
                     {
                         "row_id": str(uuid4()),
@@ -1583,8 +1590,14 @@ class DojoService:
             ) == BUDGET_ACCOUNT_TYPE_CREDIT_CARD and account.get("display_liability_positive"):
                 display_balance = -display_balance
             value = values[account_id]
+            last_reconciliation_date = None
             if account["account_class"] in {ACCOUNT_CLASS_BUDGET, ACCOUNT_CLASS_INVESTMENT}:
-                reconciliation_status = self.get_reconciliation_status(account_id)
+                reconciliation = self._reconciliation_state(account_id)["effective_reconciliation"]
+                reconciliation_status = (
+                    "CURRENT" if reconciliation is not None else "NOT_RECONCILED"
+                )
+                if reconciliation is not None:
+                    last_reconciliation_date = str(reconciliation["committed_at"])
                 if not (
                     account["account_class"] == ACCOUNT_CLASS_INVESTMENT
                     and reconciliation_status == "NOT_RECONCILED"
@@ -1606,6 +1619,7 @@ class DojoService:
                     ),
                     "change_30d_minor": value.change_minor,
                     "reconciliation_status": value.reconciliation_status,
+                    "last_reconciliation_date": last_reconciliation_date,
                     "provisional_value_minor": value.provisional_minor,
                     "liability_component_minor": value.liability_minor,
                     "restricted_asset_component_minor": value.restricted_asset_minor,
@@ -3283,7 +3297,9 @@ class DojoService:
             ):
                 raise TransactionVersionConflictError("Transaction version conflict")
 
-    def restore_transaction(self, transaction_id: str) -> dict[str, Any]:
+    def restore_transaction(
+        self, transaction_id: str, expected_deleted_version: str
+    ) -> dict[str, Any]:
         now = self.clock.now()
         with self.db.transaction() as connection:
             # Check if already has current version
@@ -3309,6 +3325,8 @@ class DojoService:
                 raise ValueError("Transaction not found or not deleted")
 
             latest_closed = rows[0]
+            if str(latest_closed["row_id"]) != str(expected_deleted_version):
+                raise TransactionVersionConflictError("Transaction version conflict")
             restore_at = max(
                 now,
                 latest_closed["valid_to"] + timedelta(microseconds=1),
@@ -4749,6 +4767,13 @@ class DojoService:
             undoable = state["undoable_reconciliation"]
             if undoable is None:
                 raise ReconciliationUndoUnavailableError()
+            expected_reconciliation_id = values.get("expected_reconciliation_id")
+            if expected_reconciliation_id is not None and str(undoable["reconciliation_id"]) != str(
+                expected_reconciliation_id
+            ):
+                raise ReconciliationUndoUnavailableError(
+                    "A newer reconciliation exists. Refresh before undoing this reconciliation."
+                )
             void = self.reconciliation_repository.void_commit(
                 reconciliation_id=str(undoable["reconciliation_id"]),
                 entity_id=account_id,
@@ -6416,7 +6441,13 @@ class DojoService:
         has_category = payload.get("category_id") is not None
         has_system = payload.get("system_category") is not None
         if has_category == has_system:
-            raise ValueError("Exactly one of category_id or system_category must be set")
+            raise ValueError(TRANSACTION_CATEGORY_TARGET_ERROR)
+        if (
+            has_category
+            and self.db.fetch_one(load_sql("queries/category_id_exists"), (payload["category_id"],))
+            is None
+        ):
+            raise ValueError("Choose a category that exists in Dojo.")
         if not new_entry:
             return
 
@@ -6432,6 +6463,8 @@ class DojoService:
         if account_class != ACCOUNT_CLASS_BUDGET:
             raise ValueError("Only budget accounts can use categories or Available to budget")
         if system_category == SYSTEM_CATEGORY_ATB:
+            return
+        if system_category == SYSTEM_CATEGORY_UNCATEGORIZED:
             return
         if system_category is not None:
             raise ValueError("This system category is not available for new entries")
