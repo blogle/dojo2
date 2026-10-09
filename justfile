@@ -29,11 +29,11 @@ airship:
 	@set -euo pipefail; \
 	cd web; \
 	args=(--host 0.0.0.0 --target 5173 --port 5174 --agent opencode --opencode-url http://127.0.0.1:4096 --safe); \
-	if [[ -n "$${DOJO_AIRSHIP_ALLOWED_HOSTS:-}" ]]; then \
-		read -r -a allowed_hosts <<< "$${DOJO_AIRSHIP_ALLOWED_HOSTS}"; \
-		for host in "$${allowed_hosts[@]}"; do args+=(--allowed-hosts "$$host"); done; \
+	if [[ -n "${DOJO_AIRSHIP_ALLOWED_HOSTS:-}" ]]; then \
+		read -r -a allowed_hosts <<< "${DOJO_AIRSHIP_ALLOWED_HOSTS}"; \
+		for host in "${allowed_hosts[@]}"; do args+=(--allowed-hosts "$host"); done; \
 	fi; \
-	pnpm exec airship "$${args[@]}"
+	pnpm exec airship "${args[@]}"
 
 unship:
 	cd web && pnpm exec unship
