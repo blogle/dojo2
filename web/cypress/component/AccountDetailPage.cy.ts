@@ -644,9 +644,11 @@ describe("AccountDetailPage", () => {
     );
     cy.get("[data-cy=form-modal-root]").contains("Review differences").click();
     cy.get("[data-cy=reconciliation-investigation]").should("be.visible");
-    cy.get("[data-cy=active-reconciliation-banner]")
-      .should("contain.text", "Cleared")
-      .and("contain.text", "Pending");
+    cy.get("[data-cy=active-reconciliation-banner]").within(() => {
+      cy.contains("button", "Edit source balances").should("be.visible");
+      cy.contains("button", "Exit reconciliation").should("be.visible");
+      cy.get("button").should("have.length", 2);
+    });
     cy.get("[data-cy=transaction-ledger]").should("contain.text", "Edited");
     cy.get("[data-cy=transaction-ledger]").should("contain.text", "Pending");
     cy.get("[data-cy=transaction-ledger]")
@@ -688,10 +690,10 @@ describe("AccountDetailPage", () => {
       .should("contain.text", "Cleared Δ $1.00")
       .and("contain.text", "Pending Δ $0.00");
     cy.get("[data-cy=form-modal-root]").contains("Review differences").click();
-    cy.get("[data-cy=active-reconciliation-banner]").should(
-      "contain.text",
-      "Pending",
-    );
+    cy.get("[data-cy=active-reconciliation-banner]").within(() => {
+      cy.contains("button", "Edit source balances").should("be.visible");
+      cy.contains("button", "Exit reconciliation").should("be.visible");
+    });
   });
 
   it("warns after a persistent canonical edit and describes it as already saved", () => {
@@ -711,7 +713,7 @@ describe("AccountDetailPage", () => {
       .click();
     cy.get("[data-cy=form-modal-root]")
       .should("contain.text", "already been saved")
-      .and("contain.text", "account unreconciled");
+      .and("contain.text", "no reconciliation recorded for this account");
   });
 
   it("opens edit configuration and submits account metadata", () => {
