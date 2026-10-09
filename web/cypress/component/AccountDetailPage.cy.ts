@@ -574,6 +574,26 @@ describe("AccountDetailPage", () => {
     cy.get("[data-cy=form-modal-root]")
       .contains("button", "Reconcile account")
       .click();
+    cy.window().then((win) => {
+      const calls = (
+        win.fetch as unknown as {
+          getCalls: () => Array<{ args: [string, RequestInit?] }>;
+        }
+      ).getCalls();
+      expect(
+        calls.some((call) => {
+          const requestUrl = new URL(call.args[0], "http://localhost");
+          return (
+            requestUrl.pathname === "/api/reconciliations/attempt-1/apply" &&
+            call.args[1]?.method === "POST"
+          );
+        }),
+      ).to.equal(true);
+    });
+    cy.get('[data-cy="mutation-feedback"]').should(
+      "contain.text",
+      "Account reconciled",
+    );
     cy.get("[data-cy=form-modal-root]").should("not.exist");
     cy.get('[data-cy="mutation-feedback"]')
       .should("contain.text", "Account reconciled")
