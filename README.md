@@ -38,6 +38,10 @@ Generate the fictional development database with `just dev-fixture` (default rep
 - Docs build: `just docs`
 - Container build: `just container`
 
+## Releases (temporary Dojo workflow)
+
+While awaiting shared SDLC onboarding, a maintainer comments exactly `/merge` on a green PR. `.github/workflows/merge.yml` calculates the version, adds the generated release entry to `CHANGELOG.md` on the PR branch, explicitly revalidates that resulting head, and arms protected squash auto-merge. `.github/workflows/release.yml` tags and publishes the resulting `master` commit. A regular GitHub merge does not create a release; it only updates staging. The default directive is `[release:patch]`. See [CONTRIBUTING.md](CONTRIBUTING.md) for canonical details.
+
 ## Authoritative Documents
 
 - Development workflow: `CONTRIBUTING.md`
