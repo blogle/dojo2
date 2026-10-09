@@ -571,7 +571,9 @@ describe("AccountDetailPage", () => {
       "contain.text",
       "Balances match",
     );
-    cy.get("[data-cy=form-modal-root]").contains("Reconcile account").click();
+    cy.get("[data-cy=form-modal-root]")
+      .contains("button", "Reconcile account")
+      .click();
     cy.get("[data-cy=form-modal-root]").should("not.exist");
     cy.get('[data-cy="mutation-feedback"]')
       .should("contain.text", "Account reconciled")
