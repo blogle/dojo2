@@ -594,7 +594,12 @@ describe("AccountDetailPage", () => {
       "contain.text",
       "Account reconciled",
     );
-    cy.get("[data-cy=form-modal-root]").should("not.exist");
+    cy.get("body").should(($body) => {
+      const remainingModals = Array.from(
+        $body[0].querySelectorAll<HTMLElement>('[data-cy="form-modal-root"]'),
+      ).map((modal) => modal.innerText.trim());
+      expect(remainingModals).to.deep.equal([]);
+    });
     cy.get('[data-cy="mutation-feedback"]')
       .should("contain.text", "Account reconciled")
       .and("contain.text", "Undo");
