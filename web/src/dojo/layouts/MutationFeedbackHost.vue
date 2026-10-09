@@ -68,7 +68,7 @@ onBeforeUnmount(() => document.removeEventListener("keydown", handleKeydown));
         :disabled="undoPending"
         @click="undoLatest"
       >
-        Undo
+        {{ notice.undoLabel ?? "Undo" }}
       </button>
       <button
         class="mutation-feedback__dismiss"

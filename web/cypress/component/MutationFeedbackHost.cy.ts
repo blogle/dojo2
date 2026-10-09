@@ -5,6 +5,7 @@ import {
   notifyMutationError,
   notifyMutationSuccess,
   notifyReconciledHistoryConfirmation,
+  notifyVersionedMutationSuccess,
   useMutationFeedback,
 } from "../../src/dojo/state/mutationFeedback";
 
@@ -66,6 +67,50 @@ describe("shared mutation feedback", () => {
     cy.get('[data-cy="mutation-feedback"]').should("not.exist");
   });
 
+  it("keeps Retry Undo accessible and disables it while a retry is pending", () => {
+    const expectedVersions: string[] = [];
+    let finishRetry: (() => void) | undefined;
+    const retryGate = new Promise<void>((resolve) => {
+      finishRetry = resolve;
+    });
+    let attempts = 0;
+    notifyVersionedMutationSuccess(
+      "Transaction updated",
+      "Transaction edit undone",
+      {
+        key: "transaction:retry-button",
+        version: "version-2",
+        run: async (expectedVersion) => {
+          expectedVersions.push(expectedVersion);
+          attempts += 1;
+          if (attempts === 1) throw new TypeError("Failed to fetch");
+          await retryGate;
+          return "version-3";
+        },
+      },
+    );
+    mount(MutationFeedbackHost);
+
+    cy.get(".mutation-feedback__undo").click();
+    cy.get('[data-cy="mutation-feedback"]')
+      .should("have.attr", "role", "alert")
+      .and("have.attr", "aria-live", "assertive")
+      .and("contain.text", "Your change is still saved");
+    cy.get(".mutation-feedback__undo").should("contain.text", "Retry Undo");
+    cy.get("body").type("{ctrl}z");
+    cy.get(".mutation-feedback__undo")
+      .should("be.disabled")
+      .and("contain.text", "Retry Undo");
+
+    cy.then(() => {
+      expect(expectedVersions).to.deep.equal(["version-2", "version-2"]);
+      finishRetry?.();
+    });
+    cy.get('[data-cy="mutation-feedback"]')
+      .should("have.attr", "role", "status")
+      .and("contain.text", "Transaction edit undone");
+  });
+
   it("confirms a reconciled transaction change before retrying it", () => {
     const confirm = cy.stub().resolves();
     notifyReconciledHistoryConfirmation(async () => {
@@ -94,6 +139,23 @@ describe("shared mutation feedback", () => {
 
     cy.wrap(cancel).should("have.been.calledOnce");
     cy.get('[data-cy="mutation-feedback"]').should("not.exist");
+  });
+
+  it("does not let a later success notice preempt a pending reconciliation decision", () => {
+    const cancel = cy.stub();
+    notifyReconciledHistoryConfirmation(async () => undefined, cancel);
+    notifyMutationSuccess("Account updated");
+    mount(MutationFeedbackHost);
+
+    cy.get('[data-cy="mutation-feedback"]')
+      .should("contain.text", "The completed reconciliation is preserved")
+      .and("not.contain.text", "Account updated");
+    cy.get(".mutation-feedback__cancel").click();
+    cy.wrap(cancel).should("have.been.calledOnce");
+    cy.get('[data-cy="mutation-feedback"]').should(
+      "contain.text",
+      "Account updated",
+    );
   });
 
   it("keeps cancellation available if applying the change fails", () => {

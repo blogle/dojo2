@@ -9,6 +9,7 @@ type UndoEntry = {
   message: string;
   undoneMessage: string;
   undo: UndoAction;
+  retryMessage?: string;
 };
 
 type UndoAction =
@@ -25,12 +26,15 @@ export type MutationNotice = {
   kind: NoticeKind;
   message: string;
   undoId?: number;
+  undoLabel?: string;
   confirm?: () => Promise<void>;
   cancel?: () => void;
 };
 
 const undoEntries = shallowRef<UndoEntry[]>([]);
 const currentNotice = shallowRef<MutationNotice | null>(null);
+const queuedConfirmations = shallowRef<MutationNotice[]>([]);
+const deferredNotice = shallowRef<MutationNotice | null>(null);
 const undoPending = ref(false);
 const confirmationPending = ref(false);
 let nextNoticeId = 1;
@@ -70,15 +74,68 @@ export function mutationErrorMessage(error: unknown): string {
 }
 
 function showLatestUndo(): void {
+  if (hasPendingDecision()) return;
   const entry = undoEntries.value[undoEntries.value.length - 1];
   currentNotice.value = entry
     ? {
         id: entry.id,
-        kind: "success",
-        message: entry.message,
+        kind: entry.retryMessage ? "error" : "success",
+        message: entry.retryMessage ?? entry.message,
         undoId: entry.id,
+        ...(entry.retryMessage ? { undoLabel: "Retry Undo" } : {}),
       }
     : null;
+}
+
+function hasPendingDecision(notice = currentNotice.value): boolean {
+  return notice?.cancel !== undefined;
+}
+
+function isRetryNotice(notice = currentNotice.value): boolean {
+  return notice?.undoLabel === "Retry Undo";
+}
+
+function showNextNotice(undoneMessage?: string): void {
+  currentNotice.value = null;
+  const nextConfirmation = queuedConfirmations.value[0];
+  if (nextConfirmation) {
+    queuedConfirmations.value = queuedConfirmations.value.slice(1);
+    currentNotice.value = nextConfirmation;
+    return;
+  }
+  if (undoEntries.value.length) {
+    showLatestUndo();
+    return;
+  }
+  if (deferredNotice.value) {
+    currentNotice.value = deferredNotice.value;
+    deferredNotice.value = null;
+    return;
+  }
+  currentNotice.value = undoneMessage
+    ? { id: nextNoticeId++, kind: "success", message: undoneMessage }
+    : null;
+}
+
+function isRetryableUndoError(error: unknown): boolean {
+  if (error instanceof ApiError) {
+    return (
+      error.status === 408 ||
+      error.status === 425 ||
+      error.status === 429 ||
+      error.status >= 500
+    );
+  }
+  return (
+    error instanceof TypeError ||
+    (typeof DOMException !== "undefined" &&
+      error instanceof DOMException &&
+      (error.name === "AbortError" || error.name === "TimeoutError"))
+  );
+}
+
+function undoRetryMessage(error: unknown): string {
+  return `Undo could not be completed. ${mutationErrorMessage(error)} Your change is still saved; retry Undo to try again.`;
 }
 
 export function notifyMutationSuccess(
@@ -96,10 +153,15 @@ export function notifyMutationSuccess(
         undo: { kind: "direct", run: undo.run },
       },
     ];
-    showLatestUndo();
+    if (!hasPendingDecision()) showLatestUndo();
     return;
   }
-  currentNotice.value = { id: nextNoticeId++, kind: "success", message };
+  const notice = { id: nextNoticeId++, kind: "success" as const, message };
+  if (hasPendingDecision() || isRetryNotice()) {
+    deferredNotice.value = notice;
+    return;
+  }
+  currentNotice.value = notice;
 }
 
 export function notifyVersionedMutationSuccess(
@@ -138,22 +200,27 @@ export function notifyVersionedMutationSuccess(
       },
     },
   ];
-  showLatestUndo();
+  if (!hasPendingDecision()) showLatestUndo();
 }
 
 export function notifyMutationError(error: unknown): void {
-  currentNotice.value = {
+  const notice: MutationNotice = {
     id: nextNoticeId++,
     kind: "error",
     message: mutationErrorMessage(error),
   };
+  if (hasPendingDecision() || isRetryNotice()) {
+    deferredNotice.value = notice;
+    return;
+  }
+  currentNotice.value = notice;
 }
 
 export function notifyReconciledHistoryConfirmation(
   confirm: () => Promise<void>,
   cancel: () => void,
 ): void {
-  currentNotice.value = {
+  const notice: MutationNotice = {
     id: nextNoticeId++,
     kind: "error",
     message:
@@ -161,6 +228,11 @@ export function notifyReconciledHistoryConfirmation(
     confirm,
     cancel,
   };
+  if (hasPendingDecision() || isRetryNotice()) {
+    queuedConfirmations.value = [...queuedConfirmations.value, notice];
+    return;
+  }
+  currentNotice.value = notice;
 }
 
 export async function confirmMutationChange(): Promise<void> {
@@ -170,7 +242,7 @@ export async function confirmMutationChange(): Promise<void> {
   confirmationPending.value = true;
   try {
     await notice.confirm();
-    if (currentNotice.value?.id === notice.id) dismissMutationNotice();
+    if (currentNotice.value?.id === notice.id) showNextNotice();
   } catch (error) {
     currentNotice.value = {
       id: nextNoticeId++,
@@ -192,7 +264,7 @@ export function dismissMutationNotice(): void {
       (entry) => entry.id !== undoId,
     );
   }
-  showLatestUndo();
+  showNextNotice();
 }
 
 export async function undoLatestMutation(): Promise<void> {
@@ -211,20 +283,25 @@ export async function undoLatestMutation(): Promise<void> {
     undoEntries.value = undoEntries.value.filter(
       (item) => item.id !== entry.id,
     );
-    if (undoEntries.value.length) {
-      showLatestUndo();
-    } else {
-      currentNotice.value = {
-        id: nextNoticeId++,
-        kind: "success",
-        message: entry.undoneMessage,
-      };
-    }
+    showNextNotice(entry.undoneMessage);
   } catch (error) {
-    undoEntries.value = undoEntries.value.filter(
-      (item) => item.id !== entry.id,
-    );
-    notifyMutationError(error);
+    if (isRetryableUndoError(error)) {
+      entry.retryMessage = undoRetryMessage(error);
+      undoEntries.value = [...undoEntries.value];
+      if (queuedConfirmations.value.length && !hasPendingDecision()) {
+        showNextNotice();
+      } else {
+        showLatestUndo();
+      }
+    } else {
+      undoEntries.value = undoEntries.value.filter(
+        (item) => item.id !== entry.id,
+      );
+      if (currentNotice.value?.undoId === entry.id) {
+        currentNotice.value = null;
+      }
+      notifyMutationError(error);
+    }
   } finally {
     undoPending.value = false;
   }
