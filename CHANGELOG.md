@@ -6,6 +6,10 @@
 
 <!-- BEGIN GENERATED RELEASES -->
 
+## v0.0.14
+
+- docs: clarify release-producing ChatOps merge path by @anvil-daemon[bot] in https://github.com/blogle/dojo2/pull/36
+
 ## v0.0.13
 
 - DOJO-40: reuse CI image content across squash merges by @anvil-daemon[bot] in https://github.com/blogle/dojo2/pull/27
