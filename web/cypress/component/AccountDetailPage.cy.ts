@@ -563,48 +563,52 @@ describe("AccountDetailPage", () => {
   });
 
   it("shows immutable evidence history and confirms latest-only undo", () => {
-    mountPage((path) => {
-      if (
-        path === `/api/accounts/${budgetAccount.account_id}/reconciliations`
-      ) {
-        return jsonResponse({
-          items: [
-            {
-              reconciliation_id: "committed-1",
-              evidence_id: "evidence-1",
-              committed_at: "2026-06-05T12:00:00Z",
-              entity_class: "BUDGET",
+    mountPage(
+      (path) => {
+        if (
+          path === `/api/accounts/${budgetAccount.account_id}/reconciliations`
+        ) {
+          return jsonResponse({
+            items: [
+              {
+                reconciliation_id: "committed-1",
+                evidence_id: "evidence-1",
+                committed_at: "2026-06-05T12:00:00Z",
+                entity_class: "BUDGET",
+              },
+            ],
+            history: [
+              {
+                history_id: "history-1",
+                event_type: "COMMITTED",
+                reconciliation_id: "committed-1",
+                recorded_at: "2026-06-05T12:00:00Z",
+              },
+            ],
+          });
+        }
+        if (path === "/api/reconciliations/committed-1") {
+          return jsonResponse({
+            reconciliation_id: "committed-1",
+            committed_at: "2026-06-05T12:00:00Z",
+            source_as_of: "2026-06-04T00:00:00Z",
+            evidence: {
+              evidence_kind: "BANK_STATEMENT",
+              source_adapter: "manual",
+              normalized_payload: {
+                cleared_minor: 671675,
+                pending_minor: 12543,
+                actual_minor: 684218,
+              },
+              records: [],
             },
-          ],
-          history: [
-            {
-              history_id: "history-1",
-              event_type: "COMMITTED",
-              reconciliation_id: "committed-1",
-              recorded_at: "2026-06-05T12:00:00Z",
-            },
-          ],
-        });
-      }
-      if (path === "/api/reconciliations/committed-1") {
-        return jsonResponse({
-          reconciliation_id: "committed-1",
-          committed_at: "2026-06-05T12:00:00Z",
-          source_as_of: "2026-06-04T00:00:00Z",
-          evidence: {
-            evidence_kind: "BANK_STATEMENT",
-            source_adapter: "manual",
-            normalized_payload: {
-              cleared_minor: 671675,
-              pending_minor: 12543,
-              actual_minor: 684218,
-            },
-            records: [],
-          },
-        });
-      }
-      return undefined;
-    });
+          });
+        }
+        return undefined;
+      },
+      {},
+      true,
+    );
 
     cy.get("[data-cy=reconciliation-history-row]")
       .should("contain.text", "Cleared $6,716.75")
@@ -1351,7 +1355,7 @@ describe("AccountDetailPage — tracking account", () => {
     cy.get('input[name="value-notes"]').type("Statement correction");
     cy.get("[data-cy=form-modal-root]").contains("Reconcile").click();
 
-    cy.window().then((win) => {
+    cy.window().should((win) => {
       const calls = (
         win.fetch as unknown as {
           getCalls: () => Array<{ args: [string, RequestInit?] }>;
@@ -1382,7 +1386,7 @@ describe("AccountDetailPage — tracking account", () => {
     cy.get('input[name="value-date"]').clear().type("2026-06-02");
     cy.get('input[name="value-amount"]').type("98432.21");
     cy.get("[data-cy=form-modal-root]").contains("Reconcile").click();
-    cy.window().then((win) => {
+    cy.window().should((win) => {
       const calls = (
         win.fetch as unknown as {
           getCalls: () => Array<{ args: [string, RequestInit?] }>;
@@ -1628,7 +1632,7 @@ describe("AccountDetailPage — tangible asset", () => {
     cy.get('input[name="value-amount"]').type("430000");
     cy.get("[data-cy=form-modal-root]").contains("Reconcile").click();
 
-    cy.window().then((win) => {
+    cy.window().should((win) => {
       const calls = (
         win.fetch as unknown as {
           getCalls: () => Array<{ args: [string, RequestInit?] }>;
@@ -1654,7 +1658,7 @@ describe("AccountDetailPage — tangible asset", () => {
     cy.get('input[name="value-date"]').clear().type("2026-06-02");
     cy.get('input[name="value-amount"]').type("425000");
     cy.get("[data-cy=form-modal-root]").contains("Reconcile").click();
-    cy.window().then((win) => {
+    cy.window().should((win) => {
       const calls = (
         win.fetch as unknown as {
           getCalls: () => Array<{ args: [string, RequestInit?] }>;
@@ -2077,7 +2081,7 @@ describe("AccountDetailPage — loan", () => {
     ].forEach((name) => cy.get(`input[name="${name}"]`).clear());
     cy.get("[data-cy=form-modal-root]").contains("Reconcile").click();
 
-    cy.window().then((win) => {
+    cy.window().should((win) => {
       const calls = (
         win.fetch as unknown as {
           getCalls: () => Array<{ args: [string, RequestInit?] }>;
@@ -2088,6 +2092,7 @@ describe("AccountDetailPage — loan", () => {
           "/loan-reconciliations",
         ),
       );
+      expect(request).not.to.eq(undefined);
       const body = JSON.parse(request?.args[1]?.body as string);
       expect(body).to.include({
         principal_balance_minor: 19_800_000,
@@ -2124,7 +2129,7 @@ describe("AccountDetailPage — loan", () => {
     cy.get('input[name="loan-ytd-interest"]').clear();
     cy.get("[data-cy=form-modal-root]").contains("Reconcile").click();
 
-    cy.window().then((win) => {
+    cy.window().should((win) => {
       const calls = (
         win.fetch as unknown as {
           getCalls: () => Array<{ args: [string, RequestInit?] }>;
@@ -2174,7 +2179,7 @@ describe("AccountDetailPage — loan", () => {
     cy.get("[data-cy=form-modal-root]").contains("Reconcile").click();
     cy.get("[data-cy=loan-correct-canonical-snapshot]").click();
 
-    cy.window().then((win) => {
+    cy.window().should((win) => {
       const calls = (
         win.fetch as unknown as {
           getCalls: () => Array<{ args: [string, RequestInit?] }>;

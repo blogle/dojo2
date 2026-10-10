@@ -1088,6 +1088,8 @@ def test_valuation_reconciliation_is_entity_scoped(service, entity_class):
             },
         )
     assert service.reconciliation_repository.list_commits(account_id) == []
+
+
 def test_investment_reconciliation_commits_normalized_evidence_and_ignores_price_only_change(
     service,
 ) -> None:
