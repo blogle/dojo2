@@ -1074,6 +1074,8 @@ def test_investment_reconciliation_rejects_quantity_change_without_basis_and_rep
             draft["reconciliation_id"], {"client_operation_id": str(uuid4())}
         )
     assert service.list_investment_positions(account_id)[0]["quantity_micros"] == 2_000_000
+
+
 @pytest.mark.parametrize("entity_class", ["TRACKING", "TANGIBLE_ASSET"])
 def test_valuation_reconciliation_same_value_writes_evidence_without_new_version(
     service, entity_class: str
