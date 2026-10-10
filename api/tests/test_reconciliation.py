@@ -834,6 +834,160 @@ def test_investment_reconciliation_uses_statement_value(service) -> None:
     assert draft["difference_minor"] == 0
 
 
+def test_investment_reconciliation_commits_normalized_evidence_and_ignores_price_only_change(
+    service,
+) -> None:
+    from dojo.api.models import ReconciliationDraftPayload
+
+    account_id = service.create_account({"name": "Brokerage", "account_class": "INVESTMENT"})[
+        "account_id"
+    ]
+    instrument = service.create_investment_instrument(
+        {"symbol": "FUND", "is_cash_equivalent": True}
+    )
+    cutoff = service.clock.today()
+    service.reconcile_investment_statement(
+        account_id,
+        {
+            "effective_date": cutoff,
+            "cash_balance_minor": 100,
+            "holdings": [
+                {
+                    "instrument_id": instrument["instrument_id"],
+                    "quantity_micros": 1_000_000,
+                    "price_minor": 500,
+                    "total_cost_basis_minor": 450,
+                }
+            ],
+        },
+    )
+    draft_payload = {
+        "source_kind": "INVESTMENT_STATEMENT",
+        "cutoff": cutoff,
+        "source_cash_minor": 100,
+        "source_total_value_minor": 600,
+        "source_as_of": service.clock.now(),
+        "source_positions": [
+            {
+                "instrument_id": instrument["instrument_id"],
+                "quantity_micros": 1_000_000,
+                "total_cost_basis_minor": 450,
+                "source_price_minor": 550,
+                "source_value_minor": 500,
+            }
+        ],
+    }
+    normalized = ReconciliationDraftPayload(**draft_payload).model_dump()
+    draft = service.create_reconciliation_draft(account_id, normalized)
+    assert draft["certification_allowed"] is True
+    assert draft["price_only_changes"] == [
+        {
+            "instrument_id": instrument["instrument_id"],
+            "canonical_price_minor": 500,
+            "source_price_minor": 550,
+        }
+    ]
+    committed = service.apply_reconciliation(
+        draft["reconciliation_id"], {"client_operation_id": str(uuid4())}
+    )
+    payload = committed["evidence"]["normalized_payload"]
+    assert payload["source"]["positions"][0]["source_value_minor"] == 500
+    assert payload["source"]["positions"][0]["source_price_minor"] == 550
+    assert payload["canonical_baseline"]["positions"][0]["total_cost_basis_minor"] == 450
+    assert service.list_investment_positions(account_id)[0]["quantity_micros"] == 1_000_000
+    undone = service.undo_last_reconciliation(
+        account_id,
+        {
+            "client_operation_id": str(uuid4()),
+            "expected_reconciliation_id": committed["reconciliation_id"],
+        },
+    )
+    assert undone["undo_record"]["event_type"] == "VOID"
+    assert service.list_investment_positions(account_id)[0]["total_cost_basis_minor"] == 450
+
+
+def test_incoherent_investment_total_is_rejected_without_mutation(service) -> None:
+    account_id = service.create_account({"name": "Brokerage", "account_class": "INVESTMENT"})[
+        "account_id"
+    ]
+    with pytest.raises(ValueError, match="cash plus position values"):
+        service.create_reconciliation_draft(
+            account_id,
+            {
+                "source_kind": "INVESTMENT_STATEMENT",
+                "cutoff": service.clock.today(),
+                "source_cash_minor": 100,
+                "source_total_value_minor": 999,
+                "source_as_of": service.clock.now(),
+                "source_positions": [
+                    {
+                        "instrument_id": str(uuid4()),
+                        "quantity_micros": 1,
+                        "total_cost_basis_minor": 1,
+                        "source_price_minor": 1,
+                        "source_value_minor": 10,
+                    }
+                ],
+            },
+        )
+    assert (
+        service.db.fetch_one("SELECT COUNT(*) AS count FROM reconciliation_commits")["count"] == 0
+    )
+
+
+def test_investment_reconciliation_rejects_quantity_change_without_basis_and_reports_structural_diffs(
+    service,
+) -> None:
+    account_id = service.create_account({"name": "Brokerage", "account_class": "INVESTMENT"})[
+        "account_id"
+    ]
+    instrument = service.create_investment_instrument({"symbol": "XYZ"})
+    cutoff = service.clock.today()
+    service.reconcile_investment_statement(
+        account_id,
+        {
+            "effective_date": cutoff,
+            "cash_balance_minor": 0,
+            "holdings": [
+                {
+                    "instrument_id": instrument["instrument_id"],
+                    "quantity_micros": 2_000_000,
+                    "price_minor": 100,
+                    "total_cost_basis_minor": 150,
+                }
+            ],
+        },
+    )
+    draft = service.create_reconciliation_draft(
+        account_id,
+        {
+            "source_kind": "INVESTMENT_STATEMENT",
+            "cutoff": cutoff,
+            "source_cash_minor": 0,
+            "source_total_value_minor": 200,
+            "source_as_of": service.clock.now(),
+            "source_positions": [
+                {
+                    "instrument_id": instrument["instrument_id"],
+                    "quantity_micros": 1_000_000,
+                    "total_cost_basis_minor": 75,
+                    "source_price_minor": 200,
+                    "source_value_minor": 200,
+                }
+            ],
+        },
+    )
+    assert {diff["field"] for diff in draft["diffs"]} == {
+        "quantity_micros",
+        "total_cost_basis_minor",
+    }
+    with pytest.raises(ValueError, match="matching cash, positions, quantity, and basis"):
+        service.apply_reconciliation(
+            draft["reconciliation_id"], {"client_operation_id": str(uuid4())}
+        )
+    assert service.list_investment_positions(account_id)[0]["quantity_micros"] == 2_000_000
+
+
 def _budget_account(service, name: str = "Checking") -> str:
     return service.create_account(
         {"name": name, "account_class": "BUDGET", "budget_account_type": "DEPOSIT"}
