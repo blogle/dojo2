@@ -36,6 +36,7 @@ from dojo.api.models import (
     InvestmentTransferPayload,
     LoanBalanceSnapshotPayload,
     LoanPaymentPayload,
+    LoanReconciliationPayload,
     MoveAllocationRequest,
     ReconciliationApplyPayload,
     ReconciliationDraftPayload,
@@ -47,6 +48,7 @@ from dojo.api.models import (
     TransactionRestorePayload,
     TransactionUpdatePayload,
     TransferPayload,
+    ValuationReconciliationPayload,
 )
 from dojo.api.settings import Settings
 from dojo.backup_credentials import (
@@ -915,6 +917,13 @@ def list_reconciliations(request: Request, account_id: str) -> dict[str, Any]:
     }
 
 
+@router.post("/accounts/{account_id}/valuation-reconciliations")
+def reconcile_valuation(
+    request: Request, account_id: str, payload: ValuationReconciliationPayload
+) -> dict[str, Any]:
+    return get_service(request).reconcile_valuation(account_id, payload.model_dump())
+
+
 @router.post("/accounts/{account_id}/reconciliations/undo")
 def undo_last_reconciliation(
     request: Request, account_id: str, payload: ReconciliationUndoPayload
@@ -1038,7 +1047,23 @@ def list_tracking_snapshots(request: Request, account_id: str) -> dict[str, Any]
 def create_loan_snapshot(
     request: Request, account_id: str, payload: LoanBalanceSnapshotPayload
 ) -> dict[str, Any]:
-    return get_service(request).create_loan_snapshot(account_id, payload.model_dump())
+    return get_service(request).create_loan_snapshot(
+        account_id, payload.model_dump(exclude_unset=True)
+    )
+
+
+@router.post("/accounts/{account_id}/loan-reconciliations")
+def reconcile_loan(
+    request: Request, account_id: str, payload: LoanReconciliationPayload
+) -> dict[str, Any]:
+    try:
+        return get_service(request).reconcile_loan(
+            account_id, payload.model_dump(exclude_unset=True)
+        )
+    except ValueError as exc:
+        detail = exc.args[0] if exc.args and isinstance(exc.args[0], dict) else str(exc)
+        status_code = 409 if isinstance(detail, dict) else 400
+        raise HTTPException(status_code=status_code, detail=detail) from exc
 
 
 @router.get("/accounts/{account_id}/loan-snapshots")

@@ -8,7 +8,11 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from dojo.api.models import ReconciliationDraftPayload
+from dojo.api.models import (
+    LoanBalanceSnapshotPayload,
+    LoanReconciliationPayload,
+    ReconciliationDraftPayload,
+)
 from dojo.constants import MAX_TS
 from dojo.operations import current_transaction_operation_legs
 from dojo.reconciliation import (
@@ -114,6 +118,87 @@ def test_reconciliation_api_requires_exactly_two_integer_source_values() -> None
         source_kind="INVESTMENT_STATEMENT", cutoff="2026-08-31", source_ending_value_minor=1
     )
     assert legacy_investment.source_ending_value_minor == 1
+
+
+def test_loan_reconciliation_preserves_unknown_optional_fields_and_explicit_zero(service) -> None:
+    account_id = service.create_account({"name": "Mortgage", "account_class": "LOAN"})["account_id"]
+    service.create_loan_snapshot(
+        account_id,
+        {"effective_date": "2026-02-15", "principal_balance_minor": 900_000},
+    )
+    omitted = LoanBalanceSnapshotPayload(
+        effective_date="2026-02-15", principal_balance_minor=900_000
+    )
+    principal_only = LoanReconciliationPayload(
+        source_as_of="2026-02-15T12:00:00Z",
+        principal_balance_minor=900_000,
+    )
+    assert "escrow_balance_minor" not in omitted.model_dump(exclude_unset=True)
+    assert "escrow_balance_minor" not in principal_only.model_dump(exclude_unset=True)
+    snapshot = service.list_loan_snapshots(account_id)[0]
+    assert snapshot["escrow_balance_minor"] is None
+    committed = service.reconcile_loan(account_id, principal_only.model_dump(exclude_unset=True))
+    assert committed["evidence"]["normalized_payload"]["source_facts"] == {
+        "principal_balance_minor": 900_000
+    }
+    assert (
+        committed["evidence"]["normalized_payload"]["canonical_baseline"]["principal_balance_minor"]
+        == 900_000
+    )
+    before_snapshot = service.list_loan_snapshots(account_id)
+    before_payments = service.list_loan_payments(account_id)
+    service.void_reconciliation_commit(account_id, committed["reconciliation_id"])
+    assert service.list_loan_snapshots(account_id) == before_snapshot
+    assert service.list_loan_payments(account_id) == before_payments
+
+    service.create_loan_snapshot(
+        account_id,
+        {
+            "effective_date": "2026-02-15",
+            "principal_balance_minor": 900_000,
+            "escrow_balance_minor": 0,
+        },
+    )
+    zero_evidence = LoanReconciliationPayload(
+        source_as_of="2026-02-15T12:00:00Z",
+        principal_balance_minor=900_000,
+        escrow_balance_minor=0,
+    ).model_dump(exclude_unset=True)
+    zero_commit = service.reconcile_loan(account_id, zero_evidence)
+    assert (
+        zero_commit["evidence"]["normalized_payload"]["source_facts"]["escrow_balance_minor"] == 0
+    )
+
+
+def test_loan_mismatch_is_corrected_by_canonical_snapshot_operation(service) -> None:
+    account_id = service.create_account({"name": "Mortgage", "account_class": "LOAN"})["account_id"]
+    service.create_loan_snapshot(
+        account_id,
+        {"effective_date": "2026-02-15", "principal_balance_minor": 900_000},
+    )
+    lender_facts = {
+        "source_as_of": "2026-02-15T12:00:00+00:00",
+        "principal_balance_minor": 899_000,
+    }
+    with pytest.raises(ValueError, match="loan_snapshot_mismatch"):
+        service.reconcile_loan(
+            account_id,
+            lender_facts,
+        )
+    assert (
+        service.db.fetch_one("SELECT COUNT(*) AS count FROM reconciliation_commits")["count"] == 0
+    )
+    assert service.list_loan_payments(account_id) == []
+    service.create_loan_snapshot(
+        account_id,
+        {"effective_date": "2026-02-15", "principal_balance_minor": 899_000},
+    )
+    commit = service.reconcile_loan(account_id, lender_facts)
+    assert (
+        commit["evidence"]["normalized_payload"]["source_facts"]["principal_balance_minor"]
+        == 899_000
+    )
+    assert service.list_loan_payments(account_id) == []
 
 
 def test_first_budget_reconciliation_commits_normalized_balances_and_full_baseline(service) -> None:
@@ -323,6 +408,9 @@ def test_shared_commit_history_round_trip_is_immutable_and_supports_void(service
                 },
             },
         )
+    assert (
+        service.db.fetch_one("SELECT COUNT(*) AS count FROM reconciliation_evidence")["count"] == 2
+    )
     assert service.reconciliation_repository.read_commit(budget_commit["reconciliation_id"])[
         "evidence"
     ]["normalized_payload"] == {"cleared_minor": 1000, "pending_minor": 0}
@@ -832,6 +920,328 @@ def test_investment_reconciliation_uses_statement_value(service) -> None:
 
     assert draft["ledger_value_minor"] == 1_000
     assert draft["difference_minor"] == 0
+
+
+def test_investment_reconciliation_commits_normalized_evidence_and_ignores_price_only_change(
+    service,
+) -> None:
+    from dojo.api.models import ReconciliationDraftPayload
+
+    account_id = service.create_account({"name": "Brokerage", "account_class": "INVESTMENT"})[
+        "account_id"
+    ]
+    instrument = service.create_investment_instrument(
+        {"symbol": "FUND", "is_cash_equivalent": True}
+    )
+    cutoff = service.clock.today()
+    service.reconcile_investment_statement(
+        account_id,
+        {
+            "effective_date": cutoff,
+            "cash_balance_minor": 100,
+            "holdings": [
+                {
+                    "instrument_id": instrument["instrument_id"],
+                    "quantity_micros": 1_000_000,
+                    "price_minor": 500,
+                    "total_cost_basis_minor": 450,
+                }
+            ],
+        },
+    )
+    draft_payload = {
+        "source_kind": "INVESTMENT_STATEMENT",
+        "cutoff": cutoff,
+        "source_cash_minor": 100,
+        "source_total_value_minor": 600,
+        "source_as_of": service.clock.now(),
+        "source_positions": [
+            {
+                "instrument_id": instrument["instrument_id"],
+                "quantity_micros": 1_000_000,
+                "total_cost_basis_minor": 450,
+                "source_price_minor": 550,
+                "source_value_minor": 500,
+            }
+        ],
+    }
+    normalized = ReconciliationDraftPayload(**draft_payload).model_dump()
+    draft = service.create_reconciliation_draft(account_id, normalized)
+    assert draft["certification_allowed"] is True
+    assert draft["price_only_changes"] == [
+        {
+            "instrument_id": instrument["instrument_id"],
+            "canonical_price_minor": 500,
+            "source_price_minor": 550,
+        }
+    ]
+    committed = service.apply_reconciliation(
+        draft["reconciliation_id"], {"client_operation_id": str(uuid4())}
+    )
+    payload = committed["evidence"]["normalized_payload"]
+    assert payload["source"]["positions"][0]["source_value_minor"] == 500
+    assert payload["source"]["positions"][0]["source_price_minor"] == 550
+    assert payload["canonical_baseline"]["positions"][0]["total_cost_basis_minor"] == 450
+    assert service.list_investment_positions(account_id)[0]["quantity_micros"] == 1_000_000
+    undone = service.undo_last_reconciliation(
+        account_id,
+        {
+            "client_operation_id": str(uuid4()),
+            "expected_reconciliation_id": committed["reconciliation_id"],
+        },
+    )
+    assert undone["undo_record"]["event_type"] == "VOID"
+    assert service.list_investment_positions(account_id)[0]["total_cost_basis_minor"] == 450
+
+
+def test_incoherent_investment_total_is_rejected_without_mutation(service) -> None:
+    account_id = service.create_account({"name": "Brokerage", "account_class": "INVESTMENT"})[
+        "account_id"
+    ]
+    with pytest.raises(ValueError, match="cash plus position values"):
+        service.create_reconciliation_draft(
+            account_id,
+            {
+                "source_kind": "INVESTMENT_STATEMENT",
+                "cutoff": service.clock.today(),
+                "source_cash_minor": 100,
+                "source_total_value_minor": 999,
+                "source_as_of": service.clock.now(),
+                "source_positions": [
+                    {
+                        "instrument_id": str(uuid4()),
+                        "quantity_micros": 1,
+                        "total_cost_basis_minor": 1,
+                        "source_price_minor": 1,
+                        "source_value_minor": 10,
+                    }
+                ],
+            },
+        )
+    assert (
+        service.db.fetch_one("SELECT COUNT(*) AS count FROM reconciliation_commits")["count"] == 0
+    )
+
+
+def test_investment_reconciliation_rejects_quantity_change_without_basis_and_reports_structural_diffs(
+    service,
+) -> None:
+    account_id = service.create_account({"name": "Brokerage", "account_class": "INVESTMENT"})[
+        "account_id"
+    ]
+    instrument = service.create_investment_instrument({"symbol": "XYZ"})
+    cutoff = service.clock.today()
+    service.reconcile_investment_statement(
+        account_id,
+        {
+            "effective_date": cutoff,
+            "cash_balance_minor": 0,
+            "holdings": [
+                {
+                    "instrument_id": instrument["instrument_id"],
+                    "quantity_micros": 2_000_000,
+                    "price_minor": 100,
+                    "total_cost_basis_minor": 150,
+                }
+            ],
+        },
+    )
+    draft = service.create_reconciliation_draft(
+        account_id,
+        {
+            "source_kind": "INVESTMENT_STATEMENT",
+            "cutoff": cutoff,
+            "source_cash_minor": 0,
+            "source_total_value_minor": 200,
+            "source_as_of": service.clock.now(),
+            "source_positions": [
+                {
+                    "instrument_id": instrument["instrument_id"],
+                    "quantity_micros": 1_000_000,
+                    "total_cost_basis_minor": 75,
+                    "source_price_minor": 200,
+                    "source_value_minor": 200,
+                }
+            ],
+        },
+    )
+    assert {diff["field"] for diff in draft["diffs"]} == {
+        "quantity_micros",
+        "total_cost_basis_minor",
+    }
+    with pytest.raises(ValueError, match="matching cash, positions, quantity, and basis"):
+        service.apply_reconciliation(
+            draft["reconciliation_id"], {"client_operation_id": str(uuid4())}
+        )
+    assert service.list_investment_positions(account_id)[0]["quantity_micros"] == 2_000_000
+
+
+@pytest.mark.parametrize("entity_class", ["TRACKING", "TANGIBLE_ASSET"])
+def test_valuation_reconciliation_same_value_writes_evidence_without_new_version(
+    service, entity_class: str
+) -> None:
+    account_id = service.create_account({"name": "Valued", "account_class": entity_class})[
+        "account_id"
+    ]
+    payload = {
+        "effective_date": date(2026, 2, 1),
+        "amount_minor": 25_000,
+        "source": "appraisal",
+        "notes": "February estimate",
+        "client_operation_id": str(uuid4()),
+    }
+    first = service.reconcile_valuation(account_id, payload)
+    valuation_rows = service.db.fetch_all(
+        "SELECT * FROM "
+        + ("net_worth_valuations" if entity_class == "TRACKING" else "tangible_asset_valuations")
+        + " WHERE account_id = ?",
+        (account_id,),
+    )
+    second = service.reconcile_valuation(
+        account_id, payload | {"client_operation_id": str(uuid4())}
+    )
+
+    assert second["reconciliation_id"] != first["reconciliation_id"]
+    assert (
+        service.db.fetch_all(
+            "SELECT * FROM "
+            + (
+                "net_worth_valuations"
+                if entity_class == "TRACKING"
+                else "tangible_asset_valuations"
+            )
+            + " WHERE account_id = ?",
+            (account_id,),
+        )
+        == valuation_rows
+    )
+    assert second["evidence"]["normalized_payload"] == {
+        "value_minor": 25_000,
+        "effective_date": "2026-02-01",
+        "source": "appraisal",
+        "notes": "February estimate",
+    }
+    assert second["source_as_of"] == "2026-02-01T00:00:00+00:00"
+
+
+@pytest.mark.parametrize("entity_class", ["TRACKING", "TANGIBLE_ASSET"])
+def test_valuation_reconciliation_commit_failure_rolls_back_version(
+    service, monkeypatch, entity_class
+):
+    account_id = service.create_account({"name": "Valued", "account_class": entity_class})[
+        "account_id"
+    ]
+    table = "net_worth_valuations" if entity_class == "TRACKING" else "tangible_asset_valuations"
+
+    def fail_commit(**_kwargs):
+        raise RuntimeError("injected commit failure")
+
+    monkeypatch.setattr(service.reconciliation_repository, "create_commit", fail_commit)
+    with pytest.raises(RuntimeError, match="injected"):
+        service.reconcile_valuation(
+            account_id,
+            {
+                "effective_date": date(2026, 2, 1),
+                "amount_minor": 10_000,
+                "source": "manual",
+                "notes": "Source note",
+                "client_operation_id": str(uuid4()),
+            },
+        )
+
+    assert service.db.fetch_one(
+        f"SELECT COUNT(*) AS count FROM {table} WHERE account_id = ?", (account_id,)
+    ) == {"count": 0}
+    assert service.reconciliation_repository.list_commits(account_id) == []
+
+
+@pytest.mark.parametrize("entity_class", ["TRACKING", "TANGIBLE_ASSET"])
+def test_valuation_undo_preserves_value_and_commit_history_is_immutable(service, entity_class):
+    account_id = service.create_account({"name": "Valued", "account_class": entity_class})[
+        "account_id"
+    ]
+    table = "net_worth_valuations" if entity_class == "TRACKING" else "tangible_asset_valuations"
+    first = service.reconcile_valuation(
+        account_id,
+        {
+            "effective_date": date(2026, 2, 1),
+            "amount_minor": 10_000,
+            "source": "manual",
+            "notes": "Initial",
+            "client_operation_id": str(uuid4()),
+        },
+    )
+    first_commit = service.reconciliation_repository.read_commit(first["reconciliation_id"])
+    other_account_id = service.create_account({"name": "Other", "account_class": entity_class})[
+        "account_id"
+    ]
+    service.clock.advance(minutes=1)
+    second = service.reconcile_valuation(
+        account_id,
+        {
+            "effective_date": date(2026, 2, 1),
+            "amount_minor": 12_000,
+            "source": "appraisal",
+            "notes": "Updated",
+            "client_operation_id": str(uuid4()),
+        },
+    )
+    commit_before_undo = service.reconciliation_repository.read_commit(second["reconciliation_id"])
+    values_before_undo = service.db.fetch_all(
+        f"SELECT effective_date, amount_minor, valid_from, valid_to FROM {table} "
+        "WHERE account_id = ? ORDER BY effective_date, valid_from",
+        (account_id,),
+    )
+
+    service.undo_last_reconciliation(
+        account_id,
+        {
+            "client_operation_id": str(uuid4()),
+            "expected_reconciliation_id": second["reconciliation_id"],
+        },
+    )
+
+    assert (
+        service.db.fetch_all(
+            f"SELECT effective_date, amount_minor, valid_from, valid_to FROM {table} "
+            "WHERE account_id = ? ORDER BY effective_date, valid_from",
+            (account_id,),
+        )
+        == values_before_undo
+    )
+    assert (
+        service.reconciliation_repository.read_commit(second["reconciliation_id"])
+        == commit_before_undo
+    )
+    assert sorted(
+        row["event_type"] for row in service.reconciliation_repository.list_history(account_id)
+    ) == ["COMMITTED", "COMMITTED", "VOID"]
+    assert (
+        service.reconciliation_repository.read_commit(first["reconciliation_id"])["entity_id"]
+        == account_id
+    )
+    assert service.reconciliation_repository.read_commit(first["reconciliation_id"]) == first_commit
+    assert service.reconciliation_repository.list_commits(other_account_id) == []
+    assert service.db.fetch_one(
+        f"SELECT COUNT(*) AS count FROM {table} WHERE account_id = ?", (other_account_id,)
+    ) == {"count": 0}
+
+
+@pytest.mark.parametrize("entity_class", ["TRACKING", "TANGIBLE_ASSET"])
+def test_valuation_reconciliation_is_entity_scoped(service, entity_class):
+    account_id = service.create_account({"name": "Valued", "account_class": entity_class})[
+        "account_id"
+    ]
+    with pytest.raises(ValueError, match="requires a tracking or tangible asset"):
+        service.reconcile_valuation(
+            _budget_account(service),
+            {
+                "effective_date": date(2026, 2, 1),
+                "amount_minor": 10,
+                "client_operation_id": str(uuid4()),
+            },
+        )
+    assert service.reconciliation_repository.list_commits(account_id) == []
 
 
 def _budget_account(service, name: str = "Checking") -> str:

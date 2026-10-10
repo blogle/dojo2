@@ -160,7 +160,7 @@ CREATE TABLE IF NOT EXISTS loan_balance_snapshots (
     effective_date DATE NOT NULL,
     principal_balance_minor BIGINT NOT NULL,
     accrued_interest_minor BIGINT,
-    escrow_balance_minor BIGINT NOT NULL DEFAULT 0,
+    escrow_balance_minor BIGINT,
     unapplied_credit_minor BIGINT,
     ytd_principal_paid_minor BIGINT,
     ytd_interest_paid_minor BIGINT,
