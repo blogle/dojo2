@@ -1807,7 +1807,7 @@ describe("AccountDetailPage — investment account", () => {
     cy.get("[data-cy=form-modal-root]").contains("Compare statement").click();
     cy.get("[data-cy=investment-reconciliation-proof]")
       .should("contain.text", "Balances match")
-      .and("contain.text", "1 price-only changes");
+      .and("contain.text", "1 price-only change");
     cy.get("[data-cy=form-modal-root]").contains("Reconcile account").click();
 
     cy.window().then((win) => {

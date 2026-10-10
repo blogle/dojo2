@@ -1125,6 +1125,10 @@ function reconciliationEvidenceSummary(reconciliationId: string): string {
   return values.length ? values.join(" · ") : evidence.evidence_kind;
 }
 
+function formatReconciliationDate(value: string): string {
+  return formatDateShort(new Date(`${value.slice(0, 10)}T00:00:00`));
+}
+
 const summaryDetails = computed((): KeyValueItem[] => {
   const summary = summaryData.value;
   const inflow = summary?.inflow_minor ?? 0;
@@ -2876,15 +2880,13 @@ function formatTaxTreatment(value: string | null | undefined): string {
                 <span>
                   Source as of
                   {{
-                    formatDateShort(
-                      new Date(
-                        reconciliationCommitById.get(item.reconciliation_id)
-                          ?.source_as_of ?? item.committed_at,
-                      ),
+                    formatReconciliationDate(
+                      reconciliationCommitById.get(item.reconciliation_id)
+                        ?.source_as_of ?? item.committed_at,
                     )
                   }}
                   · Committed
-                  {{ formatDateShort(new Date(item.committed_at)) }}
+                  {{ formatReconciliationDate(item.committed_at) }}
                 </span>
               </div>
               <Button
@@ -4112,15 +4114,23 @@ function formatTaxTreatment(value: string | null | undefined): string {
                     : "Differences found"
                 }}
               </strong>
-              <span
-                >{{ investmentReconciliationAttempt.diffs.length }} structural
-                differences</span
-              >
-              <span
-                >{{
-                  investmentReconciliationAttempt.price_only_changes.length
+              <span>
+                {{ investmentReconciliationAttempt.diffs.length }} structural
+                {{
+                  investmentReconciliationAttempt.diffs.length === 1
+                    ? "difference"
+                    : "differences"
                 }}
-                price-only changes</span
+              </span>
+              <span
+                >{{ investmentReconciliationAttempt.price_only_changes.length }}
+                price-only
+                {{
+                  investmentReconciliationAttempt.price_only_changes.length ===
+                  1
+                    ? "change"
+                    : "changes"
+                }}</span
               >
               <span
                 v-if="!investmentReconciliationAttempt.certification_allowed"
