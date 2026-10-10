@@ -5564,6 +5564,11 @@ class DojoService:
             if entity_class == ACCOUNT_CLASS_TRACKING
             else "queries/current_tangible_valuation_by_account_date"
         )
+        baseline_query = (
+            "queries/current_tracking_valuation_version_by_account_date"
+            if entity_class == ACCOUNT_CLASS_TRACKING
+            else "queries/current_tangible_valuation_version_by_account_date"
+        )
         request = {"account_id": account_id, **payload}
 
         def commit_valuation(
@@ -5627,9 +5632,7 @@ class DojoService:
                 normalized_payload=evidence_payload,
             )
             baseline_row = connection.execute(
-                f"SELECT row_id, valuation_id, effective_date, amount_minor, valid_from "
-                f"FROM {table} WHERE account_id = ? AND effective_date = ? AND valid_to = ?",
-                (account_id, effective_date, MAX_TS),
+                load_sql(baseline_query), (account_id, effective_date)
             ).fetchone()
             if baseline_row is None:
                 raise ValueError("Canonical valuation was not persisted")
