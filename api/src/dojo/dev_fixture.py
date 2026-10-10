@@ -4,7 +4,7 @@ import argparse
 import hashlib
 import json
 import os
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timezone
 from importlib.metadata import version
 from pathlib import Path
 from uuid import uuid4
@@ -131,8 +131,135 @@ def _populate_development_database(output: Path) -> None:
                     ),
                 )
             add_development_accounts(connection, FIXTURE_TIME)
+        _add_development_investment_positions(service)
+        _add_development_reconciliation_history(service)
     finally:
         service.close()
+
+
+def _add_development_reconciliation_history(service: DojoService) -> None:
+    accounts_by_name = {
+        str(account["name"]): account for account in service.list_accounts(show_hidden=True)
+    }
+    checking = accounts_by_name["Maple Checking"]
+    attempt = service.create_reconciliation_draft(
+        str(checking["account_id"]),
+        {
+            "source_kind": "BANK_STATEMENT",
+            "cutoff": service.clock.today(),
+            "source_cleared_minor": checking["cleared_balance_minor"],
+            "source_pending_minor": checking["pending_balance_minor"],
+            "source_as_of": FIXTURE_TIME,
+        },
+    )
+    if not attempt["certification_allowed"]:
+        raise RuntimeError("Development budget reconciliation does not match its ledger")
+    service.apply_reconciliation(
+        str(attempt["reconciliation_id"]), {"client_operation_id": str(uuid4())}
+    )
+
+    investment = accounts_by_name["Pinecone Brokerage"]
+    statement = service.latest_investment_statement(str(investment["account_id"]))
+    position_values = [
+        {
+            "instrument_id": position["instrument_id"],
+            "quantity_micros": position["quantity_micros"],
+            "total_cost_basis_minor": position["total_cost_basis_minor"],
+            "source_price_minor": position["price_minor"],
+            "source_value_minor": position["value_minor"],
+        }
+        for position in statement["holdings"]
+    ]
+    investment_attempt = service.create_reconciliation_draft(
+        str(investment["account_id"]),
+        {
+            "source_kind": "INVESTMENT_STATEMENT",
+            "cutoff": date.fromisoformat(str(statement["effective_date"])),
+            "source_as_of": datetime.combine(
+                date.fromisoformat(str(statement["effective_date"])), time(12), timezone.utc
+            ),
+            "source_cash_minor": statement["cash_balance_minor"],
+            "source_total_value_minor": statement["cash_balance_minor"]
+            + sum(position["source_value_minor"] for position in position_values),
+            "source_positions": position_values,
+        },
+    )
+    if not investment_attempt["certification_allowed"]:
+        raise RuntimeError("Development investment reconciliation does not match its holdings")
+    service.apply_reconciliation(
+        str(investment_attempt["reconciliation_id"]),
+        {"client_operation_id": str(uuid4())},
+    )
+
+    loan = accounts_by_name["Cedar Auto Loan"]
+    snapshot = service.list_loan_snapshots(str(loan["account_id"]))[0]
+    loan_facts = {
+        field: snapshot[field]
+        for field in (
+            "principal_balance_minor",
+            "accrued_interest_minor",
+            "escrow_balance_minor",
+            "unapplied_credit_minor",
+            "ytd_principal_paid_minor",
+            "ytd_interest_paid_minor",
+        )
+        if snapshot[field] is not None
+    }
+    service.reconcile_loan(
+        str(loan["account_id"]),
+        {
+            "source_as_of": datetime.combine(snapshot["effective_date"], time(12), timezone.utc),
+            **loan_facts,
+        },
+    )
+
+    for name in ("Harbor Education Fund", "Juniper Home"):
+        account = accounts_by_name[name]
+        service.reconcile_valuation(
+            str(account["account_id"]),
+            {
+                "effective_date": date.fromisoformat(str(account["value_effective_date"])),
+                "amount_minor": account["current_value_minor"],
+                "source": "manual",
+                "notes": "Fictional development-fixture source",
+                "client_operation_id": str(uuid4()),
+            },
+        )
+
+
+def _add_development_investment_positions(service: DojoService) -> None:
+    account = next(
+        account
+        for account in service.list_accounts(show_hidden=True)
+        if account["name"] == "Pinecone Brokerage"
+    )
+    instruments = {
+        str(instrument["symbol"]): str(instrument["instrument_id"])
+        for instrument in service.list_investment_instruments()
+    }
+    statement = service.latest_investment_statement(str(account["account_id"]))
+    service.reconcile_investment_statement(
+        str(account["account_id"]),
+        {
+            "effective_date": date.fromisoformat(str(statement["effective_date"])),
+            "cash_balance_minor": statement["cash_balance_minor"],
+            "notes": "Fictional development-fixture statement",
+            "holdings": [
+                {
+                    "instrument_id": instruments["CASH"],
+                    "quantity_micros": 25_000_000,
+                    "price_minor": 5_000,
+                    "total_cost_basis_minor": 110_000,
+                },
+                {
+                    "instrument_id": instruments["IDX"],
+                    "quantity_micros": 10_000_000,
+                    "price_minor": 10_000,
+                    "total_cost_basis_minor": 90_000,
+                },
+            ],
+        },
+    )
 
 
 def _validate_development_database(path: Path) -> None:
