@@ -23,6 +23,7 @@ import {
   createReconciliationDraft,
   createLoanPayment,
   fetchAccountBudgetLinks,
+  fetchAccountReconciliationHistory,
   fetchAccounts,
   fetchAccountBalanceTrend,
   fetchAccountTransactionSummary,
@@ -32,6 +33,7 @@ import {
   fetchLoanProjection,
   fetchLoanSnapshots,
   fetchReconciliationWorkingSet,
+  fetchReconciliationCommit,
   fetchTrackingSnapshots,
   fetchTangibleValuations,
   fetchTransactionsPage,
@@ -181,6 +183,7 @@ const loanYtdPrincipal = ref("");
 const loanYtdInterest = ref("");
 const showLoanAdvancedFields = ref(false);
 const showReconciliationModal = ref(false);
+const showUndoReconciliationConfirmation = ref(false);
 const reconciliationDate = ref(new Date().toISOString().slice(0, 10));
 const reconciliationEndingBalance = ref("");
 const reconciliationDraft = ref<Awaited<
@@ -269,6 +272,35 @@ const {
   queryKey: computed(() => ["reconciliation-working-set", accountId.value]),
   queryFn: () => fetchReconciliationWorkingSet(accountId.value),
   enabled: computed(() => investigatingReconciliation.value),
+});
+
+const {
+  data: reconciliationHistory,
+  isLoading: reconciliationHistoryLoading,
+  isError: reconciliationHistoryError,
+} = useQuery({
+  queryKey: computed(() => ["account-reconciliation-history", accountId.value]),
+  queryFn: async () => {
+    const history = await fetchAccountReconciliationHistory(accountId.value);
+    const commits = await Promise.all(
+      history.items.map((item) =>
+        fetchReconciliationCommit(item.reconciliation_id),
+      ),
+    );
+    return { ...history, commits };
+  },
+  enabled: computed(() => account.value?.account_class === "BUDGET"),
+});
+
+const latestUndoableReconciliation = computed(() => {
+  const latest = reconciliationHistory.value?.items[0];
+  if (!latest) return null;
+  const isVoided = reconciliationHistory.value?.history.some(
+    (event) =>
+      event.event_type === "VOID" &&
+      event.reconciliation_id === latest.reconciliation_id,
+  );
+  return isVoided ? null : latest;
 });
 
 const workingSetItems = computed(
@@ -1065,12 +1097,30 @@ const accountDetails = computed((): KeyValueItem[] => {
   return items;
 });
 
-const reconciliationDetails = computed((): KeyValueItem[] => [
-  { label: "Status", value: "Not reconciled", variant: "warning" },
-  { label: "Last reconciled", value: "—" },
-  { label: "Statement balance", value: "—" },
-  { label: "Difference", value: "—" },
-]);
+const reconciliationCommitById = computed(
+  () =>
+    new Map(
+      (reconciliationHistory.value?.commits ?? []).map((commit) => [
+        commit.reconciliation_id,
+        commit,
+      ]),
+    ),
+);
+
+function reconciliationEvidenceSummary(reconciliationId: string): string {
+  const commit = reconciliationCommitById.value.get(reconciliationId);
+  const evidence = commit?.evidence;
+  if (!evidence) return "Evidence recorded";
+  const payload = evidence.normalized_payload;
+  const values = [
+    ["Cleared", payload.cleared_minor],
+    ["Pending", payload.pending_minor],
+    ["Actual", payload.actual_minor],
+  ].flatMap(([label, value]) =>
+    typeof value === "number" ? [`${label} ${formatCurrency(value)}`] : [],
+  );
+  return values.length ? values.join(" · ") : evidence.evidence_kind;
+}
 
 const summaryDetails = computed((): KeyValueItem[] => {
   const summary = summaryData.value;
@@ -1408,25 +1458,14 @@ const reconciliationApplyMutation = useMutation({
       client_operation_id: reconciliationOperationId.value,
     });
   },
-  onSuccess: (result) => {
-    const reconciledAccountId = accountId.value;
+  onSuccess: () => {
     showReconciliationModal.value = false;
     reconciliationDraft.value = null;
     invalidateAccountDetailQueries();
-    notifyMutationSuccess("Account reconciled", {
-      undoneMessage: "Reconciliation undone",
-      run: async () => {
-        if (typeof result.reconciliation_id !== "string") {
-          throw new Error("The reconciliation can no longer be undone.");
-        }
-        await undoLastReconciliation(
-          reconciledAccountId,
-          result.reconciliation_id,
-          crypto.randomUUID(),
-        );
-        invalidateAccountDetailQueries();
-      },
+    queryClient.invalidateQueries({
+      queryKey: ["account-reconciliation-history", accountId.value],
     });
+    notifyMutationSuccess("Account reconciled");
   },
 });
 const budgetAttemptMutation = useMutation({
@@ -1486,26 +1525,16 @@ const budgetApplyMutation = useMutation({
     });
   },
   onSuccess: () => {
-    const reconciliationId = budgetAttempt.value?.reconciliation_id;
-    const reconciledAccountId = accountId.value;
     showReconciliationModal.value = false;
     budgetAttempt.value = null;
     investigatingReconciliation.value = false;
     persistentEditsDuringAttempt.value = false;
     sourceBalancesBeforeEdit.value = null;
     invalidateAccountDetailQueries();
-    if (!reconciliationId) return;
-    notifyMutationSuccess("Account reconciled", {
-      undoneMessage: "Reconciliation undone",
-      run: async () => {
-        await undoLastReconciliation(
-          reconciledAccountId,
-          reconciliationId,
-          crypto.randomUUID(),
-        );
-        invalidateAccountDetailQueries();
-      },
+    queryClient.invalidateQueries({
+      queryKey: ["account-reconciliation-history", accountId.value],
     });
+    notifyMutationSuccess("Account reconciled");
   },
   onError: (error) => {
     reconciliationMutationError.value = mutationErrorMessage(error);
@@ -1626,6 +1655,22 @@ function confirmExitReconciliation() {
   showExitWarning.value = false;
   investigatingReconciliation.value = false;
   budgetAttempt.value = null;
+}
+
+async function confirmUndoLastReconciliation() {
+  const latest = latestUndoableReconciliation.value;
+  if (!latest) return;
+  await undoLastReconciliation(
+    accountId.value,
+    latest.reconciliation_id,
+    crypto.randomUUID(),
+  );
+  showUndoReconciliationConfirmation.value = false;
+  await queryClient.invalidateQueries({
+    queryKey: ["account-reconciliation-history", accountId.value],
+  });
+  invalidateAccountDetailQueries();
+  notifyMutationSuccess("Reconciliation undone");
 }
 
 async function refreshReconciliationAfterMutation() {
@@ -2597,6 +2642,90 @@ function formatTaxTreatment(value: string | null | undefined): string {
           class="account-detail-page__metrics"
         />
 
+        <section
+          v-if="isBudgetAccount"
+          class="account-detail-page__section account-detail-page__reconciliation-history"
+          data-cy="reconciliation-history-section"
+          aria-labelledby="reconciliation-history-title"
+        >
+          <div class="account-detail-page__section-header">
+            <h2
+              id="reconciliation-history-title"
+              class="account-detail-page__section-title"
+            >
+              Reconciliation history
+            </h2>
+            <StateBadge
+              v-if="account.reconciliation_status === 'CURRENT'"
+              variant="positive"
+              size="sm"
+              >Current</StateBadge
+            >
+            <StateBadge v-else variant="warning" size="sm"
+              >Not reconciled</StateBadge
+            >
+          </div>
+          <p
+            v-if="reconciliationHistoryLoading"
+            class="account-detail-page__history-state"
+            role="status"
+          >
+            Loading reconciliation history…
+          </p>
+          <p
+            v-else-if="reconciliationHistoryError"
+            class="account-detail-page__history-state"
+            role="alert"
+          >
+            Reconciliation history could not be loaded.
+          </p>
+          <template v-else-if="reconciliationHistory?.items.length">
+            <div
+              v-for="item in reconciliationHistory.items"
+              :key="item.reconciliation_id"
+              class="account-detail-page__history-row"
+              data-cy="reconciliation-history-row"
+            >
+              <div class="account-detail-page__history-copy">
+                <strong>{{
+                  reconciliationEvidenceSummary(item.reconciliation_id)
+                }}</strong>
+                <span>
+                  Source as of
+                  {{
+                    formatDateShort(
+                      new Date(
+                        reconciliationCommitById.get(item.reconciliation_id)
+                          ?.source_as_of ?? item.committed_at,
+                      ),
+                    )
+                  }}
+                  · Committed
+                  {{ formatDateShort(new Date(item.committed_at)) }}
+                </span>
+              </div>
+              <Button
+                v-if="
+                  latestUndoableReconciliation?.reconciliation_id ===
+                  item.reconciliation_id
+                "
+                variant="tertiary"
+                data-cy="undo-last-reconciliation"
+                @click="showUndoReconciliationConfirmation = true"
+              >
+                Undo last reconciliation
+              </Button>
+            </div>
+          </template>
+          <p
+            v-else
+            class="account-detail-page__history-state"
+            data-cy="never-reconciled"
+          >
+            Never reconciled
+          </p>
+        </section>
+
         <div
           v-if="investigatingReconciliation && budgetAttempt"
           class="account-detail-page__reconciliation-actions"
@@ -3208,21 +3337,6 @@ function formatTaxTreatment(value: string | null | undefined): string {
               </h3>
               <KeyValueList :items="historyConfigDetails" />
             </section>
-
-            <section
-              v-if="!isTrackingAccount"
-              class="account-detail-page__sidebar-section"
-              data-cy="reconciliation-section"
-            >
-              <h3 class="account-detail-page__sidebar-title">Reconciliation</h3>
-              <KeyValueList :items="reconciliationDetails" />
-              <button
-                class="account-detail-page__sidebar-link"
-                @click="openReconciliationModal"
-              >
-                View reconciliation
-              </button>
-            </section>
           </aside>
         </div>
 
@@ -3402,6 +3516,20 @@ function formatTaxTreatment(value: string | null | undefined): string {
           <p>
             Your transaction edits have already been saved. Exiting will leave
             no reconciliation recorded for this account.
+          </p>
+        </FormModal>
+
+        <FormModal
+          :visible="showUndoReconciliationConfirmation"
+          title="Undo last reconciliation?"
+          submit-text="Undo last reconciliation"
+          @submit="confirmUndoLastReconciliation"
+          @cancel="showUndoReconciliationConfirmation = false"
+          @close="showUndoReconciliationConfirmation = false"
+        >
+          <p>
+            This appends an undo record for the latest reconciliation. It does
+            not revert account, transaction, or valuation changes already saved.
           </p>
         </FormModal>
 
@@ -4279,6 +4407,38 @@ function formatTaxTreatment(value: string | null | undefined): string {
   line-height: var(--text-body-sm-line-height);
 }
 
+.account-detail-page__reconciliation-history {
+  padding: var(--space-lg);
+}
+
+.account-detail-page__history-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-lg);
+  padding: var(--space-md) 0;
+  border-top: 1px solid var(--color-outline);
+}
+
+.account-detail-page__history-copy {
+  display: grid;
+  gap: var(--space-xs);
+  min-width: 0;
+  color: var(--color-on-surface);
+  font-family: var(--text-body-sm-font-family);
+  font-size: var(--text-body-sm-font-size);
+  line-height: var(--text-body-sm-line-height);
+}
+
+.account-detail-page__history-copy span,
+.account-detail-page__history-state {
+  margin: 0;
+  color: var(--color-on-surface-muted);
+  font-family: var(--text-body-sm-font-family);
+  font-size: var(--text-body-sm-font-size);
+  line-height: var(--text-body-sm-line-height);
+}
+
 .account-detail-page__section-actions {
   display: inline-flex;
   align-items: center;
@@ -4842,6 +5002,13 @@ function formatTaxTreatment(value: string | null | undefined): string {
 @media (max-width: 900px) {
   .account-detail-page__cutover-row {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 600px) {
+  .account-detail-page__history-row {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }
 

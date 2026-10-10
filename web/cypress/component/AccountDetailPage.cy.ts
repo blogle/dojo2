@@ -136,6 +136,15 @@ function stubFetch(
       );
     }
 
+    if (path === `/api/accounts/${budgetAccount.account_id}/reconciliations`) {
+      return Promise.resolve(
+        new Response(JSON.stringify({ items: [], history: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    }
+
     if (
       path === `/api/accounts/${budgetAccount.account_id}/reconciliations/draft`
     ) {
@@ -472,6 +481,14 @@ describe("AccountDetailPage", () => {
     cy.get("[data-cy=transaction-ledger]").should("be.visible");
     cy.get("[data-cy=account-details-section]").should("not.exist");
     cy.get("[data-cy=reconciliation-section]").should("not.exist");
+    cy.get("[data-cy=reconciliation-history-section]").should(
+      "contain.text",
+      "Never reconciled",
+    );
+    cy.get("[data-cy=account-detail-reconcile-loan]").should("not.exist");
+    cy.get("[data-cy=account-detail-reconcile-investment]").should("not.exist");
+    cy.contains("View reconciliation").should("not.exist");
+    cy.contains("Apply statement").should("not.exist");
     cy.get("[data-cy=transaction-entry-form]").should("be.visible");
     cy.get("[data-cy=history-section]").should("not.exist");
     cy.get("[data-cy=configuration-section]").should("not.exist");
@@ -480,6 +497,65 @@ describe("AccountDetailPage", () => {
       "Summary & notes",
     );
     cy.get("[data-cy=balance-trend-chart]").should("be.visible");
+  });
+
+  it("shows immutable evidence history and confirms latest-only undo", () => {
+    mountPage((path) => {
+      if (
+        path === `/api/accounts/${budgetAccount.account_id}/reconciliations`
+      ) {
+        return jsonResponse({
+          items: [
+            {
+              reconciliation_id: "committed-1",
+              evidence_id: "evidence-1",
+              committed_at: "2026-06-05T12:00:00Z",
+              entity_class: "BUDGET",
+            },
+          ],
+          history: [
+            {
+              history_id: "history-1",
+              event_type: "COMMITTED",
+              reconciliation_id: "committed-1",
+              recorded_at: "2026-06-05T12:00:00Z",
+            },
+          ],
+        });
+      }
+      if (path === "/api/reconciliations/committed-1") {
+        return jsonResponse({
+          reconciliation_id: "committed-1",
+          committed_at: "2026-06-05T12:00:00Z",
+          source_as_of: "2026-06-04T00:00:00Z",
+          evidence: {
+            evidence_kind: "BANK_STATEMENT",
+            source_adapter: "manual",
+            normalized_payload: {
+              cleared_minor: 671675,
+              pending_minor: 12543,
+              actual_minor: 684218,
+            },
+            records: [],
+          },
+        });
+      }
+      return undefined;
+    });
+
+    cy.get("[data-cy=reconciliation-history-row]")
+      .should("contain.text", "Cleared $6,716.75")
+      .and("contain.text", "Source as of")
+      .and("contain.text", "Committed");
+    cy.get("[data-cy=undo-last-reconciliation]").click();
+    cy.get("[data-cy=form-modal-root]")
+      .should("contain.text", "does not revert")
+      .contains("button", "Undo last reconciliation")
+      .click();
+    cy.get("[data-cy=mutation-feedback]").should(
+      "contain.text",
+      "Reconciliation undone",
+    );
   });
 
   it("keeps a legacy missing-category transaction unchanged until categorized", () => {

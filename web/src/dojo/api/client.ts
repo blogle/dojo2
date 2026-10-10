@@ -790,6 +790,45 @@ export async function undoLastReconciliation(
   });
 }
 
+export type AccountReconciliationHistory = {
+  items: Array<{
+    reconciliation_id: string;
+    evidence_id: string;
+    committed_at: string;
+    entity_class: string;
+  }>;
+  history: Array<{
+    history_id: string;
+    event_type: string;
+    reconciliation_id: string;
+    recorded_at: string;
+  }>;
+};
+
+export type ReconciliationCommit = {
+  reconciliation_id: string;
+  committed_at: string;
+  source_as_of: string;
+  evidence: {
+    evidence_kind: string;
+    source_adapter: string;
+    normalized_payload: Record<string, unknown>;
+    records: Array<{ normalized_payload: Record<string, unknown> }>;
+  };
+};
+
+export async function fetchAccountReconciliationHistory(
+  accountId: string,
+): Promise<AccountReconciliationHistory> {
+  return request(`/api/accounts/${accountId}/reconciliations`);
+}
+
+export async function fetchReconciliationCommit(
+  reconciliationId: string,
+): Promise<ReconciliationCommit> {
+  return request(`/api/reconciliations/${reconciliationId}`);
+}
+
 export async function fetchReconciliationWorkingSet(
   accountId: string,
 ): Promise<Record<string, unknown>> {
