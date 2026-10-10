@@ -4402,6 +4402,11 @@ class DojoService:
         self, account_id: str, payload: dict[str, Any]
     ) -> dict[str, Any]:
         account = self._require_account(account_id)
+        if (
+            account["account_class"] == ACCOUNT_CLASS_INVESTMENT
+            and payload.get("source_cash_minor") is not None
+        ):
+            return self._create_investment_reconciliation_draft(account_id, payload)
         if account["account_class"] == ACCOUNT_CLASS_BUDGET:
             source = normalize_budget_balances(
                 cleared_minor=payload.get("source_cleared_minor"),
@@ -4549,6 +4554,161 @@ class DojoService:
             ),
         }
 
+    def _investment_reconciliation_snapshot(self, account_id: str, cutoff: date) -> dict[str, Any]:
+        cash = next(
+            (
+                row
+                for row in self.db.fetch_all(
+                    load_sql("queries/latest_investment_cash_through_date"), (cutoff,)
+                )
+                if str(row["account_id"]) == account_id
+            ),
+            None,
+        )
+        cash_minor = int(cash["cash_balance_minor"]) if cash else 0
+        cash_snapshot: dict[str, Any] | None = None
+        if cash:
+            cash_snapshot = {
+                "row_id": str(cash["row_id"]),
+                "snapshot_id": str(cash["snapshot_id"]),
+                "cash_balance_minor": cash_minor,
+                "effective_date": str(cash["effective_date"]),
+                "record_order": cash.get("record_order"),
+            }
+        positions = []
+        for position in self.db.fetch_all(
+            load_sql("queries/investment_reconciliation_positions"),
+            (account_id, cutoff),
+        ):
+            price = self.db.fetch_one(
+                load_sql("queries/current_investment_price_by_instrument_date"),
+                (account_id, position["instrument_id"], position["effective_date"], account_id),
+            )
+            positions.append(
+                {
+                    "row_id": str(position["row_id"]),
+                    "position_id": str(position["position_id"]),
+                    "instrument_id": str(position["instrument_id"]),
+                    "symbol": position["symbol"],
+                    "instrument_name": position["instrument_name"],
+                    "quantity_micros": int(position["quantity_micros"]),
+                    "total_cost_basis_minor": int(position["total_cost_basis_minor"]),
+                    "price_minor": int(price["price_minor"]) if price else None,
+                    "price_row_id": str(price["row_id"]) if price else None,
+                    "effective_date": str(position["effective_date"]),
+                }
+            )
+        for position in positions:
+            position["value_minor"] = (
+                position_amount_minor(position["quantity_micros"], position["price_minor"])
+                if position["price_minor"] is not None
+                else None
+            )
+        return {
+            "cash": cash_snapshot,
+            "cash_minor": cash_minor,
+            "positions": positions,
+        }
+
+    def _create_investment_reconciliation_draft(
+        self, account_id: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        cutoff = payload["cutoff"]
+        if isinstance(cutoff, str):
+            cutoff = date.fromisoformat(cutoff)
+        source_positions = [
+            dict(position) | {"instrument_id": str(position["instrument_id"])}
+            for position in payload.get("source_positions", [])
+        ]
+        source_ids = [str(position["instrument_id"]) for position in source_positions]
+        if len(source_ids) != len(set(source_ids)):
+            raise ValueError("Source positions must use unique instruments")
+        source_cash = int(payload["source_cash_minor"])
+        source_value = int(payload["source_total_value_minor"])
+        if (
+            source_cash + sum(int(position["source_value_minor"]) for position in source_positions)
+            != source_value
+        ):
+            raise ValueError("Source total account value must equal cash plus position values")
+        snapshot = self._investment_reconciliation_snapshot(account_id, cutoff)
+        local_by_id = {position["instrument_id"]: position for position in snapshot["positions"]}
+        source_by_id = {str(position["instrument_id"]): position for position in source_positions}
+        diffs = []
+        if source_cash != snapshot["cash_minor"]:
+            diffs.append(
+                {
+                    "instrument_id": None,
+                    "field": "cash_minor",
+                    "canonical": snapshot["cash_minor"],
+                    "source": source_cash,
+                }
+            )
+        for instrument_id in sorted(set(local_by_id) | set(source_by_id)):
+            local = local_by_id.get(instrument_id)
+            source = source_by_id.get(instrument_id)
+            if local is None or source is None:
+                diffs.append(
+                    {
+                        "instrument_id": instrument_id,
+                        "field": "position",
+                        "canonical": local,
+                        "source": source,
+                    }
+                )
+                continue
+            for field in ("quantity_micros", "total_cost_basis_minor"):
+                if int(local[field]) != int(source[field]):
+                    diffs.append(
+                        {
+                            "instrument_id": instrument_id,
+                            "field": field,
+                            "canonical": local[field],
+                            "source": int(source[field]),
+                        }
+                    )
+        source_as_of = payload["source_as_of"]
+        if isinstance(source_as_of, str):
+            source_as_of = datetime.fromisoformat(source_as_of)
+        attempt_id = str(uuid4())
+        source = {
+            "cash_minor": source_cash,
+            "total_value_minor": source_value,
+            "positions": source_positions,
+        }
+        digest = sha256(json_dumps(snapshot).encode()).hexdigest()
+        self._reconciliation_attempts[attempt_id] = {
+            "account_id": account_id,
+            "account_class": ACCOUNT_CLASS_INVESTMENT,
+            "investment": True,
+            "cutoff": cutoff,
+            "source": source,
+            "source_adapter": payload.get("source_adapter", "manual"),
+            "source_as_of": source_as_of,
+            "baseline": snapshot,
+            "baseline_digest": digest,
+            "evidence_id": str(uuid4()),
+        }
+        return {
+            "reconciliation_id": attempt_id,
+            "account_id": account_id,
+            "state": "READY",
+            "source_as_of": source_as_of,
+            "source": source,
+            "canonical": snapshot,
+            "diffs": diffs,
+            "certification_allowed": not diffs,
+            "price_only_changes": [
+                {
+                    "instrument_id": instrument_id,
+                    "canonical_price_minor": local_by_id[instrument_id]["price_minor"],
+                    "source_price_minor": int(source_by_id[instrument_id]["source_price_minor"]),
+                }
+                for instrument_id in sorted(set(local_by_id) & set(source_by_id))
+                if local_by_id[instrument_id]["price_minor"]
+                != int(source_by_id[instrument_id]["source_price_minor"])
+            ],
+        }
+
     def apply_reconciliation(
         self, reconciliation_id: str, payload: dict[str, Any]
     ) -> dict[str, Any]:
@@ -4627,6 +4787,58 @@ class DojoService:
                     connection=connection,
                 )
                 return result | {"state": "SUCCESSFUL", "deltas": proof["deltas"]}
+            if attempt.get("investment"):
+                investment_snapshot = self._investment_reconciliation_snapshot(account_id, cutoff)
+                current_digest = sha256(json_dumps(investment_snapshot).encode()).hexdigest()
+                if current_digest != attempt["baseline_digest"]:
+                    raise ValueError("Reconciliation attempt is stale; create a new attempt")
+                source = attempt["source"]
+                source_by_id = {str(item["instrument_id"]): item for item in source["positions"]}
+                current_by_id = {
+                    item["instrument_id"]: item for item in investment_snapshot["positions"]
+                }
+                matches = source["cash_minor"] == investment_snapshot["cash_minor"] and set(
+                    source_by_id
+                ) == set(current_by_id)
+                matches = matches and all(
+                    int(source_by_id[instrument_id]["quantity_micros"])
+                    == current_by_id[instrument_id]["quantity_micros"]
+                    and int(source_by_id[instrument_id]["total_cost_basis_minor"])
+                    == current_by_id[instrument_id]["total_cost_basis_minor"]
+                    for instrument_id in source_by_id
+                )
+                if not matches:
+                    raise ValueError(
+                        "Investment reconciliation requires matching cash, positions, quantity, and basis"
+                    )
+                evidence = NormalizedEvidence(
+                    entity_id=account_id,
+                    entity_class=ACCOUNT_CLASS_INVESTMENT,
+                    evidence_kind=str(
+                        attempt["source_kind"]
+                        if "source_kind" in attempt
+                        else "INVESTMENT_STATEMENT"
+                    ),
+                    source_adapter=str(attempt["source_adapter"]),
+                    source_as_of=attempt["source_as_of"],
+                    evidence_id=str(attempt["evidence_id"]),
+                    normalized_payload={
+                        "source": source,
+                        "canonical_baseline": investment_snapshot,
+                        "source_total_value_minor": source["total_value_minor"],
+                        "cutoff": str(cutoff),
+                    },
+                )
+                result = self.reconciliation_repository.create_commit(
+                    entity_id=account_id,
+                    entity_class=ACCOUNT_CLASS_INVESTMENT,
+                    evidence=evidence,
+                    committed_at=now,
+                    baseline_digest=attempt["baseline_digest"],
+                    reconciliation_id=reconciliation_id,
+                    connection=connection,
+                )
+                return result | {"state": "SUCCESSFUL", "diffs": []}
             local_records = self._reconciliation_local_records(account_id, date.min, cutoff)
             current_digest = baseline_digest(
                 local_records,
