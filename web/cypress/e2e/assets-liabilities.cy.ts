@@ -388,11 +388,13 @@ describe("Linked loan payment activity", () => {
       .should("equal", 200);
     cy.wait("@reconcileLoan").its("response.statusCode").should("equal", 200);
 
-    cy.get('[data-cy="loan-summary-section"]')
-      .should("contain", "$198,000.00")
-      .and("contain", "$2,000.00")
-      .and("contain", "$3,000.00");
+    cy.get('[data-cy="loan-summary-section"]').should("contain", "$198,000.00");
     cy.get('[data-cy="loan-escrow-section"]').should("contain", "$4,000.00");
+    cy.get('[data-cy="reconciliation-history-row"]')
+      .should("contain", "Principal $198,000.00")
+      .and("contain", "Source as of")
+      .and("contain", "Committed");
+    cy.get('[data-cy="loan-payment-row"]').should("have.length", 1);
     cy.get('[data-cy="loan-estimate-section"]').should(
       "contain",
       "Estimated amortization",

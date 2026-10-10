@@ -1353,7 +1353,7 @@ describe("AccountDetailPage — tracking account", () => {
     cy.get('input[name="value-date"]').clear().type("2026-06-02");
     cy.get('input[name="value-amount"]').type("123.45");
     cy.get('input[name="value-notes"]').type("Statement correction");
-    cy.get("[data-cy=form-modal-root]").contains("Reconcile").click();
+    cy.get("[data-cy=form-modal-root]").contains("button", "Reconcile").click();
 
     cy.window().should((win) => {
       const calls = (
@@ -1385,7 +1385,7 @@ describe("AccountDetailPage — tracking account", () => {
     cy.get("[data-cy=account-detail-add-snapshot]").click();
     cy.get('input[name="value-date"]').clear().type("2026-06-02");
     cy.get('input[name="value-amount"]').type("98432.21");
-    cy.get("[data-cy=form-modal-root]").contains("Reconcile").click();
+    cy.get("[data-cy=form-modal-root]").contains("button", "Reconcile").click();
     cy.window().should((win) => {
       const calls = (
         win.fetch as unknown as {
@@ -1630,7 +1630,7 @@ describe("AccountDetailPage — tangible asset", () => {
     cy.get("[data-cy=account-detail-add-snapshot]").click();
     cy.get('input[name="value-date"]').clear().type("2026-06-02");
     cy.get('input[name="value-amount"]').type("430000");
-    cy.get("[data-cy=form-modal-root]").contains("Reconcile").click();
+    cy.get("[data-cy=form-modal-root]").contains("button", "Reconcile").click();
 
     cy.window().should((win) => {
       const calls = (
@@ -1657,7 +1657,7 @@ describe("AccountDetailPage — tangible asset", () => {
     cy.get("[data-cy=account-detail-add-snapshot]").click();
     cy.get('input[name="value-date"]').clear().type("2026-06-02");
     cy.get('input[name="value-amount"]').type("425000");
-    cy.get("[data-cy=form-modal-root]").contains("Reconcile").click();
+    cy.get("[data-cy=form-modal-root]").contains("button", "Reconcile").click();
     cy.window().should((win) => {
       const calls = (
         win.fetch as unknown as {
@@ -2079,7 +2079,7 @@ describe("AccountDetailPage — loan", () => {
       "loan-ytd-principal",
       "loan-ytd-interest",
     ].forEach((name) => cy.get(`input[name="${name}"]`).clear());
-    cy.get("[data-cy=form-modal-root]").contains("Reconcile").click();
+    cy.get("[data-cy=form-modal-root]").contains("button", "Reconcile").click();
 
     cy.window().should((win) => {
       const calls = (
@@ -2127,7 +2127,7 @@ describe("AccountDetailPage — loan", () => {
     cy.get('input[name="loan-unapplied"]').clear();
     cy.get('input[name="loan-ytd-principal"]').clear();
     cy.get('input[name="loan-ytd-interest"]').clear();
-    cy.get("[data-cy=form-modal-root]").contains("Reconcile").click();
+    cy.get("[data-cy=form-modal-root]").contains("button", "Reconcile").click();
 
     cy.window().should((win) => {
       const calls = (
@@ -2176,7 +2176,7 @@ describe("AccountDetailPage — loan", () => {
       return undefined;
     });
     cy.get("[data-cy=account-detail-reconcile-loan]").click();
-    cy.get("[data-cy=form-modal-root]").contains("Reconcile").click();
+    cy.get("[data-cy=form-modal-root]").contains("button", "Reconcile").click();
     cy.get("[data-cy=loan-correct-canonical-snapshot]").click();
 
     cy.window().should((win) => {
