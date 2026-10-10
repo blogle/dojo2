@@ -32,5 +32,10 @@ console.log(
 console.log(
   `  API requests: ${run.tests.reduce((sum, test) => sum + test.requestCount, 0)}`,
 );
+for (const test of run.tests) {
+  for (const request of test.failedRequests ?? []) {
+    console.log(`  API ${request.statusCode}: ${request.url} (${test.title})`);
+  }
+}
 console.log(`  suite duration: ${run.totalDurationMs}ms`);
 console.log(`  artifacts: ${runDir}`);

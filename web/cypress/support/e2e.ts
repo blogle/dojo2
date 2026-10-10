@@ -81,6 +81,7 @@ afterEach(function () {
     failedRequestCount: apiRequests.filter(
       (request) => request.statusCode >= 400,
     ).length,
+    failedRequests: apiRequests.filter((request) => request.statusCode >= 400),
     reset: Cypress.env("resetMetrics"),
   });
 });
