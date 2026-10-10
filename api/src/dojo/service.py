@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from hashlib import sha256
 from time import perf_counter
 from typing import Any, cast
@@ -5541,6 +5541,126 @@ class DojoService:
                     values | {"valid_from": now, "valid_to": MAX_TS},
                 )
         return {"valuation_id": valuation_id}
+
+    def reconcile_valuation(self, account_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        account = self._require_account(account_id)
+        entity_class = str(account["account_class"])
+        if entity_class not in {ACCOUNT_CLASS_TRACKING, ACCOUNT_CLASS_TANGIBLE_ASSET}:
+            raise ValueError(
+                "Valuation reconciliation requires a tracking or tangible asset account"
+            )
+        effective_date = self._non_future_date(payload["effective_date"])
+        amount_minor = abs(int(payload["amount_minor"]))
+        source = str(payload.get("source", "manual"))
+        notes = str(payload.get("notes", ""))
+        now = self.clock.now()
+        table = (
+            "net_worth_valuations"
+            if entity_class == ACCOUNT_CLASS_TRACKING
+            else "tangible_asset_valuations"
+        )
+        query = (
+            "queries/current_tracking_valuation_by_account_date"
+            if entity_class == ACCOUNT_CLASS_TRACKING
+            else "queries/current_tangible_valuation_by_account_date"
+        )
+        request = {"account_id": account_id, **payload}
+
+        def commit_valuation(
+            connection: duckdb.DuckDBPyConnection, _fingerprint: str
+        ) -> dict[str, Any]:
+            existing = connection.execute(load_sql(query), (account_id, effective_date)).fetchone()
+            columns = [column[0] for column in connection.description]
+            current = dict(zip(columns, existing, strict=True)) if existing is not None else None
+            if current is None or int(current["amount_minor"]) != amount_minor:
+                valuation_id = str(current["valuation_id"]) if current else str(uuid4())
+                values = {
+                    "valuation_id": valuation_id,
+                    "account_id": account_id,
+                    "effective_date": effective_date,
+                    "amount_minor": amount_minor,
+                    "created_at": current["created_at"] if current else now,
+                    "created_by_user_id": current.get("created_by_user_id") if current else None,
+                }
+                if entity_class == ACCOUNT_CLASS_TRACKING:
+                    values.update(
+                        raw_name=str(account["name"]),
+                        notes=notes,
+                        metadata=json_dumps({"source": source}),
+                    )
+                else:
+                    values.update(source=source, notes=notes)
+                if current is None:
+                    insert_version(
+                        connection,
+                        table,
+                        values | {"valid_from": now, "valid_to": MAX_TS},
+                    )
+
+                else:
+                    replace_current_version(
+                        connection,
+                        table,
+                        "valuation_id",
+                        valuation_id,
+                        {"row_id": str(uuid4())} | values,
+                        now=now,
+                    )
+            else:
+                valuation_id = str(current["valuation_id"])
+
+            source_as_of = datetime.combine(
+                effective_date, datetime.min.time(), tzinfo=timezone.utc
+            )
+            evidence_payload = {
+                "value_minor": amount_minor,
+                "effective_date": effective_date.isoformat(),
+                "source": source,
+                "notes": notes,
+            }
+            evidence = NormalizedEvidence(
+                entity_id=account_id,
+                entity_class=entity_class,
+                evidence_kind="VALUATION_SNAPSHOT",
+                source_adapter=source,
+                source_as_of=source_as_of,
+                normalized_payload=evidence_payload,
+            )
+            baseline_row = connection.execute(
+                f"SELECT row_id, valuation_id, effective_date, amount_minor, valid_from "
+                f"FROM {table} WHERE account_id = ? AND effective_date = ? AND valid_to = ?",
+                (account_id, effective_date, MAX_TS),
+            ).fetchone()
+            if baseline_row is None:
+                raise ValueError("Canonical valuation was not persisted")
+            baseline = {
+                "account_id": account_id,
+                "entity_class": entity_class,
+                "row_id": str(baseline_row[0]),
+                "valuation_id": str(baseline_row[1]),
+                "effective_date": baseline_row[2].isoformat(),
+                "amount_minor": int(baseline_row[3]),
+                "valid_from": baseline_row[4].isoformat(),
+            }
+            digest = sha256(json_dumps(baseline).encode()).hexdigest()
+            committed = self.reconciliation_repository.create_commit(
+                entity_id=account_id,
+                entity_class=entity_class,
+                evidence=evidence,
+                committed_at=now,
+                baseline_digest=digest,
+                connection=connection,
+            )
+            return committed | {"state": "SUCCESSFUL", "valuation_id": valuation_id}
+
+        return execute_financial_command(
+            self.db,
+            client_operation_id=str(payload["client_operation_id"]),
+            command_kind="VALUATION_RECONCILIATION",
+            request=request,
+            command=commit_valuation,
+            now=now,
+        )
 
     def list_tangible_asset_valuations(self, account_id: str) -> list[dict[str, Any]]:
         return self.db.fetch_all(
