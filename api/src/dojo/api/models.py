@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -593,6 +593,16 @@ class ReconciliationSourceRecordPayload(BaseModel):
     raw_payload: dict[str, object] | None = None
 
 
+class InvestmentReconciliationPositionPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    instrument_id: UUID
+    quantity_micros: StrictInt = Field(ge=0)
+    total_cost_basis_minor: StrictInt = Field(ge=0)
+    source_price_minor: StrictInt = Field(ge=0)
+    source_value_minor: StrictInt = Field(ge=0)
+
+
 class ReconciliationDraftPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -603,6 +613,10 @@ class ReconciliationDraftPayload(BaseModel):
     source_pending_minor: StrictInt | None = None
     source_actual_minor: StrictInt | None = None
     source_ending_value_minor: int | None = None
+    source_cash_minor: StrictInt | None = None
+    source_total_value_minor: StrictInt | None = None
+    source_as_of: datetime | None = None
+    source_positions: list[InvestmentReconciliationPositionPayload] = Field(default_factory=list)
     source_records: list[ReconciliationSourceRecordPayload] = Field(default_factory=list)
 
     @model_validator(mode="after")
@@ -615,6 +629,17 @@ class ReconciliationDraftPayload(BaseModel):
                 self.source_actual_minor,
             )
         )
+        if self.source_kind == "INVESTMENT_STATEMENT":
+            if (self.source_cash_minor is None) != (self.source_total_value_minor is None):
+                raise ValueError("Investment reconciliation requires cash and total account value")
+            if self.source_cash_minor is not None and self.source_total_value_minor is not None:
+                if supplied or self.source_ending_value_minor is not None:
+                    raise ValueError("Investment evidence cannot be combined with legacy balances")
+                if self.source_as_of is None:
+                    raise ValueError("Investment evidence requires source_as_of")
+                if self.source_as_of.tzinfo is None or self.source_as_of.utcoffset() is None:
+                    raise ValueError("Investment source_as_of must include a timezone")
+                return self
         if supplied != 2 and not (supplied == 0 and self.source_ending_value_minor is not None):
             raise ValueError(
                 "Provide exactly two source balances (or a legacy ending value for investment reconciliation)"
