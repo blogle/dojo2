@@ -6,6 +6,8 @@ declare global {
   namespace Cypress {
     interface Chainable {
       resetScenario(scenario: string): Chainable<void>;
+      /** Mark a domain rejection that this test explicitly asserts by status. */
+      expectApiStatus(statusCode: number, urlIncludes: string): Chainable<void>;
       /** No-op in normal E2E; brief wait during recording for presentation pacing. */
       presentationPause(): Chainable<void>;
       /** No-op in normal E2E; records checkpoint metadata + screenshot during recording. */
@@ -52,9 +54,12 @@ Cypress.Commands.add("presentationCheckpoint", (label: string) => {
 });
 
 let apiRequests: Array<{ url: string; statusCode: number }> = [];
+let expectedApiStatuses: Array<{ statusCode: number; urlIncludes: string }> =
+  [];
 
 beforeEach(() => {
   apiRequests = [];
+  expectedApiStatuses = [];
   cy.clock(new Date("2026-02-15T12:00:00Z").getTime(), ["Date"]);
   const apiBaseUrl = String(Cypress.env("apiBaseUrl")).replace(/\/$/, "");
   cy.intercept(`${apiBaseUrl}/api/**`, (request) => {
@@ -64,6 +69,13 @@ beforeEach(() => {
   });
 });
 
+Cypress.Commands.add(
+  "expectApiStatus",
+  (statusCode: number, urlIncludes: string) => {
+    expectedApiStatuses.push({ statusCode, urlIncludes });
+  },
+);
+
 Cypress.on("window:before:load", (window) => {
   const style = window.document.createElement("style");
   style.textContent =
@@ -72,16 +84,30 @@ Cypress.on("window:before:load", (window) => {
 });
 
 afterEach(function () {
+  const unexpectedFailures = apiRequests.filter((request) => {
+    if (request.statusCode < 400) return false;
+    const expectedIndex = expectedApiStatuses.findIndex(
+      (expected) =>
+        expected.statusCode === request.statusCode &&
+        request.url.includes(expected.urlIncludes),
+    );
+    if (expectedIndex === -1) return true;
+    expectedApiStatuses.splice(expectedIndex, 1);
+    return false;
+  });
+  expect(
+    expectedApiStatuses,
+    "expected API response statuses observed",
+  ).to.deep.equal([]);
+
   cy.task("recordE2eTest", {
     spec: Cypress.spec.relative,
     title: this.currentTest?.title,
     state: this.currentTest?.state,
     durationMs: this.currentTest?.duration,
     requestCount: apiRequests.length,
-    failedRequestCount: apiRequests.filter(
-      (request) => request.statusCode >= 400,
-    ).length,
-    failedRequests: apiRequests.filter((request) => request.statusCode >= 400),
+    failedRequestCount: unexpectedFailures.length,
+    failedRequests: unexpectedFailures,
     reset: Cypress.env("resetMetrics"),
   });
 });

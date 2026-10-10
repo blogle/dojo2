@@ -76,6 +76,7 @@ describe("Aspire authorization regression", () => {
     cy.contains("label", "Google Sheet ID")
       .find("input")
       .type(syntheticSheetId);
+    cy.expectApiStatus(403, "/api/import/google-sheet/analyze");
     cy.contains("button", "Submit").click();
     cy.contains("h1", "Migrate from Aspire").should("be.visible");
     cy.contains(
@@ -377,6 +378,7 @@ describe("Linked loan payment activity", () => {
     cy.get('input[name="loan-principal"]').clear().type("198000");
     cy.get('input[name="loan-escrow"]').should("have.value", "4000");
     cy.intercept("POST", "**/loan-reconciliations").as("reconcileLoan");
+    cy.expectApiStatus(409, "/loan-reconciliations");
     cy.get('[data-cy="form-modal-root"]')
       .contains("button", "Reconcile")
       .click();
