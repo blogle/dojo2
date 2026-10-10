@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -357,7 +357,21 @@ class LoanBalanceSnapshotPayload(BaseModel):
     effective_date: date
     principal_balance_minor: int = Field(ge=0)
     accrued_interest_minor: int | None = Field(default=None, ge=0)
-    escrow_balance_minor: int = Field(default=0, ge=0)
+    escrow_balance_minor: int | None = Field(default=None, ge=0)
+    unapplied_credit_minor: int | None = Field(default=None, ge=0)
+    ytd_principal_paid_minor: int | None = Field(default=None, ge=0)
+    ytd_interest_paid_minor: int | None = Field(default=None, ge=0)
+    notes: str = ""
+
+
+class LoanReconciliationPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_as_of: datetime
+    source_adapter: str = "manual"
+    principal_balance_minor: int = Field(ge=0)
+    accrued_interest_minor: int | None = Field(default=None, ge=0)
+    escrow_balance_minor: int | None = Field(default=None, ge=0)
     unapplied_credit_minor: int | None = Field(default=None, ge=0)
     ytd_principal_paid_minor: int | None = Field(default=None, ge=0)
     ytd_interest_paid_minor: int | None = Field(default=None, ge=0)

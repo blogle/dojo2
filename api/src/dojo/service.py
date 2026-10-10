@@ -5386,7 +5386,11 @@ class DojoService:
                 if payload.get("accrued_interest_minor") is not None
                 else None
             ),
-            "escrow_balance_minor": abs(payload.get("escrow_balance_minor", 0)),
+            "escrow_balance_minor": (
+                abs(payload["escrow_balance_minor"])
+                if payload.get("escrow_balance_minor") is not None
+                else None
+            ),
             "unapplied_credit_minor": (
                 abs(payload["unapplied_credit_minor"])
                 if payload.get("unapplied_credit_minor") is not None
@@ -5426,6 +5430,63 @@ class DojoService:
                     values | {"valid_from": now, "valid_to": MAX_TS},
                 )
         return {"snapshot_id": snapshot_id}
+
+    def reconcile_loan(self, account_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Commit lender evidence against the exact current canonical loan snapshot."""
+        self._require_account_class(account_id, ACCOUNT_CLASS_LOAN)
+        account = self._require_account(account_id)
+        source_as_of = payload["source_as_of"]
+        if isinstance(source_as_of, str):
+            source_as_of = datetime.fromisoformat(source_as_of)
+        if source_as_of.tzinfo is None:
+            raise ValueError("source_as_of must be timezone-aware")
+        effective_date = source_as_of.date()
+        current = self.db.fetch_one(
+            load_sql("queries/current_loan_balance_by_account_date"),
+            (account_id, effective_date),
+        )
+        if current is None:
+            raise ValueError("Create the canonical loan snapshot before reconciling it")
+        compared_fields = (
+            "principal_balance_minor",
+            "accrued_interest_minor",
+            "escrow_balance_minor",
+            "unapplied_credit_minor",
+            "ytd_principal_paid_minor",
+            "ytd_interest_paid_minor",
+        )
+        mismatches = {
+            field: {"lender": payload[field], "dojo": current[field]}
+            for field in compared_fields
+            if field in payload and payload[field] != current[field]
+        }
+        if mismatches:
+            raise ValueError({"code": "loan_snapshot_mismatch", "fields": mismatches})
+        now = self.clock.now()
+        evidence_payload = {field: payload[field] for field in compared_fields if field in payload}
+        baseline = {
+            "snapshot_id": str(current["snapshot_id"]),
+            "effective_date": str(current["effective_date"]),
+            **{field: current[field] for field in compared_fields},
+        }
+        baseline_digest = sha256(json_dumps(baseline).encode()).hexdigest()
+        with self.db.transaction() as connection:
+            return self.reconciliation_repository.create_commit(
+                entity_id=account_id,
+                entity_class=str(account["account_class"]),
+                evidence={
+                    "evidence_kind": "LOAN_SNAPSHOT",
+                    "source_adapter": payload.get("source_adapter", "manual"),
+                    "source_as_of": source_as_of,
+                    "normalized_payload": {
+                        "source_facts": evidence_payload,
+                        "canonical_baseline": baseline,
+                    },
+                },
+                committed_at=now,
+                baseline_digest=baseline_digest,
+                connection=connection,
+            ) | {"baseline": baseline, "comparison": {"mismatches": {}}}
 
     def list_loan_snapshots(self, account_id: str) -> list[dict[str, Any]]:
         return self.db.fetch_all(
