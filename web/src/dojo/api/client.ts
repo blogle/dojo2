@@ -520,24 +520,6 @@ export async function fetchTrackingSnapshots(
   return response.items;
 }
 
-export async function createTrackingSnapshot(
-  accountId: string,
-  payload: {
-    effective_date: string;
-    amount_minor: number;
-    source?: string;
-    notes?: string;
-  },
-): Promise<{ valuation_id: string }> {
-  return request<{ valuation_id: string }>(
-    `/api/accounts/${accountId}/tracking-snapshots`,
-    {
-      method: "POST",
-      body: JSON.stringify(payload),
-    },
-  );
-}
-
 export type TrackingCutoverSuccessor =
   | {
       account_class: "INVESTMENT";
@@ -611,22 +593,31 @@ export async function fetchTangibleValuations(
   return response.items;
 }
 
-export async function createTangibleValuation(
-  accountId: string,
-  payload: {
-    effective_date: string;
-    amount_minor: number;
-    source?: string;
-    notes?: string;
-  },
-): Promise<{ valuation_id: string }> {
-  return request<{ valuation_id: string }>(
-    `/api/accounts/${accountId}/tangible-valuations`,
-    {
-      method: "POST",
-      body: JSON.stringify(payload),
-    },
+export type InvestmentInstrument = {
+  instrument_id: string;
+  symbol: string | null;
+  name: string;
+  is_cash_equivalent: boolean;
+};
+
+export async function fetchInvestmentInstruments(): Promise<
+  InvestmentInstrument[]
+> {
+  const response = await request<{ items: InvestmentInstrument[] }>(
+    "/api/investment-instruments",
   );
+  return response.items;
+}
+
+export async function createInvestmentInstrument(payload: {
+  symbol: string;
+  name?: string;
+  is_cash_equivalent?: boolean;
+}): Promise<InvestmentInstrument> {
+  return request("/api/investment-instruments", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
 export type InvestmentStatementHolding = {
@@ -657,26 +648,6 @@ export async function fetchLatestInvestmentStatement(
   return request<InvestmentStatement>(
     `/api/accounts/${accountId}/investment-statements/latest`,
   );
-}
-
-export async function reconcileInvestmentStatement(
-  accountId: string,
-  payload: {
-    effective_date: string;
-    cash_balance_minor: number;
-    holdings: Array<{
-      ticker: string;
-      quantity_micros: number;
-      price_minor: number;
-      average_basis_minor: number;
-    }>;
-    notes?: string;
-  },
-): Promise<{ effective_date: string }> {
-  return request(`/api/accounts/${accountId}/investment-statements`, {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
 }
 
 export type ReconciliationSourceRecord = {
@@ -796,6 +767,7 @@ export type AccountReconciliationHistory = {
     evidence_id: string;
     committed_at: string;
     entity_class: string;
+    undone: boolean;
   }>;
   history: Array<{
     history_id: string;
@@ -820,7 +792,68 @@ export type ReconciliationCommit = {
 export async function fetchAccountReconciliationHistory(
   accountId: string,
 ): Promise<AccountReconciliationHistory> {
-  return request(`/api/accounts/${accountId}/reconciliations`);
+  const response = await request<Partial<AccountReconciliationHistory>>(
+    `/api/accounts/${accountId}/reconciliations`,
+  );
+  return { items: response.items ?? [], history: response.history ?? [] };
+}
+
+export async function createInvestmentReconciliationAttempt(
+  accountId: string,
+  payload: {
+    source_kind: "INVESTMENT_STATEMENT";
+    cutoff: string;
+    source_as_of: string;
+    source_cash_minor: number;
+    source_total_value_minor: number;
+    source_positions: Array<{
+      instrument_id: string;
+      quantity_micros: number;
+      total_cost_basis_minor: number;
+      source_price_minor: number;
+      source_value_minor: number;
+    }>;
+  },
+): Promise<Record<string, unknown>> {
+  return request(`/api/accounts/${accountId}/reconciliations/draft`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function reconcileLoanAccount(
+  accountId: string,
+  payload: {
+    source_as_of: string;
+    source_adapter: string;
+    principal_balance_minor: number;
+    accrued_interest_minor?: number;
+    escrow_balance_minor?: number;
+    unapplied_credit_minor?: number;
+    ytd_principal_paid_minor?: number;
+    ytd_interest_paid_minor?: number;
+  },
+): Promise<Record<string, unknown>> {
+  return request(`/api/accounts/${accountId}/loan-reconciliations`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function reconcileAccountValuation(
+  accountId: string,
+  payload: {
+    effective_date: string;
+    amount_minor: number;
+    source: string;
+    notes: string;
+    client_operation_id: string;
+  },
+): Promise<Record<string, unknown>> {
+  return request(`/api/accounts/${accountId}/valuation-reconciliations`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
 export async function fetchReconciliationCommit(
@@ -961,13 +994,13 @@ export async function fetchLoanProjection(
   return request<LoanProjection>(`/api/accounts/${accountId}/loan-projection`);
 }
 
-export async function reconcileLoanStatement(
+export async function createLoanSnapshot(
   accountId: string,
   payload: {
     effective_date: string;
     principal_balance_minor: number;
     accrued_interest_minor?: number;
-    escrow_balance_minor: number;
+    escrow_balance_minor?: number;
     unapplied_credit_minor?: number;
     ytd_principal_paid_minor?: number;
     ytd_interest_paid_minor?: number;
