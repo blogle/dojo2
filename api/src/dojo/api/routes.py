@@ -48,6 +48,7 @@ from dojo.api.models import (
     TransactionRestorePayload,
     TransactionUpdatePayload,
     TransferPayload,
+    ValuationReconciliationPayload,
 )
 from dojo.api.settings import Settings
 from dojo.backup_credentials import (
@@ -914,6 +915,13 @@ def list_reconciliations(request: Request, account_id: str) -> dict[str, Any]:
         "items": service.list_reconciliations(account_id),
         "history": service.reconciliation_history(account_id),
     }
+
+
+@router.post("/accounts/{account_id}/valuation-reconciliations")
+def reconcile_valuation(
+    request: Request, account_id: str, payload: ValuationReconciliationPayload
+) -> dict[str, Any]:
+    return get_service(request).reconcile_valuation(account_id, payload.model_dump())
 
 
 @router.post("/accounts/{account_id}/reconciliations/undo")

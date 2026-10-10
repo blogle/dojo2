@@ -393,6 +393,14 @@ class TangibleAssetValuationPayload(BaseModel):
     notes: str = ""
 
 
+class ValuationReconciliationPayload(BaseModel):
+    effective_date: date
+    amount_minor: int = Field(ge=0)
+    source: str = "manual"
+    notes: str = ""
+    client_operation_id: UUID
+
+
 class InvestmentInstrumentPayload(BaseModel):
     symbol: str | None = None
     name: str | None = None

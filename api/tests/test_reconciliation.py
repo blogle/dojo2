@@ -1074,6 +1074,172 @@ def test_investment_reconciliation_rejects_quantity_change_without_basis_and_rep
             draft["reconciliation_id"], {"client_operation_id": str(uuid4())}
         )
     assert service.list_investment_positions(account_id)[0]["quantity_micros"] == 2_000_000
+@pytest.mark.parametrize("entity_class", ["TRACKING", "TANGIBLE_ASSET"])
+def test_valuation_reconciliation_same_value_writes_evidence_without_new_version(
+    service, entity_class: str
+) -> None:
+    account_id = service.create_account({"name": "Valued", "account_class": entity_class})[
+        "account_id"
+    ]
+    payload = {
+        "effective_date": date(2026, 2, 1),
+        "amount_minor": 25_000,
+        "source": "appraisal",
+        "notes": "February estimate",
+        "client_operation_id": str(uuid4()),
+    }
+    first = service.reconcile_valuation(account_id, payload)
+    valuation_rows = service.db.fetch_all(
+        "SELECT * FROM "
+        + ("net_worth_valuations" if entity_class == "TRACKING" else "tangible_asset_valuations")
+        + " WHERE account_id = ?",
+        (account_id,),
+    )
+    second = service.reconcile_valuation(
+        account_id, payload | {"client_operation_id": str(uuid4())}
+    )
+
+    assert second["reconciliation_id"] != first["reconciliation_id"]
+    assert (
+        service.db.fetch_all(
+            "SELECT * FROM "
+            + (
+                "net_worth_valuations"
+                if entity_class == "TRACKING"
+                else "tangible_asset_valuations"
+            )
+            + " WHERE account_id = ?",
+            (account_id,),
+        )
+        == valuation_rows
+    )
+    assert second["evidence"]["normalized_payload"] == {
+        "value_minor": 25_000,
+        "effective_date": "2026-02-01",
+        "source": "appraisal",
+        "notes": "February estimate",
+    }
+    assert second["source_as_of"] == "2026-02-01T00:00:00+00:00"
+
+
+@pytest.mark.parametrize("entity_class", ["TRACKING", "TANGIBLE_ASSET"])
+def test_valuation_reconciliation_commit_failure_rolls_back_version(
+    service, monkeypatch, entity_class
+):
+    account_id = service.create_account({"name": "Valued", "account_class": entity_class})[
+        "account_id"
+    ]
+    table = "net_worth_valuations" if entity_class == "TRACKING" else "tangible_asset_valuations"
+
+    def fail_commit(**_kwargs):
+        raise RuntimeError("injected commit failure")
+
+    monkeypatch.setattr(service.reconciliation_repository, "create_commit", fail_commit)
+    with pytest.raises(RuntimeError, match="injected"):
+        service.reconcile_valuation(
+            account_id,
+            {
+                "effective_date": date(2026, 2, 1),
+                "amount_minor": 10_000,
+                "source": "manual",
+                "notes": "Source note",
+                "client_operation_id": str(uuid4()),
+            },
+        )
+
+    assert service.db.fetch_one(
+        f"SELECT COUNT(*) AS count FROM {table} WHERE account_id = ?", (account_id,)
+    ) == {"count": 0}
+    assert service.reconciliation_repository.list_commits(account_id) == []
+
+
+@pytest.mark.parametrize("entity_class", ["TRACKING", "TANGIBLE_ASSET"])
+def test_valuation_undo_preserves_value_and_commit_history_is_immutable(service, entity_class):
+    account_id = service.create_account({"name": "Valued", "account_class": entity_class})[
+        "account_id"
+    ]
+    table = "net_worth_valuations" if entity_class == "TRACKING" else "tangible_asset_valuations"
+    first = service.reconcile_valuation(
+        account_id,
+        {
+            "effective_date": date(2026, 2, 1),
+            "amount_minor": 10_000,
+            "source": "manual",
+            "notes": "Initial",
+            "client_operation_id": str(uuid4()),
+        },
+    )
+    first_commit = service.reconciliation_repository.read_commit(first["reconciliation_id"])
+    other_account_id = service.create_account({"name": "Other", "account_class": entity_class})[
+        "account_id"
+    ]
+    service.clock.advance(minutes=1)
+    second = service.reconcile_valuation(
+        account_id,
+        {
+            "effective_date": date(2026, 2, 1),
+            "amount_minor": 12_000,
+            "source": "appraisal",
+            "notes": "Updated",
+            "client_operation_id": str(uuid4()),
+        },
+    )
+    commit_before_undo = service.reconciliation_repository.read_commit(second["reconciliation_id"])
+    values_before_undo = service.db.fetch_all(
+        f"SELECT effective_date, amount_minor, valid_from, valid_to FROM {table} "
+        "WHERE account_id = ? ORDER BY effective_date, valid_from",
+        (account_id,),
+    )
+
+    service.undo_last_reconciliation(
+        account_id,
+        {
+            "client_operation_id": str(uuid4()),
+            "expected_reconciliation_id": second["reconciliation_id"],
+        },
+    )
+
+    assert (
+        service.db.fetch_all(
+            f"SELECT effective_date, amount_minor, valid_from, valid_to FROM {table} "
+            "WHERE account_id = ? ORDER BY effective_date, valid_from",
+            (account_id,),
+        )
+        == values_before_undo
+    )
+    assert (
+        service.reconciliation_repository.read_commit(second["reconciliation_id"])
+        == commit_before_undo
+    )
+    assert sorted(
+        row["event_type"] for row in service.reconciliation_repository.list_history(account_id)
+    ) == ["COMMITTED", "COMMITTED", "VOID"]
+    assert (
+        service.reconciliation_repository.read_commit(first["reconciliation_id"])["entity_id"]
+        == account_id
+    )
+    assert service.reconciliation_repository.read_commit(first["reconciliation_id"]) == first_commit
+    assert service.reconciliation_repository.list_commits(other_account_id) == []
+    assert service.db.fetch_one(
+        f"SELECT COUNT(*) AS count FROM {table} WHERE account_id = ?", (other_account_id,)
+    ) == {"count": 0}
+
+
+@pytest.mark.parametrize("entity_class", ["TRACKING", "TANGIBLE_ASSET"])
+def test_valuation_reconciliation_is_entity_scoped(service, entity_class):
+    account_id = service.create_account({"name": "Valued", "account_class": entity_class})[
+        "account_id"
+    ]
+    with pytest.raises(ValueError, match="requires a tracking or tangible asset"):
+        service.reconcile_valuation(
+            _budget_account(service),
+            {
+                "effective_date": date(2026, 2, 1),
+                "amount_minor": 10,
+                "client_operation_id": str(uuid4()),
+            },
+        )
+    assert service.reconciliation_repository.list_commits(account_id) == []
 
 
 def _budget_account(service, name: str = "Checking") -> str:
