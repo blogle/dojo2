@@ -793,7 +793,11 @@ describe("AccountDetailPage", () => {
         localSourceDate.getFullYear(),
         String(localSourceDate.getMonth() + 1).padStart(2, "0"),
         String(localSourceDate.getDate()).padStart(2, "0"),
-      ]).to.deep.equal(selectedDate.split("-"));
+      ]).to.deep.equal([
+        Number(selectedDate.slice(0, 4)),
+        selectedDate.slice(5, 7),
+        selectedDate.slice(8, 10),
+      ]);
     });
     cy.get("[data-cy=form-modal-root]")
       .contains("button", "Reconcile account")
