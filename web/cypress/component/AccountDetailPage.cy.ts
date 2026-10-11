@@ -8,6 +8,7 @@ import AssetsLiabilitiesPage from "../../src/dojo/pages/AssetsLiabilitiesPage.vu
 import MutationFeedbackHost from "../../src/dojo/layouts/MutationFeedbackHost.vue";
 import { createDojoQueryClient } from "../../src/dojo/queryClient";
 import { useMutationFeedback } from "../../src/dojo/state/mutationFeedback";
+import { localCalendarDate } from "../../src/dojo/utils/date";
 
 const budgetAccount = {
   account_id: "acct-checking-1234",
@@ -89,6 +90,8 @@ function stubFetch(
     requestUrl?: string,
   ) => Response | undefined,
 ) {
+  let reconciliationCommitted = false;
+  let reconciliationVoided = false;
   cy.stub(window, "fetch").callsFake((url: string, init?: RequestInit) => {
     const path = new URL(url, "http://localhost").pathname;
     const overridden = override?.(path, init, url);
@@ -132,6 +135,70 @@ function stubFetch(
         new Response(JSON.stringify({ items: [], groups: [] }), {
           status: 200,
           headers: { "Content-Type": "application/json" },
+        }),
+      );
+    }
+
+    if (path === `/api/accounts/${budgetAccount.account_id}/reconciliations`) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            items: reconciliationCommitted
+              ? [
+                  {
+                    reconciliation_id: "attempt-1",
+                    evidence_id: "evidence-1",
+                    committed_at: "2026-06-30T12:00:00Z",
+                    entity_class: "BUDGET",
+                    undone: reconciliationVoided,
+                  },
+                ]
+              : [],
+            history: reconciliationCommitted
+              ? [
+                  {
+                    history_id: "history-commit",
+                    event_type: "COMMITTED",
+                    reconciliation_id: "attempt-1",
+                    recorded_at: "2026-06-30T12:00:00Z",
+                  },
+                  ...(reconciliationVoided
+                    ? [
+                        {
+                          history_id: "history-void",
+                          event_type: "VOID",
+                          reconciliation_id: "attempt-1",
+                          recorded_at: "2026-06-30T12:01:00Z",
+                        },
+                      ]
+                    : []),
+                ]
+              : [],
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+      );
+    }
+
+    if (path === "/api/reconciliations/attempt-1") {
+      return Promise.resolve(
+        jsonResponse({
+          reconciliation_id: "attempt-1",
+          committed_at: "2026-06-30T12:00:00Z",
+          source_as_of: "2026-06-29T00:00:00Z",
+          evidence: {
+            evidence_kind: "BANK_STATEMENT",
+            source_adapter: "manual",
+            normalized_payload: {
+              cleared_minor: 671675,
+              pending_minor: 12543,
+              actual_minor: 684218,
+            },
+            records: [],
+          },
         }),
       );
     }
@@ -183,6 +250,7 @@ function stubFetch(
     }
 
     if (path === `/api/reconciliations/attempt-1/apply`) {
+      reconciliationCommitted = true;
       return Promise.resolve(
         new Response(JSON.stringify({ state: "SUCCESSFUL" }), {
           status: 200,
@@ -196,6 +264,7 @@ function stubFetch(
         `/api/accounts/${budgetAccount.account_id}/reconciliations/undo` &&
       init?.method === "POST"
     ) {
+      reconciliationVoided = true;
       return Promise.resolve(
         new Response(
           JSON.stringify({
@@ -472,6 +541,18 @@ describe("AccountDetailPage", () => {
     cy.get("[data-cy=transaction-ledger]").should("be.visible");
     cy.get("[data-cy=account-details-section]").should("not.exist");
     cy.get("[data-cy=reconciliation-section]").should("not.exist");
+    cy.get("[data-cy=reconciliation-history-section]").should("be.visible");
+    cy.contains("Reconcile statement").should("not.exist");
+    cy.contains("Apply statement").should("not.exist");
+    cy.contains("View reconciliation").should("not.exist");
+    cy.get("[data-cy=reconciliation-history-section]").should(
+      "contain.text",
+      "Never reconciled",
+    );
+    cy.get("[data-cy=account-detail-reconcile-loan]").should("not.exist");
+    cy.get("[data-cy=account-detail-reconcile-investment]").should("not.exist");
+    cy.contains("View reconciliation").should("not.exist");
+    cy.contains("Apply statement").should("not.exist");
     cy.get("[data-cy=transaction-entry-form]").should("be.visible");
     cy.get("[data-cy=history-section]").should("not.exist");
     cy.get("[data-cy=configuration-section]").should("not.exist");
@@ -480,6 +561,125 @@ describe("AccountDetailPage", () => {
       "Summary & notes",
     );
     cy.get("[data-cy=balance-trend-chart]").should("be.visible");
+  });
+
+  it("shows immutable evidence history and confirms latest-only undo", () => {
+    mountPage(
+      (path) => {
+        if (
+          path === `/api/accounts/${budgetAccount.account_id}/reconciliations`
+        ) {
+          return jsonResponse({
+            items: [
+              {
+                reconciliation_id: "committed-1",
+                evidence_id: "evidence-1",
+                committed_at: "2026-06-05T12:00:00Z",
+                entity_class: "BUDGET",
+              },
+            ],
+            history: [
+              {
+                history_id: "history-1",
+                event_type: "COMMITTED",
+                reconciliation_id: "committed-1",
+                recorded_at: "2026-06-05T12:00:00Z",
+              },
+            ],
+          });
+        }
+        if (path === "/api/reconciliations/committed-1") {
+          return jsonResponse({
+            reconciliation_id: "committed-1",
+            committed_at: "2026-06-05T12:00:00Z",
+            source_as_of: "2026-06-04T00:00:00Z",
+            evidence: {
+              evidence_kind: "BANK_STATEMENT",
+              source_adapter: "manual",
+              normalized_payload: {
+                cleared_minor: 671675,
+                pending_minor: 12543,
+                actual_minor: 684218,
+              },
+              records: [],
+            },
+          });
+        }
+        return undefined;
+      },
+      {},
+      true,
+    );
+
+    cy.get("[data-cy=reconciliation-history-row]")
+      .should("contain.text", "Cleared $6,716.75")
+      .and("contain.text", "Source as of")
+      .and("contain.text", "Committed");
+    cy.get("[data-cy=undo-last-reconciliation]").click();
+    cy.get("[data-cy=form-modal-root]")
+      .should("contain.text", "does not revert")
+      .contains("button", "Undo last reconciliation")
+      .click();
+    cy.get("[data-cy=mutation-feedback]").should(
+      "contain.text",
+      "Reconciliation undone",
+    );
+  });
+
+  it("composes current attention and historical-edit warning with history", () => {
+    mountPage((path) => {
+      if (
+        path === `/api/accounts/${budgetAccount.account_id}/reconciliations`
+      ) {
+        return jsonResponse({
+          items: [
+            {
+              reconciliation_id: "committed-1",
+              evidence_id: "evidence-1",
+              committed_at: "2026-06-05T12:00:00Z",
+              entity_class: "BUDGET",
+              undone: false,
+            },
+          ],
+          history: [],
+        });
+      }
+      if (path === "/api/reconciliations/committed-1") {
+        return jsonResponse({
+          reconciliation_id: "committed-1",
+          committed_at: "2026-06-05T12:00:00Z",
+          source_as_of: "2026-06-04T00:00:00Z",
+          evidence: {
+            evidence_kind: "BANK_STATEMENT",
+            source_adapter: "manual",
+            normalized_payload: { cleared_minor: 671_675 },
+            records: [],
+          },
+        });
+      }
+      if (
+        path ===
+        `/api/accounts/${budgetAccount.account_id}/reconciliation-working-set`
+      ) {
+        return jsonResponse({
+          items: [],
+          attention: {
+            changes_since: 3,
+            carried_pending: 1,
+            reconciled_history_changed: 2,
+          },
+        });
+      }
+      return undefined;
+    });
+
+    cy.get("[data-cy=reconciliation-attention]")
+      .should("contain.text", "3 changes since last reconciliation")
+      .and("contain.text", "1 carried pending");
+    cy.get("[data-cy=reconciled-history-warning]").should(
+      "contain.text",
+      "Historical transaction records changed after reconciliation",
+    );
   });
 
   it("keeps a legacy missing-category transaction unchanged until categorized", () => {
@@ -555,6 +755,59 @@ describe("AccountDetailPage", () => {
     );
   });
 
+  it("sends today's budget source date as a timezone-aware local timestamp", () => {
+    mountPage();
+    mount(MutationFeedbackHost);
+    const selectedDate = localCalendarDate();
+
+    cy.get("[data-cy=account-detail-reconcile]").click();
+    cy.get('input[name="reconciliation-cutoff"]').clear().type(selectedDate);
+    cy.get('input[name="source-cleared"]').type("6716.75");
+    cy.get('input[name="source-pending"]').type("125.43");
+    cy.get("[data-cy=form-modal-root]")
+      .contains("button", "Compare balances")
+      .click();
+    cy.get("[data-cy=budget-reconciliation-proof]").should("be.visible");
+
+    cy.window().should((win) => {
+      const calls = (
+        win.fetch as unknown as {
+          getCalls: () => Array<{ args: [string, RequestInit?] }>;
+        }
+      ).getCalls();
+      const draftCall = calls
+        .filter((call) => {
+          const url = new URL(call.args[0], "http://localhost");
+          return (
+            url.pathname ===
+            `/api/accounts/${budgetAccount.account_id}/reconciliations/draft`
+          );
+        })
+        .at(-1);
+      expect(draftCall).not.to.eq(undefined);
+      const payload = JSON.parse(draftCall?.args[1]?.body as string);
+      expect(payload.cutoff).to.equal(selectedDate);
+      expect(payload.source_as_of).to.match(/T12:00:00[+-]\d{2}:\d{2}$/);
+      const localSourceDate = new Date(payload.source_as_of);
+      expect([
+        localSourceDate.getFullYear(),
+        String(localSourceDate.getMonth() + 1).padStart(2, "0"),
+        String(localSourceDate.getDate()).padStart(2, "0"),
+      ]).to.deep.equal([
+        Number(selectedDate.slice(0, 4)),
+        selectedDate.slice(5, 7),
+        selectedDate.slice(8, 10),
+      ]);
+    });
+    cy.get("[data-cy=form-modal-root]")
+      .contains("button", "Reconcile account")
+      .click();
+    cy.get('[data-cy="mutation-feedback"]').should(
+      "contain.text",
+      "Account reconciled",
+    );
+  });
+
   it("derives the third source balance and commits an instant match", () => {
     const feedback = useMutationFeedback();
     while (feedback.notice.value) feedback.dismiss();
@@ -600,14 +853,20 @@ describe("AccountDetailPage", () => {
       ).map((modal) => modal.innerText.trim());
       expect(remainingModals).to.deep.equal([]);
     });
-    cy.get('[data-cy="mutation-feedback"]')
-      .should("contain.text", "Account reconciled")
-      .and("contain.text", "Undo");
-    cy.get(".mutation-feedback__undo").click();
+    cy.get("[data-cy=undo-last-reconciliation]").click();
+    cy.get("[data-cy=form-modal-root]")
+      .should("contain.text", "does not revert")
+      .contains("button", "Undo last reconciliation")
+      .click();
     cy.get('[data-cy="mutation-feedback"]').should(
       "contain.text",
       "Reconciliation undone",
     );
+    cy.get("[data-cy=reconciliation-history-row]").should(
+      "contain.text",
+      "Undone",
+    );
+    cy.get("[data-cy=undo-last-reconciliation]").should("not.exist");
     cy.window().then((win) => {
       const calls = (
         win.fetch as unknown as {
@@ -1079,7 +1338,10 @@ describe("AccountDetailPage — tracking account", () => {
       "contain.text",
       "Tracking account",
     );
-    cy.get("[data-cy=account-detail-add-snapshot]").should("be.visible");
+    cy.get("[data-cy=account-detail-add-snapshot]").should(
+      "contain.text",
+      "Reconcile",
+    );
     cy.get("[data-cy=account-detail-create-richer]").should("be.visible");
     cy.get("[data-cy=metric-strip-root]").should(
       "contain.text",
@@ -1133,17 +1395,21 @@ describe("AccountDetailPage — tracking account", () => {
     mountTrackingPage();
 
     cy.get("[data-cy=account-detail-add-snapshot]").click();
-    cy.get("[data-cy=form-modal-root]").should("contain.text", "Add snapshot");
+    cy.get("[data-cy=form-modal-root]").should(
+      "contain.text",
+      "Reconcile valuation",
+    );
     cy.get('input[name="value-date"]').should(
       "have.attr",
       "max",
       new Date().toISOString().slice(0, 10),
     );
+    cy.get('input[name="value-date"]').clear().type("2026-06-02");
     cy.get('input[name="value-amount"]').type("123.45");
     cy.get('input[name="value-notes"]').type("Statement correction");
-    cy.get("[data-cy=form-modal-root]").contains("Save").click();
+    cy.get("[data-cy=form-modal-root]").contains("button", "Reconcile").click();
 
-    cy.window().then((win) => {
+    cy.window().should((win) => {
       const calls = (
         win.fetch as unknown as {
           getCalls: () => Array<{ args: [string, RequestInit?] }>;
@@ -1153,7 +1419,7 @@ describe("AccountDetailPage — tracking account", () => {
         const requestUrl = new URL(call.args[0], "http://localhost");
         return (
           requestUrl.pathname ===
-            `/api/accounts/${trackingAccount.account_id}/tracking-snapshots` &&
+            `/api/accounts/${trackingAccount.account_id}/valuation-reconciliations` &&
           call.args[1]?.method === "POST"
         );
       });
@@ -1163,6 +1429,31 @@ describe("AccountDetailPage — tracking account", () => {
         amount_minor: 12345,
         source: "manual",
         notes: "Statement correction",
+      });
+      expect(body.client_operation_id).to.be.a("string");
+    });
+  });
+
+  it("records evidence for an unchanged tracking value", () => {
+    mountTrackingPage();
+    cy.get("[data-cy=account-detail-add-snapshot]").click();
+    cy.get('input[name="value-date"]').clear().type("2026-06-02");
+    cy.get('input[name="value-amount"]').type("98432.21");
+    cy.get("[data-cy=form-modal-root]").contains("button", "Reconcile").click();
+    cy.window().should((win) => {
+      const calls = (
+        win.fetch as unknown as {
+          getCalls: () => Array<{ args: [string, RequestInit?] }>;
+        }
+      ).getCalls();
+      const valuation = calls.find((call) =>
+        new URL(call.args[0], "http://localhost").pathname.endsWith(
+          "/valuation-reconciliations",
+        ),
+      );
+      expect(JSON.parse(valuation?.args[1]?.body as string)).to.include({
+        effective_date: "2026-06-02",
+        amount_minor: 9_843_221,
       });
     });
   });
@@ -1388,13 +1679,14 @@ describe("AccountDetailPage — tangible asset", () => {
     cy.get("[data-cy=transactions-section]").should("not.exist");
     cy.get("[data-cy=account-detail-add-snapshot]").should(
       "contain.text",
-      "Add valuation",
+      "Reconcile",
     );
     cy.get("[data-cy=account-detail-add-snapshot]").click();
+    cy.get('input[name="value-date"]').clear().type("2026-06-02");
     cy.get('input[name="value-amount"]').type("430000");
-    cy.get("[data-cy=form-modal-root]").contains("Save").click();
+    cy.get("[data-cy=form-modal-root]").contains("button", "Reconcile").click();
 
-    cy.window().then((win) => {
+    cy.window().should((win) => {
       const calls = (
         win.fetch as unknown as {
           getCalls: () => Array<{ args: [string, RequestInit?] }>;
@@ -1404,13 +1696,241 @@ describe("AccountDetailPage — tangible asset", () => {
         const requestUrl = new URL(call.args[0], "http://localhost");
         return (
           requestUrl.pathname ===
-            `/api/accounts/${tangibleAccount.account_id}/tangible-valuations` &&
+            `/api/accounts/${tangibleAccount.account_id}/valuation-reconciliations` &&
           call.args[1]?.method === "POST"
         );
       });
       const body = JSON.parse(valuationCall?.args[1]?.body as string);
       expect(body).to.include({ amount_minor: 43000000, source: "manual" });
+      expect(body.client_operation_id).to.be.a("string");
     });
+  });
+
+  it("records evidence for an unchanged tangible valuation", () => {
+    mountTangiblePage();
+    cy.get("[data-cy=account-detail-add-snapshot]").click();
+    cy.get('input[name="value-date"]').clear().type("2026-06-02");
+    cy.get('input[name="value-amount"]').type("425000");
+    cy.get("[data-cy=form-modal-root]").contains("button", "Reconcile").click();
+    cy.window().should((win) => {
+      const calls = (
+        win.fetch as unknown as {
+          getCalls: () => Array<{ args: [string, RequestInit?] }>;
+        }
+      ).getCalls();
+      const valuation = calls.find((call) =>
+        new URL(call.args[0], "http://localhost").pathname.endsWith(
+          "/valuation-reconciliations",
+        ),
+      );
+      expect(JSON.parse(valuation?.args[1]?.body as string)).to.include({
+        effective_date: "2026-06-02",
+        amount_minor: 42_500_000,
+      });
+    });
+  });
+});
+
+const investmentAccount = {
+  account_id: "acct-investment-0001",
+  name: "Index Brokerage",
+  account_class: "INVESTMENT",
+  is_hidden: false,
+  is_active: true,
+  institution: "Fidelity",
+  account_number_last4: "5678",
+  actual_balance_minor: 0,
+  pending_balance_minor: 0,
+  cleared_balance_minor: 0,
+  display_balance_minor: 10_000,
+  current_value_minor: 10_000,
+  value_effective_date: "2026-06-02",
+  net_worth_contribution_minor: 10_000,
+  investment_self_managed: true,
+  investment_tax_treatment: "TAXABLE",
+};
+
+function mountInvestmentPage(
+  draftResponse: Record<string, unknown> = {
+    reconciliation_id: "investment-attempt-1",
+    certification_allowed: true,
+    diffs: [],
+    price_only_changes: [
+      {
+        instrument_id: "instrument-fund",
+        canonical_price_minor: 8_900,
+        source_price_minor: 9_000,
+      },
+    ],
+  },
+) {
+  cy.stub(window, "fetch").callsFake((url: string, init?: RequestInit) => {
+    const path = new URL(url, "http://localhost").pathname;
+    let body: unknown = { items: [] };
+    if (path === "/api/accounts") {
+      body = { items: [investmentAccount] };
+    } else if (path === "/api/categories") {
+      body = { groups: [], items: [] };
+    } else if (path.endsWith("/investment-statements/latest")) {
+      body = {
+        effective_date: "2026-06-02",
+        cash_balance_minor: 1_000,
+        holdings: [
+          {
+            position_id: "position-fund",
+            ticker: "FND",
+            quantity_micros: 1_000_000,
+            average_basis_minor: 8_000,
+            price_minor: 9_000,
+            value_minor: 9_000,
+            cost_basis_minor: 8_000,
+            unrealized_gain_minor: 1_000,
+          },
+        ],
+        holdings_value_minor: 9_000,
+        holdings_cost_basis_minor: 8_000,
+        unrealized_gain_minor: 1_000,
+        current_value_minor: 10_000,
+        provisional_transfer_minor: 0,
+      };
+    } else if (path === "/api/investment-instruments") {
+      body = {
+        items: [
+          {
+            instrument_id: "instrument-fund",
+            symbol: "FND",
+            name: "Fund",
+            is_cash_equivalent: false,
+          },
+        ],
+      };
+    } else if (
+      path ===
+        `/api/accounts/${investmentAccount.account_id}/reconciliations/draft` &&
+      init?.method === "POST"
+    ) {
+      body = draftResponse;
+    } else if (path === "/api/reconciliations/investment-attempt-1/apply") {
+      body = { state: "SUCCESSFUL", reconciliation_id: "investment-commit-1" };
+    } else if (path.endsWith("/transactions/summary")) {
+      body = {
+        inflow_minor: 0,
+        outflow_minor: 0,
+        net_flow_minor: 0,
+        transaction_count: 0,
+        average_daily_balance_minor: 10_000,
+      };
+    } else if (path.endsWith("/balance-trend")) {
+      body = { points: [] };
+    } else if (path === "/api/transactions") {
+      body = {
+        items: [],
+        total: 0,
+        offset: 0,
+        limit: 100,
+        has_more: false,
+        status_counts: { PENDING: 0, CLEARED: 0 },
+      };
+    }
+    return Promise.resolve(jsonResponse(body));
+  });
+
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      { path: "/assets-liabilities", component: AssetsLiabilitiesPage },
+      { path: "/assets-liabilities/:id", component: AccountDetailPage },
+    ],
+  });
+  router.push(`/assets-liabilities/${investmentAccount.account_id}`);
+  cy.wrap(router.isReady());
+  const queryClient = createDojoQueryClient();
+  mount(AccountDetailPage, {
+    global: { plugins: [router, [VueQueryPlugin, { queryClient }]] },
+  });
+}
+
+describe("AccountDetailPage — investment account", () => {
+  it("compares coherent reported source value and reconciles price-only movement", () => {
+    mountInvestmentPage();
+    cy.contains("Reconcile statement").should("not.exist");
+    cy.contains("Apply statement").should("not.exist");
+    cy.contains("View reconciliation").should("not.exist");
+    cy.get("[data-cy=account-detail-reconcile-investment]").click();
+    cy.get('input[name="investment-statement-total"]').should(
+      "have.value",
+      "100",
+    );
+    cy.get('input[name="holding-value-0"]').should("have.value", "90");
+    cy.get("[data-cy=form-modal-root]").contains("Compare statement").click();
+    cy.get("[data-cy=investment-reconciliation-proof]")
+      .should("contain.text", "Balances match")
+      .and("contain.text", "1 price-only change");
+    cy.get("[data-cy=form-modal-root]").contains("Reconcile account").click();
+
+    cy.window().then((win) => {
+      const calls = (
+        win.fetch as unknown as {
+          getCalls: () => Array<{ args: [string, RequestInit?] }>;
+        }
+      ).getCalls();
+      const draft = calls.find(
+        (call) =>
+          new URL(call.args[0], "http://localhost").pathname ===
+            `/api/accounts/${investmentAccount.account_id}/reconciliations/draft` &&
+          call.args[1]?.method === "POST",
+      );
+      const body = JSON.parse(draft?.args[1]?.body as string);
+      expect(body).to.include({
+        source_kind: "INVESTMENT_STATEMENT",
+        source_cash_minor: 1_000,
+        source_total_value_minor: 10_000,
+      });
+      expect(body.source_as_of).to.match(/T12:00:00[+-]\d{2}:\d{2}$/);
+      const investmentSourceDate = new Date(body.source_as_of);
+      expect([
+        investmentSourceDate.getFullYear(),
+        String(investmentSourceDate.getMonth() + 1).padStart(2, "0"),
+        String(investmentSourceDate.getDate()).padStart(2, "0"),
+      ]).to.deep.equal([2026, "06", "02"]);
+      expect(body.source_positions[0]).to.include({
+        instrument_id: "instrument-fund",
+        quantity_micros: 1_000_000,
+        total_cost_basis_minor: 8_000,
+        source_price_minor: 9_000,
+        source_value_minor: 9_000,
+      });
+      expect(
+        calls.some(
+          (call) =>
+            new URL(call.args[0], "http://localhost").pathname ===
+            "/api/reconciliations/investment-attempt-1/apply",
+        ),
+      ).to.equal(true);
+    });
+  });
+
+  it("routes structural differences to normal holdings investigation without applying", () => {
+    mountInvestmentPage({
+      reconciliation_id: "investment-attempt-1",
+      certification_allowed: false,
+      diffs: [
+        { field: "quantity_micros", source: 900_000, canonical: 1_000_000 },
+      ],
+      price_only_changes: [],
+    });
+    cy.get("[data-cy=account-detail-reconcile-investment]").click();
+    cy.get("[data-cy=form-modal-root]").contains("Compare statement").click();
+    cy.get("[data-cy=investment-reconciliation-proof]").should(
+      "contain.text",
+      "Differences found",
+    );
+    cy.get("[data-cy=form-modal-root]").contains("Review holdings").click();
+    cy.get("[data-cy=holdings-summary-section]").should("be.visible");
+    cy.get("[data-cy=account-detail-page]").should(
+      "contain.text",
+      "No holdings were changed",
+    );
   });
 });
 
@@ -1439,9 +1959,13 @@ const loanAccount = {
   loan_remaining_term_months: 120,
 };
 
-function mountLoanPage() {
+function mountLoanPage(
+  override?: (path: string, init?: RequestInit) => Response | undefined,
+) {
   cy.stub(window, "fetch").callsFake((url: string, init?: RequestInit) => {
     const path = new URL(url, "http://localhost").pathname;
+    const overridden = override?.(path, init);
+    if (overridden) return Promise.resolve(overridden);
     let body: unknown = { items: [] };
     if (path === "/api/accounts") {
       body = {
@@ -1569,6 +2093,10 @@ function mountLoanPage() {
 describe("AccountDetailPage — loan", () => {
   it("separates actual, restricted, estimated, and payment configuration", () => {
     mountLoanPage();
+    cy.contains("Reconcile statement").should("not.exist");
+    cy.contains("Apply statement").should("not.exist");
+    cy.contains("View reconciliation").should("not.exist");
+    cy.get("[data-cy=reconciliation-history-section]").should("be.visible");
 
     cy.get("[data-cy=loan-summary-section]").should(
       "contain.text",
@@ -1598,5 +2126,153 @@ describe("AccountDetailPage — loan", () => {
     cy.contains("button", "Show optional fields").click();
     cy.get('input[name="loan-interest"]').should("exist");
     cy.get('input[name="loan-ytd-interest"]').should("exist");
+  });
+
+  it("keeps blank lender facts unknown and records principal-only evidence", () => {
+    mountLoanPage();
+    cy.get("[data-cy=account-detail-reconcile-loan]").click();
+    cy.get('input[name="loan-escrow"]').clear();
+    cy.contains("button", "Show optional fields").click();
+    [
+      "loan-interest",
+      "loan-unapplied",
+      "loan-ytd-principal",
+      "loan-ytd-interest",
+    ].forEach((name) => cy.get(`input[name="${name}"]`).clear());
+    cy.get("[data-cy=form-modal-root]").contains("button", "Reconcile").click();
+
+    cy.window().should((win) => {
+      const calls = (
+        win.fetch as unknown as {
+          getCalls: () => Array<{ args: [string, RequestInit?] }>;
+        }
+      ).getCalls();
+      const request = calls.find((call) =>
+        new URL(call.args[0], "http://localhost").pathname.endsWith(
+          "/loan-reconciliations",
+        ),
+      );
+      expect(request).not.to.eq(undefined);
+      const body = JSON.parse(request?.args[1]?.body as string);
+      expect(body).to.include({
+        principal_balance_minor: 19_800_000,
+      });
+      expect(body.source_as_of).to.match(/T12:00:00[+-]\d{2}:\d{2}$/);
+      const loanSourceDate = new Date(body.source_as_of);
+      expect([
+        loanSourceDate.getFullYear(),
+        String(loanSourceDate.getMonth() + 1).padStart(2, "0"),
+        String(loanSourceDate.getDate()).padStart(2, "0"),
+      ]).to.deep.equal([2026, "06", "01"]);
+      for (const optional of [
+        "accrued_interest_minor",
+        "escrow_balance_minor",
+        "unapplied_credit_minor",
+        "ytd_principal_paid_minor",
+        "ytd_interest_paid_minor",
+      ]) {
+        expect(body).not.to.have.property(optional);
+      }
+      expect(
+        calls.some(
+          (call) =>
+            new URL(call.args[0], "http://localhost").pathname.endsWith(
+              "/loan-payments",
+            ) && call.args[1]?.method === "POST",
+        ),
+      ).to.equal(false);
+    });
+  });
+
+  it("preserves an explicitly asserted optional zero", () => {
+    mountLoanPage();
+    cy.get("[data-cy=account-detail-reconcile-loan]").click();
+    cy.get('input[name="loan-escrow"]').clear();
+    cy.contains("button", "Show optional fields").click();
+    cy.get('input[name="loan-interest"]').clear().type("0");
+    cy.get('input[name="loan-unapplied"]').clear();
+    cy.get('input[name="loan-ytd-principal"]').clear();
+    cy.get('input[name="loan-ytd-interest"]').clear();
+    cy.get("[data-cy=form-modal-root]").contains("button", "Reconcile").click();
+
+    cy.window().should((win) => {
+      const calls = (
+        win.fetch as unknown as {
+          getCalls: () => Array<{ args: [string, RequestInit?] }>;
+        }
+      ).getCalls();
+      const request = calls.find((call) =>
+        new URL(call.args[0], "http://localhost").pathname.endsWith(
+          "/loan-reconciliations",
+        ),
+      );
+      const body = JSON.parse(request?.args[1]?.body as string);
+      expect(body).to.have.property("accrued_interest_minor", 0);
+      expect(body).not.to.have.property("escrow_balance_minor");
+      expect(body).not.to.have.property("unapplied_credit_minor");
+    });
+  });
+
+  it("corrects only supplied canonical facts before retrying reconciliation", () => {
+    let reconciliationRequests = 0;
+    mountLoanPage((path, init) => {
+      if (
+        path.endsWith("/loan-reconciliations") &&
+        init?.method === "POST" &&
+        reconciliationRequests++ === 0
+      ) {
+        return jsonResponse(
+          {
+            detail: {
+              code: "loan_snapshot_mismatch",
+              fields: {
+                principal_balance_minor: {
+                  lender: 19_800_000,
+                  dojo: 19_900_000,
+                },
+              },
+            },
+          },
+          409,
+        );
+      }
+      if (path.endsWith("/loan-reconciliations")) {
+        return jsonResponse({ reconciliation_id: "loan-reconciliation-1" });
+      }
+      return undefined;
+    });
+    cy.get("[data-cy=account-detail-reconcile-loan]").click();
+    cy.get("[data-cy=form-modal-root]").contains("button", "Reconcile").click();
+    cy.get("[data-cy=loan-correct-canonical-snapshot]").click();
+
+    cy.window().should((win) => {
+      const calls = (
+        win.fetch as unknown as {
+          getCalls: () => Array<{ args: [string, RequestInit?] }>;
+        }
+      ).getCalls();
+      const correction = calls.find(
+        (call) =>
+          new URL(call.args[0], "http://localhost").pathname.endsWith(
+            "/loan-snapshots",
+          ) && call.args[1]?.method === "POST",
+      );
+      const body = JSON.parse(correction?.args[1]?.body as string);
+      expect(body).to.include({
+        effective_date: "2026-06-01",
+        principal_balance_minor: 19_800_000,
+        accrued_interest_minor: 100_000,
+        escrow_balance_minor: 1_200_000,
+      });
+      expect(reconciliationRequests).to.equal(2);
+      expect(
+        calls.some(
+          (call) =>
+            new URL(call.args[0], "http://localhost").pathname.endsWith(
+              "/loan-payments",
+            ) && call.args[1]?.method === "POST",
+        ),
+      ).to.equal(false);
+    });
   });
 });

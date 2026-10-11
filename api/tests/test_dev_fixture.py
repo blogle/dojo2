@@ -132,6 +132,37 @@ def test_development_fixture_is_deterministic_and_financially_coherent(tmp_path)
                 "LOAN",
                 "TANGIBLE_ASSET",
             }
+            investment_id = next(
+                str(account["account_id"])
+                for account in service.list_accounts(show_hidden=True)
+                if account["name"] == "Pinecone Brokerage"
+            )
+            investment_statement = service.latest_investment_statement(investment_id)
+            assert {position["symbol"] for position in investment_statement["holdings"]} == {
+                "CASH",
+                "IDX",
+            }
+            assert all(
+                position["total_cost_basis_minor"] > 0
+                for position in investment_statement["holdings"]
+            )
+            reconciled_fixture_accounts = (
+                "Maple Checking",
+                "Pinecone Brokerage",
+                "Cedar Auto Loan",
+                "Harbor Education Fund",
+                "Juniper Home",
+            )
+            fixture_accounts_by_name = {
+                account["name"]: account for account in service.list_accounts(show_hidden=True)
+            }
+            for name in reconciled_fixture_accounts:
+                account_id = str(fixture_accounts_by_name[name]["account_id"])
+                commits = service.list_reconciliations(account_id)
+                history = service.reconciliation_history(account_id)
+                assert len(commits) == 1 and commits[0]["undone"] is False
+                assert len(history) == 1 and history[0]["event_type"] == "COMMITTED"
+                assert service.reconciliation_working_set(account_id)["undo"]["available"] is True
             current_categories = {
                 row["name"]: row
                 for row in service.list_categories(month="2026-10", show_hidden=True)

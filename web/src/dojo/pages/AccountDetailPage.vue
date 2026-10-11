@@ -13,16 +13,16 @@ import {
   deleteTransaction,
   createTransaction,
   createTransfer,
-  createTangibleValuation,
   createTrackingCutover,
-  createTrackingSnapshot,
+  createInvestmentInstrument,
   createInvestmentTransfer,
   createCreditCardPayment,
   applyReconciliation,
   createBudgetReconciliationAttempt,
-  createReconciliationDraft,
+  createLoanSnapshot,
   createLoanPayment,
   fetchAccountBudgetLinks,
+  fetchAccountReconciliationHistory,
   fetchAccounts,
   fetchAccountBalanceTrend,
   fetchAccountTransactionSummary,
@@ -32,11 +32,14 @@ import {
   fetchLoanProjection,
   fetchLoanSnapshots,
   fetchReconciliationWorkingSet,
+  fetchReconciliationCommit,
   fetchTrackingSnapshots,
   fetchTangibleValuations,
   fetchTransactionsPage,
-  reconcileInvestmentStatement,
-  reconcileLoanStatement,
+  createInvestmentReconciliationAttempt,
+  fetchInvestmentInstruments,
+  reconcileAccountValuation,
+  reconcileLoanAccount,
   restoreTransaction,
   setAccountBudgetLink,
   type TransactionFilters,
@@ -67,6 +70,10 @@ import TransactionLedger from "@/dojo/components/transactions/TransactionLedger.
 import TransactionEntryForm from "@/dojo/components/transactions/TransactionEntryForm.vue";
 import type { Transaction, TransactionPayload } from "@/dojo/types";
 import { formatCurrency } from "@/dojo/utils/currency";
+import {
+  localCalendarDate,
+  localCalendarDateAsTimestamp,
+} from "@/dojo/utils/date";
 import { institutionSuggestions } from "@/dojo/utils/institutions";
 import {
   mutationErrorMessage,
@@ -98,7 +105,7 @@ const suggestedInstitutions = computed(() =>
   institutionSuggestions(accounts.value?.map((item) => item.institution) ?? []),
 );
 
-const currentDate = new Date().toISOString().slice(0, 10);
+const currentDate = localCalendarDate();
 const currentMonth = computed(() => currentDate.slice(0, 7));
 const categoryFilter = ref("all");
 const dateFilter = ref("all");
@@ -122,19 +129,29 @@ const configurationRemainingTermMonths = ref("");
 const configurationExtraPrincipal = ref("");
 const actionMessage = ref("");
 const showValueModal = ref(false);
-const valueDate = ref(new Date().toISOString().slice(0, 10));
+const valueDate = ref(localCalendarDate());
 const valueAmount = ref("");
 const valueNotes = ref("");
 const showInvestmentStatementModal = ref(false);
-const investmentStatementDate = ref(new Date().toISOString().slice(0, 10));
+const investmentStatementDate = ref(localCalendarDate());
+const investmentSourceAsOf = ref(localCalendarDate());
 const investmentStatementCash = ref("");
-const investmentStatementNotes = ref("");
+const investmentStatementTotal = ref("");
+const investmentReconciliationAttempt = ref<{
+  reconciliation_id: string;
+  certification_allowed: boolean;
+  diffs: Array<Record<string, unknown>>;
+  price_only_changes: Array<Record<string, unknown>>;
+} | null>(null);
+const investmentReconciliationError = ref("");
+const investmentReconciliationOperationId = ref(crypto.randomUUID());
 const investmentHoldingRows = ref<
   Array<{
     ticker: string;
     quantity: string;
     price: string;
     averageBasis: string;
+    value: string;
   }>
 >([]);
 const showInvestmentTransferModal = ref(false);
@@ -172,7 +189,7 @@ const loanPaymentBudgetAccountId = ref("");
 const loanPaymentAmount = ref("");
 const loanPaymentMemo = ref("Loan payment");
 const showLoanStatementModal = ref(false);
-const loanStatementDate = ref(new Date().toISOString().slice(0, 10));
+const loanStatementDate = ref(localCalendarDate());
 const loanPrincipal = ref("");
 const loanAccruedInterest = ref("");
 const loanEscrow = ref("");
@@ -180,14 +197,12 @@ const loanUnapplied = ref("");
 const loanYtdPrincipal = ref("");
 const loanYtdInterest = ref("");
 const showLoanAdvancedFields = ref(false);
+const loanReconciliationError = ref("");
+const loanMismatchNeedsCorrection = ref(false);
 const showReconciliationModal = ref(false);
-const reconciliationDate = ref(new Date().toISOString().slice(0, 10));
-const reconciliationEndingBalance = ref("");
-const reconciliationDraft = ref<Awaited<
-  ReturnType<typeof createReconciliationDraft>
-> | null>(null);
+const showUndoReconciliationConfirmation = ref(false);
 const reconciliationOperationId = ref(crypto.randomUUID());
-const sourceAsOfDate = ref(new Date().toISOString().slice(0, 10));
+const sourceAsOfDate = ref(localCalendarDate());
 const sourceCleared = ref("");
 const sourcePending = ref("");
 const sourceActual = ref("");
@@ -268,7 +283,48 @@ const {
 } = useQuery({
   queryKey: computed(() => ["reconciliation-working-set", accountId.value]),
   queryFn: () => fetchReconciliationWorkingSet(accountId.value),
-  enabled: computed(() => investigatingReconciliation.value),
+  enabled: computed(() => !!account.value),
+});
+
+const {
+  data: reconciliationHistory,
+  isLoading: reconciliationHistoryLoading,
+  isError: reconciliationHistoryError,
+} = useQuery({
+  queryKey: computed(() => ["account-reconciliation-history", accountId.value]),
+  queryFn: async () => {
+    const history = await fetchAccountReconciliationHistory(accountId.value);
+    const commits = await Promise.all(
+      history.items.map((item) =>
+        fetchReconciliationCommit(item.reconciliation_id),
+      ),
+    );
+    return { ...history, commits };
+  },
+  enabled: computed(() => !!account.value),
+});
+
+const latestUndoableReconciliation = computed(() => {
+  const latest = reconciliationHistory.value?.items[0];
+  if (!latest) return null;
+  const isVoided = reconciliationHistory.value?.history.some(
+    (event) =>
+      event.event_type === "VOID" &&
+      event.reconciliation_id === latest.reconciliation_id,
+  );
+  return isVoided || latest.undone ? null : latest;
+});
+const reconciliationAttention = computed(() => {
+  const response = reconciliationWorkingSet.value as
+    | {
+        attention?: {
+          changes_since?: number;
+          carried_pending?: number;
+          reconciled_history_changed?: number;
+        };
+      }
+    | undefined;
+  return response?.attention;
 });
 
 const workingSetItems = computed(
@@ -502,6 +558,12 @@ const { data: investmentStatement } = useQuery({
   queryKey: computed(() => ["investment-statement", accountId.value]),
   queryFn: () => fetchLatestInvestmentStatement(accountId.value),
   enabled: computed(() => !!accountId.value && isInvestmentAccount.value),
+});
+
+const { data: investmentInstruments } = useQuery({
+  queryKey: ["investment-instruments"],
+  queryFn: fetchInvestmentInstruments,
+  enabled: computed(() => isInvestmentAccount.value),
 });
 
 const { data: accountBudgetLinks } = useQuery({
@@ -827,38 +889,6 @@ const metricItems = computed((): MetricStripItem[] => {
         value: formatCurrency(account.value.display_balance_minor),
         auxValue: "Assets",
       },
-      {
-        key: "recon",
-        label: investigatingReconciliation.value
-          ? "Reconciliation · In progress"
-          : "Reconciliation",
-        value:
-          investigatingReconciliation.value && budgetAttempt.value
-            ? certificationAllowed.value
-              ? "Balances match"
-              : "Review differences"
-            : account.value.reconciliation_status === "CURRENT"
-              ? "Recorded"
-              : "Not reconciled",
-        auxValue:
-          investigatingReconciliation.value && budgetAttempt.value
-            ? `As of ${budgetAttempt.value.cutoff}`
-            : account.value.reconciliation_status === "CURRENT"
-              ? account.value.last_reconciliation_date
-                ? `Last reconciled ${formatDateShort(
-                    new Date(account.value.last_reconciliation_date),
-                  )}`
-                : "A reconciliation is on record"
-              : "No reconciliation recorded",
-        status: {
-          label: investigatingReconciliation.value ? "Active" : "",
-          variant: investigatingReconciliation.value
-            ? ("warning" as const)
-            : account.value.reconciliation_status === "CURRENT"
-              ? ("positive" as const)
-              : ("warning" as const),
-        },
-      },
     ];
   }
 
@@ -904,13 +934,6 @@ const metricItems = computed((): MetricStripItem[] => {
         value: formatCurrency(account.value.net_worth_contribution_minor ?? 0),
         auxValue: "Asset",
       },
-      {
-        key: "recon",
-        label: "Reconciliation freshness",
-        value: "Not reconciled",
-        auxValue: "No statement recorded",
-        status: { label: "", variant: "warning" as const },
-      },
     ];
   }
 
@@ -934,13 +957,6 @@ const metricItems = computed((): MetricStripItem[] => {
         label: "Net worth contribution",
         value: formatCurrency(account.value.net_worth_contribution_minor ?? 0),
         auxValue: "Liability",
-      },
-      {
-        key: "recon",
-        label: "Reconciliation freshness",
-        value: "Not reconciled",
-        auxValue: "No statement recorded",
-        status: { label: "", variant: "warning" as const },
       },
     ];
   }
@@ -1023,13 +1039,6 @@ const metricItems = computed((): MetricStripItem[] => {
       value: formatCurrency(account.value.net_worth_contribution_minor ?? 0),
       auxValue: isTrackingAccount.value ? "Asset" : "Assets",
     },
-    {
-      key: "recon",
-      label: "Reconciliation freshness",
-      value: "Not reconciled",
-      auxValue: "No reconciliation recorded",
-      status: { label: "", variant: "warning" as const },
-    },
   ];
 });
 
@@ -1065,12 +1074,64 @@ const accountDetails = computed((): KeyValueItem[] => {
   return items;
 });
 
-const reconciliationDetails = computed((): KeyValueItem[] => [
-  { label: "Status", value: "Not reconciled", variant: "warning" },
-  { label: "Last reconciled", value: "—" },
-  { label: "Statement balance", value: "—" },
-  { label: "Difference", value: "—" },
-]);
+const reconciliationCommitById = computed(
+  () =>
+    new Map(
+      (reconciliationHistory.value?.commits ?? []).map((commit) => [
+        commit.reconciliation_id,
+        commit,
+      ]),
+    ),
+);
+
+function reconciliationEvidenceSummary(reconciliationId: string): string {
+  const commit = reconciliationCommitById.value.get(reconciliationId);
+  const evidence = commit?.evidence;
+  if (!evidence) return "Evidence recorded";
+  const payload = evidence.normalized_payload;
+  const source = payload.source;
+  if (typeof source === "object" && source !== null) {
+    const sourceRecord = source as Record<string, unknown>;
+    const cash = sourceRecord.cash_minor;
+    const total = sourceRecord.total_value_minor;
+    const positions = sourceRecord.positions;
+    if (typeof cash === "number" && typeof total === "number") {
+      return `Cash ${formatCurrency(cash)} · ${Array.isArray(positions) ? positions.length : 0} positions · Total ${formatCurrency(total)}`;
+    }
+  }
+  const loanFacts = payload.source_facts;
+  if (typeof loanFacts === "object" && loanFacts !== null) {
+    const facts = loanFacts as Record<string, unknown>;
+    const reported = [
+      ["Principal", facts.principal_balance_minor],
+      ["Interest", facts.accrued_interest_minor],
+      ["Escrow", facts.escrow_balance_minor],
+    ].flatMap(([label, value]) =>
+      typeof value === "number" ? [`${label} ${formatCurrency(value)}`] : [],
+    );
+    if (reported.length) return reported.join(" · ");
+  }
+  if (typeof payload.value_minor === "number") {
+    const details = [`Value ${formatCurrency(payload.value_minor)}`];
+    if (typeof payload.source === "string") details.push(payload.source);
+    if (typeof payload.notes === "string" && payload.notes.trim()) {
+      details.push(payload.notes.trim());
+    }
+    return details.join(" · ");
+  }
+  const values = [
+    ["Cleared", payload.cleared_minor],
+    ["Pending", payload.pending_minor],
+    ["Actual", payload.actual_minor],
+  ].flatMap(([label, value]) =>
+    typeof value === "number" ? [`${label} ${formatCurrency(value)}`] : [],
+  );
+  return values.length ? values.join(" · ") : evidence.evidence_kind;
+}
+
+function formatReconciliationDate(value: string): string {
+  return formatDateShort(new Date(`${value.slice(0, 10)}T00:00:00`));
+}
 
 const summaryDetails = computed((): KeyValueItem[] => {
   const summary = summaryData.value;
@@ -1298,18 +1359,17 @@ const createValueMutation = useMutation({
     amount_minor: number;
     source: string;
     notes: string;
-  }) =>
-    isTrackingAccount.value
-      ? createTrackingSnapshot(accountId.value, payload)
-      : createTangibleValuation(accountId.value, payload),
+    client_operation_id: string;
+  }) => reconcileAccountValuation(accountId.value, payload),
   onSuccess: () => {
     showValueModal.value = false;
     queryClient.invalidateQueries({ queryKey: ["tracking-snapshots"] });
     queryClient.invalidateQueries({ queryKey: ["tangible-valuations"] });
+    queryClient.invalidateQueries({
+      queryKey: ["account-reconciliation-history", accountId.value],
+    });
     invalidateAccountDetailQueries();
-    notifyMutationSuccess(
-      isTrackingAccount.value ? "Snapshot recorded" : "Valuation recorded",
-    );
+    notifyMutationSuccess("Valuation reconciled");
   },
 });
 const cutoverMutation = useMutation({
@@ -1334,16 +1394,105 @@ const cutoverMutation = useMutation({
     notifyMutationSuccess("Tracking account replaced");
   },
 });
-const reconcileInvestmentMutation = useMutation({
-  mutationFn: (payload: Parameters<typeof reconcileInvestmentStatement>[1]) =>
-    reconcileInvestmentStatement(accountId.value, payload),
-  onSuccess: () => {
-    showInvestmentStatementModal.value = false;
-    queryClient.invalidateQueries({ queryKey: ["investment-statement"] });
-    invalidateAccountDetailQueries();
-    notifyMutationSuccess("Investment statement recorded");
+const investmentAttemptMutation = useMutation({
+  mutationFn: async () => {
+    const cash = parseCurrencyMinor(investmentStatementCash.value);
+    const total = parseCurrencyMinor(investmentStatementTotal.value);
+    if (cash === null || total === null) {
+      throw new Error("Enter source cash and total account value.");
+    }
+    const knownInstruments = [...(investmentInstruments.value ?? [])];
+    const positions = await Promise.all(
+      investmentHoldingRows.value.map(async (holding) => {
+        const symbol = holding.ticker.trim().toUpperCase();
+        let instrument = knownInstruments.find(
+          (candidate) => candidate.symbol?.toUpperCase() === symbol,
+        );
+        if (!instrument) {
+          instrument = await createInvestmentInstrument({
+            symbol,
+            name: symbol,
+          });
+          knownInstruments.push(instrument);
+        }
+        const quantityMicros = Math.round(Number(holding.quantity) * 1_000_000);
+        const unitBasis = parseCurrencyMinor(holding.averageBasis);
+        const price = parseCurrencyMinor(holding.price);
+        const value = parseCurrencyMinor(holding.value);
+        if (unitBasis === null || price === null || value === null) {
+          throw new Error(
+            "Enter each holding’s basis, price, and reported value.",
+          );
+        }
+        return {
+          instrument_id: instrument.instrument_id,
+          quantity_micros: quantityMicros,
+          total_cost_basis_minor: Math.floor(
+            (quantityMicros * unitBasis + 500_000) / 1_000_000,
+          ),
+          source_price_minor: price,
+          source_value_minor: value,
+        };
+      }),
+    );
+    return createInvestmentReconciliationAttempt(accountId.value, {
+      source_kind: "INVESTMENT_STATEMENT",
+      cutoff: investmentStatementDate.value,
+      source_as_of: localCalendarDateAsTimestamp(investmentSourceAsOf.value),
+      source_cash_minor: cash,
+      source_total_value_minor: total,
+      source_positions: positions,
+    });
+  },
+  onSuccess: (result) => {
+    investmentReconciliationAttempt.value =
+      result as typeof investmentReconciliationAttempt.value;
+    investmentReconciliationError.value = "";
+  },
+  onError: (error) => {
+    investmentReconciliationError.value = mutationErrorMessage(error);
   },
 });
+const investmentApplyMutation = useMutation({
+  mutationFn: () => {
+    const attempt = investmentReconciliationAttempt.value;
+    if (!attempt) throw new Error("Compare the statement before reconciling.");
+    if (!attempt.certification_allowed) {
+      throw new Error("Investigate the canonical holdings before reconciling.");
+    }
+    return applyReconciliation(attempt.reconciliation_id, {
+      client_operation_id: investmentReconciliationOperationId.value,
+    });
+  },
+  onSuccess: () => {
+    showInvestmentStatementModal.value = false;
+    investmentReconciliationAttempt.value = null;
+    queryClient.invalidateQueries({ queryKey: ["investment-statement"] });
+    queryClient.invalidateQueries({
+      queryKey: ["account-reconciliation-history", accountId.value],
+    });
+    invalidateAccountDetailQueries();
+    notifyMutationSuccess("Account reconciled");
+  },
+  onError: (error) => {
+    investmentReconciliationError.value = mutationErrorMessage(error);
+  },
+});
+watch(
+  [
+    investmentStatementDate,
+    investmentSourceAsOf,
+    investmentStatementCash,
+    investmentStatementTotal,
+    investmentHoldingRows,
+  ],
+  () => {
+    if (!showInvestmentStatementModal.value) return;
+    investmentReconciliationAttempt.value = null;
+    investmentReconciliationError.value = "";
+  },
+  { deep: true },
+);
 const investmentTransferMutation = useMutation({
   mutationFn: (payload: Parameters<typeof createInvestmentTransfer>[1]) =>
     createInvestmentTransfer(accountId.value, payload),
@@ -1374,59 +1523,104 @@ const loanPaymentMutation = useMutation({
     notifyMutationSuccess("Loan payment recorded");
   },
 });
+function loanReconciliationPayload(): Parameters<
+  typeof reconcileLoanAccount
+>[1] {
+  const principal = parseCurrencyMinor(loanPrincipal.value);
+  if (principal === null) throw new Error("Enter principal balance.");
+  const accruedInterest = parseCurrencyMinor(loanAccruedInterest.value);
+  const escrow = parseCurrencyMinor(loanEscrow.value);
+  const unappliedCredit = parseCurrencyMinor(loanUnapplied.value);
+  const ytdPrincipal = parseCurrencyMinor(loanYtdPrincipal.value);
+  const ytdInterest = parseCurrencyMinor(loanYtdInterest.value);
+  return {
+    source_as_of: localCalendarDateAsTimestamp(loanStatementDate.value),
+    source_adapter: "manual",
+    principal_balance_minor: principal,
+    ...(accruedInterest === null
+      ? {}
+      : { accrued_interest_minor: accruedInterest }),
+    ...(escrow === null ? {} : { escrow_balance_minor: escrow }),
+    ...(unappliedCredit === null
+      ? {}
+      : { unapplied_credit_minor: unappliedCredit }),
+    ...(ytdPrincipal === null
+      ? {}
+      : { ytd_principal_paid_minor: ytdPrincipal }),
+    ...(ytdInterest === null ? {} : { ytd_interest_paid_minor: ytdInterest }),
+  };
+}
+
 const loanStatementMutation = useMutation({
-  mutationFn: (payload: Parameters<typeof reconcileLoanStatement>[1]) =>
-    reconcileLoanStatement(accountId.value, payload),
+  mutationFn: (payload: Parameters<typeof reconcileLoanAccount>[1]) =>
+    reconcileLoanAccount(accountId.value, payload),
   onSuccess: () => {
     showLoanStatementModal.value = false;
+    loanReconciliationError.value = "";
+    loanMismatchNeedsCorrection.value = false;
     queryClient.invalidateQueries({ queryKey: ["loan-snapshots"] });
+    queryClient.invalidateQueries({
+      queryKey: ["account-reconciliation-history", accountId.value],
+    });
     invalidateAccountDetailQueries();
-    notifyMutationSuccess("Loan statement recorded");
+    notifyMutationSuccess("Account reconciled");
+  },
+  onError: (error) => {
+    const detail = error instanceof ApiError ? error.detail : null;
+    const mismatch =
+      typeof detail === "object" &&
+      detail !== null &&
+      "code" in detail &&
+      detail.code === "loan_snapshot_mismatch";
+    loanMismatchNeedsCorrection.value = mismatch;
+    loanReconciliationError.value = mismatch
+      ? "Lender facts differ from the canonical snapshot. Review and correct the canonical snapshot before reconciling."
+      : mutationErrorMessage(error);
   },
 });
-const reconciliationDraftMutation = useMutation({
-  mutationFn: () => {
-    const ending = parseCurrencyMinor(reconciliationEndingBalance.value);
-    if (ending === null) throw new Error("Enter an ending balance");
-    return createReconciliationDraft(accountId.value, {
-      source_kind: isCreditCardAccount.value
-        ? "CREDIT_CARD_STATEMENT"
-        : "BANK_STATEMENT",
-      cutoff: reconciliationDate.value,
-      source_ending_value_minor: ending,
+const correctLoanSnapshotMutation = useMutation({
+  mutationFn: async () => {
+    const payload = loanReconciliationPayload();
+    const {
+      principal_balance_minor,
+      accrued_interest_minor,
+      escrow_balance_minor,
+      unapplied_credit_minor,
+      ytd_principal_paid_minor,
+      ytd_interest_paid_minor,
+    } = payload;
+    await createLoanSnapshot(accountId.value, {
+      effective_date: loanStatementDate.value,
+      principal_balance_minor,
+      ...(accrued_interest_minor === undefined
+        ? {}
+        : { accrued_interest_minor }),
+      ...(escrow_balance_minor === undefined ? {} : { escrow_balance_minor }),
+      ...(unapplied_credit_minor === undefined
+        ? {}
+        : { unapplied_credit_minor }),
+      ...(ytd_principal_paid_minor === undefined
+        ? {}
+        : { ytd_principal_paid_minor }),
+      ...(ytd_interest_paid_minor === undefined
+        ? {}
+        : { ytd_interest_paid_minor }),
     });
+    return reconcileLoanAccount(accountId.value, payload);
   },
-  onSuccess: (draft) => {
-    reconciliationDraft.value = draft;
-  },
-});
-const reconciliationApplyMutation = useMutation({
-  mutationFn: () => {
-    if (!reconciliationDraft.value)
-      throw new Error("Create a reconciliation draft first");
-    return applyReconciliation(reconciliationDraft.value.reconciliation_id, {
-      client_operation_id: reconciliationOperationId.value,
+  onSuccess: () => {
+    showLoanStatementModal.value = false;
+    loanReconciliationError.value = "";
+    loanMismatchNeedsCorrection.value = false;
+    queryClient.invalidateQueries({ queryKey: ["loan-snapshots"] });
+    queryClient.invalidateQueries({
+      queryKey: ["account-reconciliation-history", accountId.value],
     });
-  },
-  onSuccess: (result) => {
-    const reconciledAccountId = accountId.value;
-    showReconciliationModal.value = false;
-    reconciliationDraft.value = null;
     invalidateAccountDetailQueries();
-    notifyMutationSuccess("Account reconciled", {
-      undoneMessage: "Reconciliation undone",
-      run: async () => {
-        if (typeof result.reconciliation_id !== "string") {
-          throw new Error("The reconciliation can no longer be undone.");
-        }
-        await undoLastReconciliation(
-          reconciledAccountId,
-          result.reconciliation_id,
-          crypto.randomUUID(),
-        );
-        invalidateAccountDetailQueries();
-      },
-    });
+    notifyMutationSuccess("Account reconciled");
+  },
+  onError: (error) => {
+    loanReconciliationError.value = mutationErrorMessage(error);
   },
 });
 const budgetAttemptMutation = useMutation({
@@ -1442,6 +1636,7 @@ const budgetAttemptMutation = useMutation({
         ? "CREDIT_CARD_STATEMENT"
         : "BANK_STATEMENT",
       cutoff: sourceAsOfDate.value,
+      source_as_of: localCalendarDateAsTimestamp(sourceAsOfDate.value),
       ...values,
     } as Parameters<typeof createBudgetReconciliationAttempt>[1]);
   },
@@ -1486,26 +1681,16 @@ const budgetApplyMutation = useMutation({
     });
   },
   onSuccess: () => {
-    const reconciliationId = budgetAttempt.value?.reconciliation_id;
-    const reconciledAccountId = accountId.value;
     showReconciliationModal.value = false;
     budgetAttempt.value = null;
     investigatingReconciliation.value = false;
     persistentEditsDuringAttempt.value = false;
     sourceBalancesBeforeEdit.value = null;
     invalidateAccountDetailQueries();
-    if (!reconciliationId) return;
-    notifyMutationSuccess("Account reconciled", {
-      undoneMessage: "Reconciliation undone",
-      run: async () => {
-        await undoLastReconciliation(
-          reconciledAccountId,
-          reconciliationId,
-          crypto.randomUUID(),
-        );
-        invalidateAccountDetailQueries();
-      },
+    queryClient.invalidateQueries({
+      queryKey: ["account-reconciliation-history", accountId.value],
     });
+    notifyMutationSuccess("Account reconciled");
   },
   onError: (error) => {
     reconciliationMutationError.value = mutationErrorMessage(error);
@@ -1527,6 +1712,7 @@ watch(
 );
 
 function invalidateAccountDetailQueries() {
+  queryClient.invalidateQueries({ queryKey: ["reconciliation-working-set"] });
   queryClient.invalidateQueries({ queryKey: ["transactions"] });
   queryClient.invalidateQueries({ queryKey: ["accounts"] });
   queryClient.invalidateQueries({ queryKey: ["account-transaction-summary"] });
@@ -1541,18 +1727,15 @@ function invalidateAccountDetailQueries() {
 }
 
 function openValueModal() {
-  valueDate.value = new Date().toISOString().slice(0, 10);
+  valueDate.value = localCalendarDate();
   valueAmount.value = "";
   valueNotes.value = "";
   showValueModal.value = true;
 }
 
 function openReconciliationModal() {
-  reconciliationDate.value = new Date().toISOString().slice(0, 10);
-  reconciliationEndingBalance.value = "";
-  reconciliationDraft.value = null;
   reconciliationOperationId.value = crypto.randomUUID();
-  sourceAsOfDate.value = new Date().toISOString().slice(0, 10);
+  sourceAsOfDate.value = localCalendarDate();
   sourceCleared.value = "";
   sourcePending.value = "";
   sourceActual.value = "";
@@ -1626,6 +1809,22 @@ function confirmExitReconciliation() {
   showExitWarning.value = false;
   investigatingReconciliation.value = false;
   budgetAttempt.value = null;
+}
+
+async function confirmUndoLastReconciliation() {
+  const latest = latestUndoableReconciliation.value;
+  if (!latest) return;
+  await undoLastReconciliation(
+    accountId.value,
+    latest.reconciliation_id,
+    crypto.randomUUID(),
+  );
+  showUndoReconciliationConfirmation.value = false;
+  await queryClient.invalidateQueries({
+    queryKey: ["account-reconciliation-history", accountId.value],
+  });
+  invalidateAccountDetailQueries();
+  notifyMutationSuccess("Reconciliation undone");
 }
 
 async function refreshReconciliationAfterMutation() {
@@ -1717,14 +1916,6 @@ function handleAccountEntry(
     });
 }
 
-function createReconciliationPreview() {
-  reconciliationDraftMutation.mutate();
-}
-
-function applyReconciliationDraft() {
-  reconciliationApplyMutation.mutate();
-}
-
 function saveValue() {
   const amountMinor = parseCurrencyMinor(valueAmount.value);
   if (amountMinor === null) return;
@@ -1733,19 +1924,27 @@ function saveValue() {
     amount_minor: amountMinor,
     source: "manual",
     notes: valueNotes.value,
+    client_operation_id: crypto.randomUUID(),
   });
 }
 
 function openInvestmentStatementModal() {
   const statement = investmentStatement.value;
   investmentStatementDate.value =
-    statement?.effective_date ?? new Date().toISOString().slice(0, 10);
+    statement?.effective_date ?? localCalendarDate();
+  investmentSourceAsOf.value = statement?.effective_date ?? localCalendarDate();
   investmentStatementCash.value =
     statement?.cash_balance_minor === null ||
     statement?.cash_balance_minor === undefined
       ? ""
       : String(statement.cash_balance_minor / 100);
-  investmentStatementNotes.value = "";
+  investmentStatementTotal.value =
+    statement?.current_value_minor == null
+      ? ""
+      : String(statement.current_value_minor / 100);
+  investmentReconciliationAttempt.value = null;
+  investmentReconciliationError.value = "";
+  investmentReconciliationOperationId.value = crypto.randomUUID();
   investmentHoldingRows.value = (statement?.holdings ?? []).map((holding) => ({
     ticker: holding.ticker,
     quantity: String(holding.quantity_micros / 1_000_000),
@@ -1754,6 +1953,7 @@ function openInvestmentStatementModal() {
       holding.average_basis_minor === null
         ? ""
         : String(holding.average_basis_minor / 100),
+    value: String(holding.value_minor / 100),
   }));
   showInvestmentStatementModal.value = true;
 }
@@ -1764,28 +1964,12 @@ function addInvestmentHoldingRow() {
     quantity: "",
     price: "",
     averageBasis: "",
+    value: "",
   });
 }
 
 function removeInvestmentHoldingRow(index: number) {
   investmentHoldingRows.value.splice(index, 1);
-}
-
-function saveInvestmentStatement() {
-  const cash = parseCurrencyMinor(investmentStatementCash.value);
-  if (cash === null) return;
-  const holdings = investmentHoldingRows.value.map((holding) => ({
-    ticker: holding.ticker.trim().toUpperCase(),
-    quantity_micros: Math.round(Number(holding.quantity) * 1_000_000),
-    price_minor: parseCurrencyMinor(holding.price) ?? 0,
-    average_basis_minor: parseCurrencyMinor(holding.averageBasis) ?? 0,
-  }));
-  reconcileInvestmentMutation.mutate({
-    effective_date: investmentStatementDate.value,
-    cash_balance_minor: cash,
-    holdings,
-    notes: investmentStatementNotes.value,
-  });
 }
 
 function openInvestmentTransferModal(direction: "CONTRIBUTION" | "WITHDRAWAL") {
@@ -1887,7 +2071,7 @@ function saveLoanPayment() {
 
 function openLoanStatementModal() {
   const snapshot = latestLoanSnapshot.value;
-  loanStatementDate.value = new Date().toISOString().slice(0, 10);
+  loanStatementDate.value = snapshot?.effective_date ?? localCalendarDate();
   loanPrincipal.value = snapshot
     ? String(snapshot.principal_balance_minor / 100)
     : "";
@@ -1895,9 +2079,10 @@ function openLoanStatementModal() {
     snapshot?.accrued_interest_minor == null
       ? ""
       : String(snapshot.accrued_interest_minor / 100);
-  loanEscrow.value = snapshot
-    ? String(snapshot.escrow_balance_minor / 100)
-    : "0";
+  loanEscrow.value =
+    snapshot?.escrow_balance_minor == null
+      ? ""
+      : String(snapshot.escrow_balance_minor / 100);
   loanUnapplied.value =
     snapshot?.unapplied_credit_minor == null
       ? ""
@@ -1911,44 +2096,70 @@ function openLoanStatementModal() {
       ? ""
       : String(snapshot.ytd_interest_paid_minor / 100);
   showLoanAdvancedFields.value = false;
+  loanReconciliationError.value = "";
+  loanMismatchNeedsCorrection.value = false;
   showLoanStatementModal.value = true;
 }
 
 function saveLoanStatement() {
-  const principal = parseCurrencyMinor(loanPrincipal.value);
-  if (principal === null) return;
-  const accruedInterest = parseCurrencyMinor(loanAccruedInterest.value);
-  const unappliedCredit = parseCurrencyMinor(loanUnapplied.value);
-  const ytdPrincipal = parseCurrencyMinor(loanYtdPrincipal.value);
-  const ytdInterest = parseCurrencyMinor(loanYtdInterest.value);
-  loanStatementMutation.mutate({
-    effective_date: loanStatementDate.value,
-    principal_balance_minor: principal,
-    escrow_balance_minor: parseCurrencyMinor(loanEscrow.value) ?? 0,
-    ...(accruedInterest === null
-      ? {}
-      : { accrued_interest_minor: accruedInterest }),
-    ...(unappliedCredit === null
-      ? {}
-      : { unapplied_credit_minor: unappliedCredit }),
-    ...(ytdPrincipal === null
-      ? {}
-      : { ytd_principal_paid_minor: ytdPrincipal }),
-    ...(ytdInterest === null ? {} : { ytd_interest_paid_minor: ytdInterest }),
-  });
+  loanStatementMutation.mutate(loanReconciliationPayload());
 }
 
+const investmentSourceTotalFromParts = computed(() => {
+  const cash = parseCurrencyMinor(investmentStatementCash.value);
+  if (cash === null) return null;
+  const values = investmentHoldingRows.value.map((holding) =>
+    parseCurrencyMinor(holding.value),
+  );
+  if (values.some((value) => value === null)) return null;
+  return cash + values.reduce<number>((sum, value) => sum + (value ?? 0), 0);
+});
+
 const investmentStatementCanSave = computed(() => {
-  if (parseCurrencyMinor(investmentStatementCash.value) === null) return false;
+  const declaredTotal = parseCurrencyMinor(investmentStatementTotal.value);
+  if (
+    declaredTotal === null ||
+    declaredTotal !== investmentSourceTotalFromParts.value
+  ) {
+    return false;
+  }
   return investmentHoldingRows.value.every(
     (holding) =>
       holding.ticker.trim().length > 0 &&
+      investmentHoldingRows.value.filter(
+        (candidate) =>
+          candidate.ticker.trim().toUpperCase() ===
+          holding.ticker.trim().toUpperCase(),
+      ).length === 1 &&
+      holding.quantity.trim().length > 0 &&
       Number.isFinite(Number(holding.quantity)) &&
       Number(holding.quantity) >= 0 &&
       (parseCurrencyMinor(holding.price) ?? 0) > 0 &&
-      parseCurrencyMinor(holding.averageBasis) !== null,
+      parseCurrencyMinor(holding.averageBasis) !== null &&
+      parseCurrencyMinor(holding.value) !== null,
   );
 });
+const investmentSourceTotalError = computed(() => {
+  const declared = parseCurrencyMinor(investmentStatementTotal.value);
+  const derived = investmentSourceTotalFromParts.value;
+  if (declared === null || derived === null || declared === derived) return "";
+  return `Cash plus reported position values total ${formatCurrency(derived)}; the source total is ${formatCurrency(declared)}.`;
+});
+
+function handleInvestmentSubmit() {
+  const attempt = investmentReconciliationAttempt.value;
+  if (!attempt) {
+    investmentAttemptMutation.mutate();
+    return;
+  }
+  if (attempt.certification_allowed) {
+    investmentApplyMutation.mutate();
+    return;
+  }
+  showInvestmentStatementModal.value = false;
+  actionMessage.value =
+    "Statement differences need investigation in Holdings summary and normal account activity. No holdings were changed.";
+}
 
 function handleCommitEdit(
   id: string,
@@ -2385,7 +2596,9 @@ function amountPresetToFilter(
 }
 
 function parseCurrencyMinor(value: string): number | null {
-  const amount = Number(value.replace(/[$,]/g, "").trim());
+  const normalized = value.replace(/[$,]/g, "").trim();
+  if (!normalized) return null;
+  const amount = Number(normalized);
   if (!Number.isFinite(amount) || amount < 0) return null;
   return Math.round(amount * 100);
 }
@@ -2489,7 +2702,7 @@ function formatTaxTreatment(value: string | null | undefined): string {
               data-cy="account-detail-add-snapshot"
               @click="openValueModal"
             >
-              {{ isTrackingAccount ? "Add snapshot" : "Add valuation" }}
+              Reconcile
             </Button>
             <Button
               v-if="isTrackingAccount"
@@ -2513,7 +2726,7 @@ function formatTaxTreatment(value: string | null | undefined): string {
               :disabled="loanSnapshotsLoading"
               @click="openLoanStatementModal"
             >
-              Reconcile statement
+              Reconcile
             </Button>
             <Button
               v-if="isInvestmentAccount"
@@ -2543,7 +2756,7 @@ function formatTaxTreatment(value: string | null | undefined): string {
               data-cy="account-detail-reconcile-investment"
               @click="openInvestmentStatementModal"
             >
-              Reconcile statement
+              Reconcile
             </Button>
             <Button
               v-if="isBudgetAccount && !investigatingReconciliation"
@@ -2597,6 +2810,110 @@ function formatTaxTreatment(value: string | null | undefined): string {
           class="account-detail-page__metrics"
         />
 
+        <section
+          class="account-detail-page__section account-detail-page__reconciliation-history"
+          data-cy="reconciliation-history-section"
+          aria-labelledby="reconciliation-history-title"
+        >
+          <div class="account-detail-page__section-header">
+            <h2
+              id="reconciliation-history-title"
+              class="account-detail-page__section-title"
+            >
+              Reconciliation history
+            </h2>
+            <StateBadge
+              v-if="reconciliationHistory?.items.some((item) => !item.undone)"
+              variant="positive"
+              size="sm"
+              >On record</StateBadge
+            >
+            <StateBadge v-else variant="warning" size="sm"
+              >Not reconciled</StateBadge
+            >
+          </div>
+          <p
+            v-if="reconciliationHistoryLoading"
+            class="account-detail-page__history-state"
+            role="status"
+          >
+            Loading reconciliation history…
+          </p>
+          <p
+            v-else-if="reconciliationHistoryError"
+            class="account-detail-page__history-state"
+            role="alert"
+          >
+            Reconciliation history could not be loaded.
+          </p>
+          <template v-else-if="reconciliationHistory?.items.length">
+            <p
+              v-if="reconciliationAttention?.changes_since"
+              class="account-detail-page__history-state"
+              data-cy="reconciliation-attention"
+            >
+              {{ reconciliationAttention.changes_since }} changes since last
+              reconciliation
+              <template v-if="reconciliationAttention.carried_pending">
+                · {{ reconciliationAttention.carried_pending }} carried pending
+              </template>
+            </p>
+            <p
+              v-if="reconciliationAttention?.reconciled_history_changed"
+              class="account-detail-page__history-warning"
+              role="status"
+              data-cy="reconciled-history-warning"
+            >
+              Historical transaction records changed after reconciliation. Those
+              edits are already saved and are not reverted by Undo.
+            </p>
+            <div
+              v-for="item in reconciliationHistory.items"
+              :key="item.reconciliation_id"
+              class="account-detail-page__history-row"
+              data-cy="reconciliation-history-row"
+            >
+              <div class="account-detail-page__history-copy">
+                <strong>{{
+                  reconciliationEvidenceSummary(item.reconciliation_id)
+                }}</strong>
+                <span v-if="item.undone"
+                  >Undone · canonical changes remain in place</span
+                >
+                <span>
+                  Source as of
+                  {{
+                    formatReconciliationDate(
+                      reconciliationCommitById.get(item.reconciliation_id)
+                        ?.source_as_of ?? item.committed_at,
+                    )
+                  }}
+                  · Committed
+                  {{ formatReconciliationDate(item.committed_at) }}
+                </span>
+              </div>
+              <Button
+                v-if="
+                  latestUndoableReconciliation?.reconciliation_id ===
+                  item.reconciliation_id
+                "
+                variant="tertiary"
+                data-cy="undo-last-reconciliation"
+                @click="showUndoReconciliationConfirmation = true"
+              >
+                Undo last reconciliation
+              </Button>
+            </div>
+          </template>
+          <p
+            v-else
+            class="account-detail-page__history-state"
+            data-cy="never-reconciled"
+          >
+            Never reconciled
+          </p>
+        </section>
+
         <div
           v-if="investigatingReconciliation && budgetAttempt"
           class="account-detail-page__reconciliation-actions"
@@ -2617,7 +2934,6 @@ function formatTaxTreatment(value: string | null | undefined): string {
         </div>
 
         <section
-          v-if="isBudgetAccount"
           class="account-detail-page__budget-entry"
           aria-label="Add transaction or transfer"
         >
@@ -3208,186 +3524,111 @@ function formatTaxTreatment(value: string | null | undefined): string {
               </h3>
               <KeyValueList :items="historyConfigDetails" />
             </section>
-
-            <section
-              v-if="!isTrackingAccount"
-              class="account-detail-page__sidebar-section"
-              data-cy="reconciliation-section"
-            >
-              <h3 class="account-detail-page__sidebar-title">Reconciliation</h3>
-              <KeyValueList :items="reconciliationDetails" />
-              <button
-                class="account-detail-page__sidebar-link"
-                @click="openReconciliationModal"
-              >
-                View reconciliation
-              </button>
-            </section>
           </aside>
         </div>
 
         <FormModal
           :visible="showReconciliationModal"
           title="Reconcile account"
-          :submit-text="
-            isBudgetAccount
-              ? budgetReconciliationSubmitText
-              : reconciliationDraft
-                ? 'Apply reconciliation'
-                : 'Preview difference'
-          "
-          :submit-disabled="
-            isBudgetAccount
-              ? !budgetAttempt && !sourceEntryReady
-              : reconciliationDraft
-                ? reconciliationDraft.difference_minor !== 0
-                : parseCurrencyMinor(reconciliationEndingBalance) === null
-          "
+          :submit-text="budgetReconciliationSubmitText"
+          :submit-disabled="!budgetAttempt && !sourceEntryReady"
           :loading="
             budgetAttemptMutation.isPending.value ||
-            budgetApplyMutation.isPending.value ||
-            reconciliationDraftMutation.isPending.value ||
-            reconciliationApplyMutation.isPending.value
+            budgetApplyMutation.isPending.value
           "
           @submit="
-            isBudgetAccount
-              ? budgetAttempt
-                ? certificationAllowed
-                  ? budgetApplyMutation.mutate()
-                  : reviewReconciliationDifferences()
-                : previewBudgetBalances()
-              : reconciliationDraft
-                ? applyReconciliationDraft()
-                : createReconciliationPreview()
+            budgetAttempt
+              ? certificationAllowed
+                ? budgetApplyMutation.mutate()
+                : reviewReconciliationDifferences()
+              : previewBudgetBalances()
           "
           @cancel="cancelReconciliationEntry"
           @close="cancelReconciliationEntry"
         >
           <div class="account-detail-page__config-form">
-            <template v-if="isBudgetAccount">
-              <DatePicker
-                v-model="sourceAsOfDate"
-                label="Source as of"
-                name="reconciliation-cutoff"
-                :max="currentDate"
-              />
-              <p class="account-detail-page__config-note">
-                Enter any two source balances. dojo derives the third; Cleared
-                and Pending must both match before this account can be
-                reconciled.
-              </p>
-              <CurrencyField
-                :model-value="sourceInputValue('cleared')"
-                label="Cleared"
-                name="source-cleared"
-                :disabled="sourceInputDisabled('cleared')"
-                @update:model-value="
-                  sourceCleared = $event;
-                  budgetAttempt = null;
-                "
-              />
-              <CurrencyField
-                :model-value="sourceInputValue('pending')"
-                label="Pending"
-                name="source-pending"
-                :disabled="sourceInputDisabled('pending')"
-                @update:model-value="
-                  sourcePending = $event;
-                  budgetAttempt = null;
-                "
-              />
-              <CurrencyField
-                :model-value="sourceInputValue('actual')"
-                label="Actual"
-                name="source-actual"
-                :disabled="sourceInputDisabled('actual')"
-                @update:model-value="
-                  sourceActual = $event;
-                  budgetAttempt = null;
-                "
-              />
-              <p
-                v-if="derivedSourceBalance"
-                class="account-detail-page__config-note"
-                data-cy="derived-balance"
+            <DatePicker
+              v-model="sourceAsOfDate"
+              label="Source as of"
+              name="reconciliation-cutoff"
+              :max="currentDate"
+            />
+            <p class="account-detail-page__config-note">
+              Enter any two source balances. dojo derives the third; Cleared and
+              Pending must both match before this account can be reconciled.
+            </p>
+            <CurrencyField
+              :model-value="sourceInputValue('cleared')"
+              label="Cleared"
+              name="source-cleared"
+              :disabled="sourceInputDisabled('cleared')"
+              @update:model-value="
+                sourceCleared = $event;
+                budgetAttempt = null;
+              "
+            />
+            <CurrencyField
+              :model-value="sourceInputValue('pending')"
+              label="Pending"
+              name="source-pending"
+              :disabled="sourceInputDisabled('pending')"
+              @update:model-value="
+                sourcePending = $event;
+                budgetAttempt = null;
+              "
+            />
+            <CurrencyField
+              :model-value="sourceInputValue('actual')"
+              label="Actual"
+              name="source-actual"
+              :disabled="sourceInputDisabled('actual')"
+              @update:model-value="
+                sourceActual = $event;
+                budgetAttempt = null;
+              "
+            />
+            <p
+              v-if="derivedSourceBalance"
+              class="account-detail-page__config-note"
+              data-cy="derived-balance"
+            >
+              {{ derivedSourceBalance.key }} is derived from the other two
+              source balances.
+            </p>
+            <div
+              v-if="budgetAttempt"
+              class="account-detail-page__reconciliation-proof"
+              data-cy="budget-reconciliation-proof"
+            >
+              <strong>{{
+                certificationAllowed ? "Balances match" : "Differences found"
+              }}</strong>
+              <span
+                >Cleared Δ
+                {{
+                  formatCurrency(budgetAttempt.deltas.cleared_delta_minor)
+                }}</span
               >
-                {{ derivedSourceBalance.key }} is derived from the other two
-                source balances.
-              </p>
-              <div
-                v-if="budgetAttempt"
-                class="account-detail-page__reconciliation-proof"
-                data-cy="budget-reconciliation-proof"
+              <span
+                >Pending Δ
+                {{
+                  formatCurrency(budgetAttempt.deltas.pending_delta_minor)
+                }}</span
               >
-                <strong>{{
-                  certificationAllowed ? "Balances match" : "Differences found"
-                }}</strong>
-                <span
-                  >Cleared Δ
-                  {{
-                    formatCurrency(budgetAttempt.deltas.cleared_delta_minor)
-                  }}</span
-                >
-                <span
-                  >Pending Δ
-                  {{
-                    formatCurrency(budgetAttempt.deltas.pending_delta_minor)
-                  }}</span
-                >
-                <span
-                  >Actual Δ
-                  {{
-                    formatCurrency(budgetAttempt.deltas.actual_delta_minor)
-                  }}</span
-                >
-              </div>
-              <p
-                v-if="reconciliationMutationError"
-                class="account-detail-page__config-note"
-                role="alert"
+              <span
+                >Actual Δ
+                {{
+                  formatCurrency(budgetAttempt.deltas.actual_delta_minor)
+                }}</span
               >
-                {{ reconciliationMutationError }}
-              </p>
-            </template>
-            <template v-else>
-              <DatePicker
-                v-model="reconciliationDate"
-                label="Statement cutoff"
-                name="reconciliation-cutoff"
-                :max="currentDate"
-              />
-              <CurrencyField
-                v-model="reconciliationEndingBalance"
-                :label="
-                  isCreditCardAccount
-                    ? 'Statement liability'
-                    : 'Statement ending balance'
-                "
-                name="reconciliation-ending-balance"
-              />
-              <div
-                v-if="reconciliationDraft"
-                class="account-detail-page__reconciliation-preview"
-              >
-                <p>
-                  Ledger through cutoff:
-                  <strong>{{
-                    formatCurrency(reconciliationDraft.ledger_value_minor)
-                  }}</strong>
-                </p>
-                <p>
-                  Difference:
-                  <strong>{{
-                    formatCurrency(reconciliationDraft.difference_minor)
-                  }}</strong>
-                </p>
-                <p class="account-detail-page__config-note">
-                  Source records can be supplied through the API contract. This
-                  focused action records the balance evidence without hiding
-                  unmatched ledger activity.
-                </p>
-              </div>
-            </template>
+            </div>
+            <p
+              v-if="reconciliationMutationError"
+              class="account-detail-page__config-note"
+              role="alert"
+            >
+              {{ reconciliationMutationError }}
+            </p>
           </div>
         </FormModal>
 
@@ -3402,6 +3643,20 @@ function formatTaxTreatment(value: string | null | undefined): string {
           <p>
             Your transaction edits have already been saved. Exiting will leave
             no reconciliation recorded for this account.
+          </p>
+        </FormModal>
+
+        <FormModal
+          :visible="showUndoReconciliationConfirmation"
+          title="Undo last reconciliation?"
+          submit-text="Undo last reconciliation"
+          @submit="confirmUndoLastReconciliation"
+          @cancel="showUndoReconciliationConfirmation = false"
+          @close="showUndoReconciliationConfirmation = false"
+        >
+          <p>
+            This appends an undo record for the latest reconciliation. It does
+            not revert account, transaction, or valuation changes already saved.
           </p>
         </FormModal>
 
@@ -3561,10 +3816,16 @@ function formatTaxTreatment(value: string | null | undefined): string {
 
         <FormModal
           :visible="showLoanStatementModal"
-          title="Reconcile loan statement"
-          submit-text="Apply statement"
-          :submit-disabled="parseCurrencyMinor(loanPrincipal) === null"
-          :loading="loanStatementMutation.isPending.value"
+          title="Reconcile loan"
+          submit-text="Reconcile"
+          :submit-disabled="
+            parseCurrencyMinor(loanPrincipal) === null ||
+            loanMismatchNeedsCorrection
+          "
+          :loading="
+            loanStatementMutation.isPending.value ||
+            correctLoanSnapshotMutation.isPending.value
+          "
           @submit="saveLoanStatement"
           @cancel="showLoanStatementModal = false"
           @close="showLoanStatementModal = false"
@@ -3620,9 +3881,21 @@ function formatTaxTreatment(value: string | null | undefined): string {
               />
             </template>
             <p class="account-detail-page__config-note">
-              dojo derives aggregate principal reduction and leaves the
-              remaining attributed cash explicitly unknown non-principal.
+              Only lender-provided facts are recorded. Blank optional fields
+              remain unknown; enter zero only when the lender states zero.
             </p>
+            <p v-if="loanReconciliationError" role="alert">
+              {{ loanReconciliationError }}
+            </p>
+            <Button
+              v-if="loanMismatchNeedsCorrection"
+              variant="secondary"
+              data-cy="loan-correct-canonical-snapshot"
+              :loading="correctLoanSnapshotMutation.isPending.value"
+              @click="correctLoanSnapshotMutation.mutate()"
+            >
+              Correct canonical snapshot and reconcile
+            </Button>
           </div>
         </FormModal>
 
@@ -3715,19 +3988,40 @@ function formatTaxTreatment(value: string | null | undefined): string {
 
         <FormModal
           :visible="showInvestmentStatementModal"
-          title="Reconcile investment statement"
-          submit-text="Apply statement"
+          title="Reconcile investment account"
+          :submit-text="
+            !investmentReconciliationAttempt
+              ? 'Compare statement'
+              : investmentReconciliationAttempt.certification_allowed
+                ? 'Reconcile account'
+                : 'Review holdings'
+          "
           :submit-disabled="!investmentStatementCanSave"
-          :loading="reconcileInvestmentMutation.isPending.value"
-          @submit="saveInvestmentStatement"
-          @cancel="showInvestmentStatementModal = false"
-          @close="showInvestmentStatementModal = false"
+          :loading="
+            investmentAttemptMutation.isPending.value ||
+            investmentApplyMutation.isPending.value
+          "
+          @submit="handleInvestmentSubmit"
+          @cancel="
+            showInvestmentStatementModal = false;
+            investmentReconciliationAttempt = null;
+          "
+          @close="
+            showInvestmentStatementModal = false;
+            investmentReconciliationAttempt = null;
+          "
         >
           <div class="account-detail-page__config-form">
             <DatePicker
               v-model="investmentStatementDate"
-              label="Statement date"
+              label="Statement effective date"
               name="investment-statement-date"
+              :max="currentDate"
+            />
+            <DatePicker
+              v-model="investmentSourceAsOf"
+              label="Source as of"
+              name="investment-source-as-of"
               :max="currentDate"
             />
             <CurrencyField
@@ -3735,6 +4029,19 @@ function formatTaxTreatment(value: string | null | undefined): string {
               label="Cash balance"
               name="investment-statement-cash"
             />
+            <CurrencyField
+              v-model="investmentStatementTotal"
+              label="Total account value"
+              name="investment-statement-total"
+            />
+            <p
+              v-if="investmentSourceTotalError"
+              class="account-detail-page__config-note"
+              role="alert"
+              data-cy="investment-source-total-error"
+            >
+              {{ investmentSourceTotalError }}
+            </p>
             <div class="account-detail-page__statement-holdings">
               <div class="account-detail-page__section-header">
                 <h3 class="account-detail-page__section-title">Holdings</h3>
@@ -3775,6 +4082,11 @@ function formatTaxTreatment(value: string | null | undefined): string {
                   :name="`holding-price-${index}`"
                 />
                 <CurrencyField
+                  v-model="holding.value"
+                  label="Reported position value"
+                  :name="`holding-value-${index}`"
+                />
+                <CurrencyField
                   v-model="holding.averageBasis"
                   label="Average cost per unit"
                   :name="`holding-basis-${index}`"
@@ -3788,23 +4100,58 @@ function formatTaxTreatment(value: string | null | undefined): string {
                 </Button>
               </div>
             </div>
-            <TextField
-              v-model="investmentStatementNotes"
-              label="Notes"
-              name="investment-statement-notes"
-            />
             <p class="account-detail-page__config-note">
-              This statement replaces provisional transfer adjustments through
-              the statement date. Trades, dividends, and interest are reflected
-              by the holdings and cash snapshot.
+              The source total must equal cash plus reported position values.
+              Price movement is shown separately and does not change structural
+              holdings.
+            </p>
+            <div
+              v-if="investmentReconciliationAttempt"
+              class="account-detail-page__reconciliation-proof"
+              data-cy="investment-reconciliation-proof"
+            >
+              <strong>
+                {{
+                  investmentReconciliationAttempt.certification_allowed
+                    ? "Balances match"
+                    : "Differences found"
+                }}
+              </strong>
+              <span>
+                {{ investmentReconciliationAttempt.diffs.length }} structural
+                {{
+                  investmentReconciliationAttempt.diffs.length === 1
+                    ? "difference"
+                    : "differences"
+                }}
+              </span>
+              <span
+                >{{ investmentReconciliationAttempt.price_only_changes.length }}
+                price-only
+                {{
+                  investmentReconciliationAttempt.price_only_changes.length ===
+                  1
+                    ? "change"
+                    : "changes"
+                }}</span
+              >
+              <span
+                v-if="!investmentReconciliationAttempt.certification_allowed"
+              >
+                No canonical holdings were changed. Investigate in Holdings
+                summary before retrying.
+              </span>
+            </div>
+            <p v-if="investmentReconciliationError" role="alert">
+              {{ investmentReconciliationError }}
             </p>
           </div>
         </FormModal>
 
         <FormModal
           :visible="showValueModal"
-          :title="isTrackingAccount ? 'Add snapshot' : 'Add valuation'"
-          submit-text="Save"
+          title="Reconcile valuation"
+          submit-text="Reconcile"
           :submit-disabled="parseCurrencyMinor(valueAmount) === null"
           :loading="createValueMutation.isPending.value"
           @submit="saveValue"
@@ -3826,8 +4173,8 @@ function formatTaxTreatment(value: string | null | undefined): string {
             />
             <TextField v-model="valueNotes" label="Notes" name="value-notes" />
             <p class="account-detail-page__config-note">
-              Saving another value for this date corrects the existing dated
-              value while preserving its history.
+              A changed value and its reconciliation commit are recorded
+              together. Repeating the same value records new evidence only.
             </p>
           </div>
         </FormModal>
@@ -4276,6 +4623,50 @@ function formatTaxTreatment(value: string | null | undefined): string {
   font-family: var(--text-body-sm-font-family);
   font-size: var(--text-body-sm-font-size);
   font-weight: var(--text-body-sm-font-weight);
+  line-height: var(--text-body-sm-line-height);
+}
+
+.account-detail-page__reconciliation-history {
+  padding: var(--space-lg);
+}
+
+.account-detail-page__history-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-lg);
+  padding: var(--space-md) 0;
+  border-top: 1px solid var(--color-outline);
+}
+
+.account-detail-page__history-copy {
+  display: grid;
+  gap: var(--space-xs);
+  min-width: 0;
+  color: var(--color-on-surface);
+  font-family: var(--text-body-sm-font-family);
+  font-size: var(--text-body-sm-font-size);
+  line-height: var(--text-body-sm-line-height);
+}
+
+.account-detail-page__history-copy span,
+.account-detail-page__history-state {
+  margin: 0;
+  color: var(--color-on-surface-muted);
+  font-family: var(--text-body-sm-font-family);
+  font-size: var(--text-body-sm-font-size);
+  line-height: var(--text-body-sm-line-height);
+}
+
+.account-detail-page__history-warning {
+  margin: var(--space-md) 0;
+  padding: var(--space-md);
+  color: var(--color-warning);
+  background: var(--color-warning-container);
+  border: 1px solid var(--color-warning);
+  border-radius: var(--radius-all);
+  font-family: var(--text-body-sm-font-family);
+  font-size: var(--text-body-sm-font-size);
   line-height: var(--text-body-sm-line-height);
 }
 
@@ -4842,6 +5233,13 @@ function formatTaxTreatment(value: string | null | undefined): string {
 @media (max-width: 900px) {
   .account-detail-page__cutover-row {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 600px) {
+  .account-detail-page__history-row {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }
 

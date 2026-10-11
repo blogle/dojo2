@@ -79,6 +79,12 @@ def add_development_accounts(connection: DuckDBPyConnection, now: datetime) -> N
            VALUES (?, ?, ?, TRUE, ?, NULL)""",
         (instrument_id, "CASH", "Brokerage cash", now),
     )
+    connection.execute(
+        """INSERT INTO investment_instruments
+           (instrument_id, symbol, name, is_cash_equivalent, created_at, created_by_user_id)
+           VALUES (?, ?, ?, FALSE, ?, NULL)""",
+        (_id("instrument", "PINECONE-INDEX"), "IDX", "Broad market index", now),
+    )
 
     for month in range(1, 10):
         effective_date = date(2026, month, monthrange(2026, month)[1])

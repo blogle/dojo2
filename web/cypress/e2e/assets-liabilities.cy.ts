@@ -76,6 +76,7 @@ describe("Aspire authorization regression", () => {
     cy.contains("label", "Google Sheet ID")
       .find("input")
       .type(syntheticSheetId);
+    cy.expectApiStatus(403, "/api/import/google-sheet/analyze");
     cy.contains("button", "Submit").click();
     cy.contains("h1", "Migrate from Aspire").should("be.visible");
     cy.contains(
@@ -163,18 +164,20 @@ describe("Tracking snapshot correction", () => {
     cy.get('input[name="value-amount"]').type("510000");
     cy.get('input[name="value-notes"]').type("Updated appraisal");
 
-    cy.intercept("POST", "**/tracking-snapshots").as("correctSnapshot");
-    cy.get('[data-cy="form-modal-root"]').contains("button", "Save").click();
+    cy.intercept("POST", "**/valuation-reconciliations").as("correctSnapshot");
+    cy.get('[data-cy="form-modal-root"]')
+      .contains("button", "Reconcile")
+      .click();
     cy.wait("@correctSnapshot").its("response.statusCode").should("equal", 200);
 
     cy.get('[data-cy="metric-value"]').should("contain", "$510,000");
-    cy.get('[data-cy="snapshot-history-row"]')
+    cy.get('[data-cy="reconciliation-history-row"]')
       .should("have.length", 1)
-      .and("contain", "$510,000");
+      .and("contain", "Value $510,000.00");
 
     cy.reload();
     cy.get('[data-cy="metric-value"]').should("contain", "$510,000");
-    cy.get('[data-cy="snapshot-history-row"]').should("have.length", 1);
+    cy.get('[data-cy="reconciliation-history-row"]').should("have.length", 1);
 
     cy.visit("/assets-liabilities");
     cy.get(
@@ -206,32 +209,26 @@ describe("Cash-only investment reconciliation", () => {
       "2026-02-15",
     );
     cy.get('input[name="investment-statement-cash"]').type("12000");
+    cy.get('input[name="investment-statement-total"]').type("12000");
     cy.get('[data-cy="form-modal-root"]')
       .should("contain", "No holdings")
       .find('input[name^="holding-ticker-"]')
       .should("not.exist");
 
-    cy.intercept("POST", "**/investment-statements").as("reconcileInvestment");
     cy.get('[data-cy="form-modal-root"]')
-      .contains("button", "Apply statement")
+      .contains("button", "Compare statement")
       .click();
-    cy.wait("@reconcileInvestment")
-      .its("response.statusCode")
-      .should("equal", 200);
-
-    cy.get('[data-cy="metric-value"]').should("contain", "$12,000");
-    cy.get('[data-cy="holdings-summary-section"]').should(
+    cy.get('[data-cy="investment-reconciliation-proof"]')
+      .should("contain", "Differences found")
+      .and("contain", "No canonical holdings were changed");
+    cy.get('[data-cy="form-modal-root"]')
+      .contains("button", "Review holdings")
+      .click();
+    cy.get('[data-cy="holdings-summary-section"]').should("be.visible");
+    cy.get('[data-cy="reconciliation-history-section"]').should(
       "contain",
-      "No holdings in latest statement.",
+      "Never reconciled",
     );
-
-    cy.visit("/assets-liabilities");
-    cy.get('[data-cy="assets-liabilities-group"][data-group-key="investments"]')
-      .find('[data-cy="assets-liabilities-row"]')
-      .should("have.length", 1)
-      .and("contain", "Cash brokerage")
-      .and("contain", "$12,000");
-    cy.get('[data-cy="metric-net-worth"]').should("contain", "$32,000");
   });
 });
 
@@ -297,24 +294,14 @@ describe("Investment contribution provenance", () => {
       .and("contain", "-$1,000.00");
 
     cy.visit("/assets-liabilities/00000000-0000-0000-0000-000000000401");
-    cy.get('[data-cy="account-detail-reconcile-investment"]').click();
-    cy.get('input[name="investment-statement-cash"]').clear().type("11000");
-    cy.intercept("POST", "**/investment-statements").as("includeContribution");
-    cy.get('[data-cy="form-modal-root"]')
-      .contains("button", "Apply statement")
-      .click();
-    cy.wait("@includeContribution")
-      .its("response.statusCode")
-      .should("equal", 200);
-
     cy.get('[data-cy="metric-value"]')
       .should("contain", "$11,000")
-      .and("not.contain", "Provisional");
+      .and("contain", "Provisional");
     cy.request(
       `${String(Cypress.env("apiBaseUrl")).replace(/\/$/, "")}/api/accounts/00000000-0000-0000-0000-000000000401/investment-statements/latest`,
     )
       .its("body.provisional_transfer_minor")
-      .should("equal", 0);
+      .should("be.greaterThan", 0);
     cy.request(
       `${String(Cypress.env("apiBaseUrl")).replace(/\/$/, "")}/api/net-worth`,
     )
@@ -390,17 +377,26 @@ describe("Linked loan payment activity", () => {
     cy.get('[data-cy="account-detail-reconcile-loan"]').click();
     cy.get('input[name="loan-principal"]').clear().type("198000");
     cy.get('input[name="loan-escrow"]').should("have.value", "4000");
-    cy.intercept("POST", "**/loan-snapshots").as("reconcileLoan");
+    cy.intercept("POST", "**/loan-reconciliations").as("reconcileLoan");
+    cy.expectApiStatus(409, "/loan-reconciliations");
     cy.get('[data-cy="form-modal-root"]')
-      .contains("button", "Apply statement")
+      .contains("button", "Reconcile")
       .click();
+    cy.wait("@reconcileLoan").its("response.statusCode").should("equal", 409);
+    cy.intercept("POST", "**/loan-snapshots").as("correctLoanSnapshot");
+    cy.get('[data-cy="loan-correct-canonical-snapshot"]').click();
+    cy.wait("@correctLoanSnapshot")
+      .its("response.statusCode")
+      .should("equal", 200);
     cy.wait("@reconcileLoan").its("response.statusCode").should("equal", 200);
 
-    cy.get('[data-cy="loan-summary-section"]')
-      .should("contain", "$198,000.00")
-      .and("contain", "$2,000.00")
-      .and("contain", "$3,000.00");
+    cy.get('[data-cy="loan-summary-section"]').should("contain", "$198,000.00");
     cy.get('[data-cy="loan-escrow-section"]').should("contain", "$4,000.00");
+    cy.get('[data-cy="reconciliation-history-row"]')
+      .should("contain", "Principal $198,000.00")
+      .and("contain", "Source as of")
+      .and("contain", "Committed");
+    cy.get('[data-cy="loan-payment-row"]').should("have.length", 1);
     cy.get('[data-cy="loan-estimate-section"]').should(
       "contain",
       "Estimated amortization",
