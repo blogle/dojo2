@@ -724,6 +724,7 @@ export async function createBudgetReconciliationAttempt(
   payload: {
     source_kind: "BANK_STATEMENT" | "CREDIT_CARD_STATEMENT";
     cutoff: string;
+    source_as_of: string;
     source_cleared_minor?: number;
     source_pending_minor?: number;
     source_actual_minor?: number;

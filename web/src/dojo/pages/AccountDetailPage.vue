@@ -70,6 +70,10 @@ import TransactionLedger from "@/dojo/components/transactions/TransactionLedger.
 import TransactionEntryForm from "@/dojo/components/transactions/TransactionEntryForm.vue";
 import type { Transaction, TransactionPayload } from "@/dojo/types";
 import { formatCurrency } from "@/dojo/utils/currency";
+import {
+  localCalendarDate,
+  localCalendarDateAsTimestamp,
+} from "@/dojo/utils/date";
 import { institutionSuggestions } from "@/dojo/utils/institutions";
 import {
   mutationErrorMessage,
@@ -101,7 +105,7 @@ const suggestedInstitutions = computed(() =>
   institutionSuggestions(accounts.value?.map((item) => item.institution) ?? []),
 );
 
-const currentDate = new Date().toISOString().slice(0, 10);
+const currentDate = localCalendarDate();
 const currentMonth = computed(() => currentDate.slice(0, 7));
 const categoryFilter = ref("all");
 const dateFilter = ref("all");
@@ -125,12 +129,12 @@ const configurationRemainingTermMonths = ref("");
 const configurationExtraPrincipal = ref("");
 const actionMessage = ref("");
 const showValueModal = ref(false);
-const valueDate = ref(new Date().toISOString().slice(0, 10));
+const valueDate = ref(localCalendarDate());
 const valueAmount = ref("");
 const valueNotes = ref("");
 const showInvestmentStatementModal = ref(false);
-const investmentStatementDate = ref(new Date().toISOString().slice(0, 10));
-const investmentSourceAsOf = ref(new Date().toISOString().slice(0, 10));
+const investmentStatementDate = ref(localCalendarDate());
+const investmentSourceAsOf = ref(localCalendarDate());
 const investmentStatementCash = ref("");
 const investmentStatementTotal = ref("");
 const investmentReconciliationAttempt = ref<{
@@ -185,7 +189,7 @@ const loanPaymentBudgetAccountId = ref("");
 const loanPaymentAmount = ref("");
 const loanPaymentMemo = ref("Loan payment");
 const showLoanStatementModal = ref(false);
-const loanStatementDate = ref(new Date().toISOString().slice(0, 10));
+const loanStatementDate = ref(localCalendarDate());
 const loanPrincipal = ref("");
 const loanAccruedInterest = ref("");
 const loanEscrow = ref("");
@@ -198,7 +202,7 @@ const loanMismatchNeedsCorrection = ref(false);
 const showReconciliationModal = ref(false);
 const showUndoReconciliationConfirmation = ref(false);
 const reconciliationOperationId = ref(crypto.randomUUID());
-const sourceAsOfDate = ref(new Date().toISOString().slice(0, 10));
+const sourceAsOfDate = ref(localCalendarDate());
 const sourceCleared = ref("");
 const sourcePending = ref("");
 const sourceActual = ref("");
@@ -1434,7 +1438,7 @@ const investmentAttemptMutation = useMutation({
     return createInvestmentReconciliationAttempt(accountId.value, {
       source_kind: "INVESTMENT_STATEMENT",
       cutoff: investmentStatementDate.value,
-      source_as_of: `${investmentSourceAsOf.value}T12:00:00Z`,
+      source_as_of: localCalendarDateAsTimestamp(investmentSourceAsOf.value),
       source_cash_minor: cash,
       source_total_value_minor: total,
       source_positions: positions,
@@ -1530,7 +1534,7 @@ function loanReconciliationPayload(): Parameters<
   const ytdPrincipal = parseCurrencyMinor(loanYtdPrincipal.value);
   const ytdInterest = parseCurrencyMinor(loanYtdInterest.value);
   return {
-    source_as_of: `${loanStatementDate.value}T12:00:00Z`,
+    source_as_of: localCalendarDateAsTimestamp(loanStatementDate.value),
     source_adapter: "manual",
     principal_balance_minor: principal,
     ...(accruedInterest === null
@@ -1632,6 +1636,7 @@ const budgetAttemptMutation = useMutation({
         ? "CREDIT_CARD_STATEMENT"
         : "BANK_STATEMENT",
       cutoff: sourceAsOfDate.value,
+      source_as_of: localCalendarDateAsTimestamp(sourceAsOfDate.value),
       ...values,
     } as Parameters<typeof createBudgetReconciliationAttempt>[1]);
   },
@@ -1722,7 +1727,7 @@ function invalidateAccountDetailQueries() {
 }
 
 function openValueModal() {
-  valueDate.value = new Date().toISOString().slice(0, 10);
+  valueDate.value = localCalendarDate();
   valueAmount.value = "";
   valueNotes.value = "";
   showValueModal.value = true;
@@ -1730,7 +1735,7 @@ function openValueModal() {
 
 function openReconciliationModal() {
   reconciliationOperationId.value = crypto.randomUUID();
-  sourceAsOfDate.value = new Date().toISOString().slice(0, 10);
+  sourceAsOfDate.value = localCalendarDate();
   sourceCleared.value = "";
   sourcePending.value = "";
   sourceActual.value = "";
@@ -1926,9 +1931,8 @@ function saveValue() {
 function openInvestmentStatementModal() {
   const statement = investmentStatement.value;
   investmentStatementDate.value =
-    statement?.effective_date ?? new Date().toISOString().slice(0, 10);
-  investmentSourceAsOf.value =
-    statement?.effective_date ?? new Date().toISOString().slice(0, 10);
+    statement?.effective_date ?? localCalendarDate();
+  investmentSourceAsOf.value = statement?.effective_date ?? localCalendarDate();
   investmentStatementCash.value =
     statement?.cash_balance_minor === null ||
     statement?.cash_balance_minor === undefined
@@ -2067,8 +2071,7 @@ function saveLoanPayment() {
 
 function openLoanStatementModal() {
   const snapshot = latestLoanSnapshot.value;
-  loanStatementDate.value =
-    snapshot?.effective_date ?? new Date().toISOString().slice(0, 10);
+  loanStatementDate.value = snapshot?.effective_date ?? localCalendarDate();
   loanPrincipal.value = snapshot
     ? String(snapshot.principal_balance_minor / 100)
     : "";

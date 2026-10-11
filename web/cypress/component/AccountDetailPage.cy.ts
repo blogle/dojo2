@@ -8,6 +8,7 @@ import AssetsLiabilitiesPage from "../../src/dojo/pages/AssetsLiabilitiesPage.vu
 import MutationFeedbackHost from "../../src/dojo/layouts/MutationFeedbackHost.vue";
 import { createDojoQueryClient } from "../../src/dojo/queryClient";
 import { useMutationFeedback } from "../../src/dojo/state/mutationFeedback";
+import { localCalendarDate } from "../../src/dojo/utils/date";
 
 const budgetAccount = {
   account_id: "acct-checking-1234",
@@ -751,6 +752,55 @@ describe("AccountDetailPage", () => {
     cy.get("[data-cy=form-modal-root]").should(
       "contain.text",
       "Compare balances",
+    );
+  });
+
+  it("sends today's budget source date as a timezone-aware local timestamp", () => {
+    mountPage();
+    mount(MutationFeedbackHost);
+    const selectedDate = localCalendarDate();
+
+    cy.get("[data-cy=account-detail-reconcile]").click();
+    cy.get('input[name="reconciliation-cutoff"]').clear().type(selectedDate);
+    cy.get('input[name="source-cleared"]').type("6716.75");
+    cy.get('input[name="source-pending"]').type("125.43");
+    cy.get("[data-cy=form-modal-root]")
+      .contains("button", "Compare balances")
+      .click();
+    cy.get("[data-cy=budget-reconciliation-proof]").should("be.visible");
+
+    cy.window().should((win) => {
+      const calls = (
+        win.fetch as unknown as {
+          getCalls: () => Array<{ args: [string, RequestInit?] }>;
+        }
+      ).getCalls();
+      const draftCall = calls
+        .filter((call) => {
+          const url = new URL(call.args[0], "http://localhost");
+          return (
+            url.pathname ===
+            `/api/accounts/${budgetAccount.account_id}/reconciliations/draft`
+          );
+        })
+        .at(-1);
+      expect(draftCall).not.to.eq(undefined);
+      const payload = JSON.parse(draftCall?.args[1]?.body as string);
+      expect(payload.cutoff).to.equal(selectedDate);
+      expect(payload.source_as_of).to.match(/T12:00:00[+-]\d{2}:\d{2}$/);
+      const localSourceDate = new Date(payload.source_as_of);
+      expect([
+        localSourceDate.getFullYear(),
+        String(localSourceDate.getMonth() + 1).padStart(2, "0"),
+        String(localSourceDate.getDate()).padStart(2, "0"),
+      ]).to.deep.equal(selectedDate.split("-"));
+    });
+    cy.get("[data-cy=form-modal-root]")
+      .contains("button", "Reconcile account")
+      .click();
+    cy.get('[data-cy="mutation-feedback"]').should(
+      "contain.text",
+      "Account reconciled",
     );
   });
 
@@ -1831,8 +1881,14 @@ describe("AccountDetailPage — investment account", () => {
         source_kind: "INVESTMENT_STATEMENT",
         source_cash_minor: 1_000,
         source_total_value_minor: 10_000,
-        source_as_of: "2026-06-02T12:00:00Z",
       });
+      expect(body.source_as_of).to.match(/T12:00:00[+-]\d{2}:\d{2}$/);
+      const investmentSourceDate = new Date(body.source_as_of);
+      expect([
+        investmentSourceDate.getFullYear(),
+        String(investmentSourceDate.getMonth() + 1).padStart(2, "0"),
+        String(investmentSourceDate.getDate()).padStart(2, "0"),
+      ]).to.deep.equal([2026, "06", "02"]);
       expect(body.source_positions[0]).to.include({
         instrument_id: "instrument-fund",
         quantity_micros: 1_000_000,
@@ -2096,8 +2152,14 @@ describe("AccountDetailPage — loan", () => {
       const body = JSON.parse(request?.args[1]?.body as string);
       expect(body).to.include({
         principal_balance_minor: 19_800_000,
-        source_as_of: "2026-06-01T12:00:00Z",
       });
+      expect(body.source_as_of).to.match(/T12:00:00[+-]\d{2}:\d{2}$/);
+      const loanSourceDate = new Date(body.source_as_of);
+      expect([
+        loanSourceDate.getFullYear(),
+        String(loanSourceDate.getMonth() + 1).padStart(2, "0"),
+        String(loanSourceDate.getDate()).padStart(2, "0"),
+      ]).to.deep.equal([2026, "06", "01"]);
       for (const optional of [
         "accrued_interest_minor",
         "escrow_balance_minor",

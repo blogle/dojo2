@@ -118,6 +118,22 @@ def test_reconciliation_api_requires_exactly_two_integer_source_values() -> None
         source_kind="INVESTMENT_STATEMENT", cutoff="2026-08-31", source_ending_value_minor=1
     )
     assert legacy_investment.source_ending_value_minor == 1
+    with pytest.raises(ValueError, match="timezone info"):
+        ReconciliationDraftPayload(
+            source_kind="BANK_STATEMENT",
+            cutoff="2026-08-31",
+            source_cleared_minor=1,
+            source_pending_minor=2,
+            source_as_of=datetime(2026, 8, 31, 12),
+        )
+    aware_budget_source = ReconciliationDraftPayload(
+        source_kind="BANK_STATEMENT",
+        cutoff="2026-08-31",
+        source_cleared_minor=1,
+        source_pending_minor=2,
+        source_as_of=datetime(2026, 8, 31, 12, tzinfo=timezone.utc),
+    )
+    assert aware_budget_source.source_as_of == datetime(2026, 8, 31, 12, tzinfo=timezone.utc)
 
 
 def test_loan_reconciliation_preserves_unknown_optional_fields_and_explicit_zero(service) -> None:
@@ -216,6 +232,7 @@ def test_first_budget_reconciliation_commits_normalized_balances_and_full_baseli
                 "memo": f"Imported {index}",
             }
         )
+    source_as_of = datetime(2026, 8, 31, 17, 30, tzinfo=timezone.utc)
     attempt = service.create_reconciliation_draft(
         account_id,
         {
@@ -223,6 +240,7 @@ def test_first_budget_reconciliation_commits_normalized_balances_and_full_baseli
             "cutoff": date(2026, 8, 31),
             "source_cleared_minor": 4000,
             "source_actual_minor": 4000,
+            "source_as_of": source_as_of,
         },
     )
     assert attempt["certification_allowed"] is True
@@ -236,6 +254,7 @@ def test_first_budget_reconciliation_commits_normalized_balances_and_full_baseli
         attempt["reconciliation_id"], {"client_operation_id": str(uuid4())}
     )
     assert committed["evidence"]["normalized_payload"] == attempt["source"]
+    assert committed["source_as_of"] == source_as_of.isoformat()
     assert (
         service.db.fetch_one(
             "SELECT COUNT(*) AS count FROM reconciliation_transaction_refs WHERE reconciliation_id = ?",

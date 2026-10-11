@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StrictInt, model_validator
 
 from dojo.constants import TRANSACTION_CATEGORY_TARGET_ERROR
 from dojo.investment import total_cost_basis_minor
@@ -367,7 +367,7 @@ class LoanBalanceSnapshotPayload(BaseModel):
 class LoanReconciliationPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    source_as_of: datetime
+    source_as_of: AwareDatetime
     source_adapter: str = "manual"
     principal_balance_minor: int = Field(ge=0)
     accrued_interest_minor: int | None = Field(default=None, ge=0)
@@ -637,7 +637,7 @@ class ReconciliationDraftPayload(BaseModel):
     source_ending_value_minor: int | None = None
     source_cash_minor: StrictInt | None = None
     source_total_value_minor: StrictInt | None = None
-    source_as_of: datetime | None = None
+    source_as_of: AwareDatetime | None = None
     source_positions: list[InvestmentReconciliationPositionPayload] = Field(default_factory=list)
     source_records: list[ReconciliationSourceRecordPayload] = Field(default_factory=list)
 
