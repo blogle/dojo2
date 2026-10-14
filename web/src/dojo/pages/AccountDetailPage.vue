@@ -774,6 +774,10 @@ function holdingSummaryRow(row: object): HoldingSummaryRow {
   return row as HoldingSummaryRow;
 }
 
+function holdingSummaryCellValue(row: object, columnKey: string): string {
+  return holdingSummaryRow(row)[columnKey as keyof HoldingSummaryRow] ?? "";
+}
+
 function handleHoldingKeydown(event: KeyboardEvent) {
   if (!editingHoldingId.value || event.key !== "Escape") return;
   event.stopPropagation();
@@ -3529,78 +3533,61 @@ function formatTaxTreatment(value: string | null | undefined): string {
                     row-clickable
                     @row-click="handleHoldingRowClick"
                   >
-                    <template #row="{ row }">
+                    <template #cell="{ row, column }">
                       <template
-                        v-if="editingHoldingId === holdingSummaryRow(row).key"
+                        v-if="
+                          editingHoldingId === holdingSummaryRow(row).key &&
+                          column.key === 'quantity'
+                        "
                       >
-                        <td class="table-shell__cell">
-                          {{ holdingSummaryRow(row).symbol }}
-                        </td>
-                        <td class="table-shell__cell table-shell__cell--end">
-                          <TextField
-                            v-model="holdingDraft.quantity"
-                            label="Quantity"
-                            type="number"
-                            min="0"
-                            step="any"
-                            :disabled="holdingMutationPending"
-                            @keydown="
-                              handleHoldingSubmitKeydown(
-                                $event,
-                                investmentStatement!.holdings.find(
-                                  (holding) =>
-                                    holding.position_id ===
-                                    holdingSummaryRow(row).key,
-                                )!,
-                              )
-                            "
-                          />
-                        </td>
-                        <td class="table-shell__cell table-shell__cell--end">
-                          <TextField
-                            v-model="holdingDraft.basis"
-                            :label="
-                              holdingBasisMode === 'average'
-                                ? 'Average basis'
-                                : 'Total basis'
-                            "
-                            inputmode="decimal"
-                            :disabled="holdingMutationPending"
-                            @keydown="
-                              handleHoldingSubmitKeydown(
-                                $event,
-                                investmentStatement!.holdings.find(
-                                  (holding) =>
-                                    holding.position_id ===
-                                    holdingSummaryRow(row).key,
-                                )!,
-                              )
-                            "
-                          />
-                        </td>
-                        <td class="table-shell__cell table-shell__cell--end">
-                          {{ holdingSummaryRow(row).value }}
-                        </td>
-                        <td class="table-shell__cell table-shell__cell--end">
-                          {{ holdingSummaryRow(row).gain }}
-                        </td>
+                        <TextField
+                          v-model="holdingDraft.quantity"
+                          label="Quantity"
+                          type="number"
+                          min="0"
+                          step="any"
+                          :disabled="holdingMutationPending"
+                          @keydown="
+                            handleHoldingSubmitKeydown(
+                              $event,
+                              investmentStatement!.holdings.find(
+                                (holding) =>
+                                  holding.position_id ===
+                                  holdingSummaryRow(row).key,
+                              )!,
+                            )
+                          "
+                        />
+                      </template>
+                      <template
+                        v-else-if="
+                          editingHoldingId === holdingSummaryRow(row).key &&
+                          column.key === 'basis'
+                        "
+                      >
+                        <TextField
+                          v-model="holdingDraft.basis"
+                          :label="
+                            holdingBasisMode === 'average'
+                              ? 'Average basis'
+                              : 'Total basis'
+                          "
+                          inputmode="decimal"
+                          :disabled="holdingMutationPending"
+                          @keydown="
+                            handleHoldingSubmitKeydown(
+                              $event,
+                              investmentStatement!.holdings.find(
+                                (holding) =>
+                                  holding.position_id ===
+                                  holdingSummaryRow(row).key,
+                              )!,
+                            )
+                          "
+                        />
                       </template>
                       <template v-else>
-                        <td class="table-shell__cell">
-                          {{ holdingSummaryRow(row).symbol }}
-                        </td>
-                        <td class="table-shell__cell table-shell__cell--end">
-                          {{ holdingSummaryRow(row).quantity }}
-                        </td>
-                        <td class="table-shell__cell table-shell__cell--end">
-                          {{ holdingSummaryRow(row).basis }}
-                        </td>
-                        <td class="table-shell__cell table-shell__cell--end">
-                          {{ holdingSummaryRow(row).value }}
-                        </td>
-                        <td class="table-shell__cell table-shell__cell--end">
-                          {{ holdingSummaryRow(row).gain }}
-                        </td>
+                        {{ holdingSummaryCellValue(row, column.key) }}
                       </template>
                     </template>
                   </TableShell>
@@ -4798,7 +4785,7 @@ function formatTaxTreatment(value: string | null | undefined): string {
 
 .account-detail-page__left:has([data-cy="holdings-summary-section"])
   > [data-cy="holdings-summary-section"] {
-  grid-column: auto;
+  grid-column: 1 / -1;
 }
 
 .account-detail-page__chart-section {

@@ -75,6 +75,68 @@ const mockTransactions = [
 ];
 
 describe("TransactionLedger", () => {
+  it("fits financial columns and truncates long memos at desktop widths", () => {
+    const longMemo =
+      "A very long descriptive memo that should never wrap or widen the ledger ".repeat(
+        4,
+      );
+    [1152, 1440].forEach((width) => {
+      cy.viewport(width, 900);
+      mount(TransactionLedger, {
+        props: {
+          transactions: [
+            {
+              ...mockTransactions[0],
+              memo: longMemo,
+              amount_minor: -123456789,
+            },
+          ],
+          accounts: mockAccounts,
+          categories: mockCategories,
+          showAccountColumn: false,
+          showRunningBalance: true,
+          runningBalances: { t1: 987654321 },
+        },
+      });
+
+      cy.get(".ledger__scroll").should(($scroll) => {
+        expect($scroll[0].scrollWidth).to.be.at.most($scroll[0].clientWidth);
+      });
+      cy.get(".ledger__head")
+        .contains("Balance")
+        .should(($balance) => {
+          expect($balance[0].getBoundingClientRect().height).to.equal(
+            $balance[0].closest("tr")!.getBoundingClientRect().height,
+          );
+        });
+      cy.get(".ledger__header-row .ledger__head").each(($head, index) => {
+        cy.get(".ledger__row .ledger__cell")
+          .eq(index)
+          .should(($cell) => {
+            expect($cell[0].getBoundingClientRect().left).to.be.closeTo(
+              $head[0].getBoundingClientRect().left,
+              1,
+            );
+          });
+      });
+      cy.contains(".ledger__cell--amount", "$1,234,567.89").should(
+        "be.visible",
+      );
+      cy.get(".ledger__cell--muted")
+        .should("have.attr", "title", longMemo)
+        .should(($memo) => {
+          expect($memo[0].scrollWidth).to.be.greaterThan($memo[0].clientWidth);
+          expect($memo[0].getBoundingClientRect().height).to.equal(42);
+        });
+      cy.get(".ledger__table").should(($table) => {
+        expect($table[0].getBoundingClientRect().width).to.be.closeTo(
+          $table[0].parentElement!.clientWidth,
+          1,
+        );
+      });
+    });
+  });
+
   it("renders reconciliation provenance independently from settlement status", () => {
     const scenario = ledgerFixtures.scenarios[0];
     mount(TransactionLedger, { props: scenario?.props ?? {} });

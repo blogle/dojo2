@@ -380,6 +380,7 @@ function systemCategoryLabel(value: string | null): string {
             :class="{
               'ledger__header-row--no-account': !showAccountColumn,
               'ledger__header-row--with-balance': showRunningBalance,
+              'ledger__header-row--with-transfer': showTransferProvenance,
               'ledger__header-row--with-reconciliation':
                 Object.keys(reconciliationChanges).length > 0,
             }"
@@ -423,6 +424,7 @@ function systemCategoryLabel(value: string | null): string {
                 'ledger__row--editing': editingId === tx.transaction_id,
                 'ledger__row--no-account': !showAccountColumn,
                 'ledger__row--with-balance': showRunningBalance,
+                'ledger__row--with-transfer': showTransferProvenance,
                 'ledger__row--with-reconciliation':
                   Object.keys(reconciliationChanges).length > 0,
                 'ledger__row--removed': isRemovedTransaction(tx),
@@ -566,7 +568,9 @@ function systemCategoryLabel(value: string | null): string {
                     Category missing
                   </span>
                 </td>
-                <td class="ledger__cell ledger__cell--muted">{{ tx.memo }}</td>
+                <td class="ledger__cell ledger__cell--muted" :title="tx.memo">
+                  {{ tx.memo }}
+                </td>
                 <td class="ledger__cell">
                   <span
                     :class="[
@@ -654,8 +658,7 @@ function systemCategoryLabel(value: string | null): string {
 }
 
 .ledger__table {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  display: block;
   width: 100%;
   min-width: 530px;
   border-collapse: separate;
@@ -674,47 +677,73 @@ function systemCategoryLabel(value: string | null): string {
 .ledger__row {
   display: grid;
   grid-template-columns:
-    28px minmax(70px, 0.6fr) minmax(70px, 0.8fr) minmax(80px, 0.9fr)
-    minmax(90px, 1.1fr) minmax(60px, 0.6fr) minmax(70px, 0.6fr)
-    minmax(60px, 0.5fr);
+    28px 96px minmax(90px, 1fr) minmax(110px, 1.2fr) minmax(150px, 1.6fr)
+    100px 120px 90px;
   width: 100%;
 }
 
 .ledger__header-row--no-account,
 .ledger__row--no-account {
   grid-template-columns:
-    28px minmax(78px, 0.6fr) minmax(110px, 0.9fr) minmax(150px, 1.2fr)
-    minmax(70px, 0.6fr) minmax(80px, 0.7fr) minmax(76px, 0.6fr);
+    28px 96px minmax(110px, 1.2fr) minmax(150px, 1.6fr)
+    100px 120px 90px;
 }
 
 .ledger__header-row--no-account.ledger__header-row--with-reconciliation,
 .ledger__row--no-account.ledger__row--with-reconciliation {
   grid-template-columns:
-    28px minmax(78px, 0.6fr) minmax(110px, 0.9fr) minmax(150px, 1.2fr)
-    minmax(70px, 0.6fr) minmax(80px, 0.7fr) minmax(76px, 0.6fr)
-    minmax(74px, 0.6fr);
+    28px 96px minmax(110px, 1.2fr) minmax(150px, 1.6fr)
+    100px 120px 90px 90px;
 }
 .ledger__header-row:not(
     .ledger__header-row--no-account
   ).ledger__header-row--with-reconciliation,
 .ledger__row:not(.ledger__row--no-account).ledger__row--with-reconciliation {
   grid-template-columns:
-    28px minmax(70px, 0.6fr) minmax(70px, 0.8fr) minmax(80px, 0.9fr)
-    minmax(90px, 1.1fr) minmax(60px, 0.6fr) minmax(70px, 0.6fr) minmax(
-      60px,
-      0.5fr
-    )
-    minmax(74px, 0.6fr);
+    28px 96px minmax(90px, 1fr) minmax(110px, 1.2fr) minmax(150px, 1.6fr)
+    100px 120px 90px 90px;
 }
 
 .ledger__header-row--no-account.ledger__header-row--with-balance,
 .ledger__row--no-account.ledger__row--with-balance {
-  grid-template-columns: 28px repeat(7, minmax(0, 1fr));
+  grid-template-columns:
+    28px 96px minmax(110px, 1.2fr) minmax(150px, 1.6fr)
+    100px 120px 90px 120px;
 }
 
 .ledger__header-row--no-account.ledger__header-row--with-balance.ledger__header-row--with-reconciliation,
 .ledger__row--no-account.ledger__row--with-balance.ledger__row--with-reconciliation {
-  grid-template-columns: 28px repeat(8, minmax(0, 1fr));
+  grid-template-columns:
+    28px 96px minmax(110px, 1.2fr) minmax(150px, 1.6fr) 100px 120px 90px 90px
+    120px;
+}
+
+.ledger__header-row--with-transfer:not(.ledger__header-row--no-account),
+.ledger__row--with-transfer:not(.ledger__row--no-account) {
+  grid-template-columns:
+    28px 96px minmax(90px, 0.8fr) minmax(110px, 1fr) minmax(130px, 1.2fr)
+    minmax(150px, 1.4fr) 100px 120px 90px;
+}
+
+.ledger__header-row--no-account.ledger__header-row--with-transfer,
+.ledger__row--no-account.ledger__row--with-transfer {
+  grid-template-columns:
+    28px 96px minmax(110px, 1fr) minmax(130px, 1.2fr) minmax(150px, 1.4fr)
+    100px 120px 90px;
+}
+
+.ledger__header-row--no-account.ledger__header-row--with-transfer.ledger__header-row--with-balance,
+.ledger__row--no-account.ledger__row--with-transfer.ledger__row--with-balance {
+  grid-template-columns:
+    28px 96px minmax(110px, 1fr) minmax(130px, 1.2fr) minmax(150px, 1.4fr)
+    100px 120px 90px 120px;
+}
+
+.ledger__header-row--no-account.ledger__header-row--with-transfer.ledger__header-row--with-balance.ledger__header-row--with-reconciliation,
+.ledger__row--no-account.ledger__row--with-transfer.ledger__row--with-balance.ledger__row--with-reconciliation {
+  grid-template-columns:
+    28px 96px minmax(110px, 1fr) minmax(130px, 1.2fr) minmax(150px, 1.4fr)
+    100px 120px 90px 90px 120px;
 }
 
 .ledger__body {
@@ -732,6 +761,8 @@ function systemCategoryLabel(value: string | null): string {
   justify-content: flex-start;
   text-align: left;
   white-space: nowrap;
+  min-width: 0;
+  overflow: hidden;
   font-family: var(--text-label-sm-font-family);
   font-size: var(--text-label-sm-font-size);
   font-weight: var(--text-label-sm-font-weight);
@@ -740,8 +771,8 @@ function systemCategoryLabel(value: string | null): string {
 }
 
 .ledger__head--end {
-  justify-content: flex-start;
-  text-align: left;
+  justify-content: flex-end;
+  text-align: right;
 }
 
 .ledger__head--check {

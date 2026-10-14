@@ -1851,6 +1851,38 @@ function mountInvestmentPage(
 }
 
 describe("AccountDetailPage — investment account", () => {
+  it("aligns all holdings values with their configured headers", () => {
+    mountInvestmentPage();
+
+    const table = "[data-cy=holdings-summary-table]";
+    cy.get(`${table} thead th`).should(($headers) => {
+      expect(
+        [...$headers].map((header) => header.textContent?.trim()),
+      ).to.deep.equal(["Symbol", "Qty", "Cost basis", "Value", "Gain"]);
+    });
+    cy.get(`${table} tbody tr`).first().find("td").should("have.length", 5);
+    cy.get(`${table} thead th`).each(($header, index) => {
+      cy.get(`${table} tbody tr`)
+        .first()
+        .find("td")
+        .eq(index)
+        .then(($cell) => {
+          const headerRect = $header[0].getBoundingClientRect();
+          const cellRect = $cell[0].getBoundingClientRect();
+          expect(Math.abs(headerRect.left - cellRect.left)).to.be.lessThan(1);
+          expect(Math.abs(headerRect.right - cellRect.right)).to.be.lessThan(1);
+          for (const element of [$header[0], $cell[0]]) {
+            const alignment = getComputedStyle(element).textAlign;
+            if (index === 0) {
+              expect(["left", "start"]).to.include(alignment);
+            } else {
+              expect(alignment).to.equal("right");
+            }
+          }
+        });
+    });
+  });
+
   it("compares coherent reported source value and reconciles price-only movement", () => {
     mountInvestmentPage();
     cy.contains("Reconcile statement").should("not.exist");
