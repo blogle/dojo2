@@ -13,13 +13,17 @@ withDefaults(
     rowKey?: string;
     stickyHeader?: boolean;
     emptyText?: string;
+    rowClickable?: boolean;
   }>(),
   {
     rowKey: "key",
     stickyHeader: false,
     emptyText: "No rows to display.",
+    rowClickable: false,
   },
 );
+
+const emit = defineEmits<{ rowClick: [row: object] }>();
 
 function cellValue(row: object, columnKey: string): unknown {
   return (row as Record<string, unknown>)[columnKey];
@@ -55,6 +59,10 @@ function cellValue(row: object, columnKey: string): unknown {
           v-for="row in rows"
           :key="String((row as Record<string, unknown>)[rowKey] ?? '')"
           class="table-shell__row"
+          :class="{ 'table-shell__row--clickable': rowClickable }"
+          :tabindex="rowClickable ? 0 : undefined"
+          @click="rowClickable && emit('rowClick', row)"
+          @keydown.enter.prevent="rowClickable && emit('rowClick', row)"
         >
           <slot name="row" :row="row" :columns="columns">
             <template v-for="column in columns" :key="column.key">
@@ -126,6 +134,16 @@ function cellValue(row: object, columnKey: string): unknown {
 
 .table-shell__row:hover {
   background: var(--color-surface-selected);
+}
+
+.table-shell__row--clickable {
+  cursor: pointer;
+}
+
+.table-shell__row--clickable:focus-visible {
+  background: var(--color-surface-selected);
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
 }
 
 .table-shell__empty {

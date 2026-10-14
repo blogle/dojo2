@@ -24,5 +24,16 @@ export default defineFixtures<TableShellProps>({
         ],
       },
     },
+    {
+      name: "clickable rows",
+      props: {
+        columns: [
+          { key: "symbol", label: "Symbol" },
+          { key: "quantity", label: "Qty", align: "end" },
+        ],
+        rows: [{ key: "1", symbol: "VTI", quantity: "12.5" }],
+        rowClickable: true,
+      },
+    },
   ],
 });

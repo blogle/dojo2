@@ -163,7 +163,7 @@ const onSelect = (item: DropdownButtonItem) => {
   cursor: not-allowed;
 }
 
-.dropdown-button__menu {
+:global(.dropdown-button__menu) {
   position: absolute;
   top: calc(100% + 4px);
   right: 0;
@@ -172,9 +172,9 @@ const onSelect = (item: DropdownButtonItem) => {
   padding: var(--space-xs);
   border: 1px solid var(--color-outline);
   border-radius: var(--radius-all);
-  background: var(--color-surface-raised);
+  background: var(--color-surface);
   box-shadow: var(--shadow-popover);
-  z-index: 100;
+  z-index: 300;
 }
 
 .dropdown-button__item {

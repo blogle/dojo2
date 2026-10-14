@@ -477,18 +477,13 @@ function setMode(nextMode: "transaction" | "transfer") {
       0.8fr
     )
     auto;
-  gap: var(--space-md);
+  gap: var(--space-lg);
   align-items: end;
 }
 
 .entry-form__row--transaction {
-  grid-template-columns:
-    minmax(95px, 0.8fr) minmax(120px, 1.1fr) minmax(130px, 1.2fr)
-    minmax(90px, 0.75fr) minmax(95px, 0.8fr) minmax(130px, 1.2fr) minmax(
-      100px,
-      0.8fr
-    )
-    auto;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: var(--space-lg);
 }
 
 .entry-form__row--transfer {

@@ -631,6 +631,46 @@ export type InvestmentStatementHolding = {
   unrealized_gain_minor: number;
 };
 
+export type InvestmentPosition = {
+  position_id: string;
+  account_id: string;
+  instrument_id: string;
+  symbol: string;
+  quantity_micros: number;
+  total_cost_basis_minor: number;
+  version: string;
+};
+
+export async function createInvestmentPosition(
+  accountId: string,
+  payload: {
+    effective_date: string;
+    symbol: string;
+    quantity_micros: number;
+    total_cost_basis_minor: number;
+  },
+): Promise<InvestmentPosition> {
+  return request(`/api/accounts/${accountId}/positions`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateInvestmentPosition(
+  accountId: string,
+  positionId: string,
+  payload: {
+    effective_date: string;
+    quantity_micros: number;
+    total_cost_basis_minor: number;
+  },
+): Promise<InvestmentPosition> {
+  return request(`/api/accounts/${accountId}/positions/${positionId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
 export type InvestmentStatement = {
   effective_date: string | null;
   cash_balance_minor: number | null;

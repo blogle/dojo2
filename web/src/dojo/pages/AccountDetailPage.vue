@@ -15,6 +15,8 @@ import {
   createTransfer,
   createTrackingCutover,
   createInvestmentInstrument,
+  createInvestmentPosition,
+  updateInvestmentPosition,
   createInvestmentTransfer,
   createCreditCardPayment,
   applyReconciliation,
@@ -44,6 +46,7 @@ import {
   setAccountBudgetLink,
   type TransactionFilters,
   type BudgetReconciliationAttempt,
+  type InvestmentStatementHolding,
   type TrackingCutoverSuccessor,
   updateAccount,
   updateTransaction,
@@ -63,6 +66,9 @@ import DatePicker from "@/dojo/components/forms/DatePicker.vue";
 import InstitutionCombobox from "@/dojo/components/forms/InstitutionCombobox.vue";
 import SelectField from "@/dojo/components/forms/SelectField.vue";
 import TextField from "@/dojo/components/forms/TextField.vue";
+import BinaryToggle, {
+  type BinaryToggleOption,
+} from "@/dojo/components/forms/BinaryToggle.vue";
 import FormModal from "@/dojo/components/overlays/FormModal.vue";
 import TableShell from "@/dojo/components/tables/TableShell.vue";
 import TransactionFilterBar from "@/dojo/components/transactions/TransactionFilterBar.vue";
@@ -113,6 +119,7 @@ const amountFilter = ref("all");
 const statusFilter = ref("all");
 const chartPeriod = ref("1m");
 const showConfigurationModal = ref(false);
+const accountDrawer = ref<"config" | "history" | null>(null);
 const configurationName = ref("");
 const configurationInstitution = ref("");
 const configurationLast4 = ref("");
@@ -654,6 +661,133 @@ const loanProjectionColumns = [
   { key: "interest", label: "Interest", align: "end" as const },
   { key: "balance", label: "Balance", align: "end" as const },
 ];
+const holdingSummaryColumns = [
+  { key: "symbol", label: "Symbol" },
+  { key: "quantity", label: "Qty", align: "end" as const },
+  { key: "basis", label: "Cost basis", align: "end" as const },
+  { key: "value", label: "Value", align: "end" as const },
+  { key: "gain", label: "Gain", align: "end" as const },
+];
+type HoldingSummaryRow = {
+  key: string;
+  symbol: string;
+  quantity: string;
+  basis: string;
+  value: string;
+  gain: string;
+};
+const holdingSummaryRows = computed<HoldingSummaryRow[]>(() =>
+  (investmentStatement.value?.holdings ?? []).map((holding) => ({
+    key: holding.position_id,
+    symbol: holding.ticker,
+    quantity: (holding.quantity_micros / 1_000_000).toLocaleString(),
+    basis: formatCurrency(holding.cost_basis_minor),
+    value: formatCurrency(holding.value_minor),
+    gain: formatCurrency(holding.unrealized_gain_minor),
+  })),
+);
+const editingHoldingId = ref<string | null>(null);
+const holdingDraft = ref({ symbol: "", quantity: "", basis: "" });
+const newHolding = ref({ symbol: "", quantity: "", basis: "" });
+const holdingBasisMode = ref<"average" | "total">("average");
+const holdingMutationPending = ref(false);
+const holdingBasisOptions: [BinaryToggleOption, BinaryToggleOption] = [
+  { value: "average", label: "Average basis" },
+  { value: "total", label: "Total basis" },
+];
+
+function positionCostBasis(quantity: number, enteredBasis: number): number {
+  return holdingBasisMode.value === "total"
+    ? enteredBasis
+    : Math.floor(
+        (Math.round(quantity * 1_000_000) * enteredBasis + 500_000) / 1_000_000,
+      );
+}
+
+function editHolding(holding: InvestmentStatementHolding) {
+  holdingBasisMode.value = "average";
+  editingHoldingId.value = holding.position_id;
+  holdingDraft.value = {
+    symbol: holding.ticker,
+    quantity: String(holding.quantity_micros / 1_000_000),
+    basis: String(holding.average_basis_minor / 100),
+  };
+}
+
+async function saveHolding(holding: InvestmentStatementHolding) {
+  const quantity = Number(holdingDraft.value.quantity);
+  const basis = parseCurrencyMinor(holdingDraft.value.basis);
+  if (!Number.isFinite(quantity) || quantity < 0 || basis === null) return;
+  holdingMutationPending.value = true;
+  try {
+    await updateInvestmentPosition(accountId.value, holding.position_id, {
+      effective_date: localCalendarDate(),
+      quantity_micros: Math.round(quantity * 1_000_000),
+      total_cost_basis_minor: positionCostBasis(quantity, basis),
+    });
+    editingHoldingId.value = null;
+    await queryClient.invalidateQueries({ queryKey: ["investment-statement"] });
+    invalidateAccountDetailQueries();
+    notifyMutationSuccess("Holding updated");
+  } catch (error) {
+    notifyMutationError(error);
+  } finally {
+    holdingMutationPending.value = false;
+  }
+}
+
+async function addHolding() {
+  const quantity = Number(newHolding.value.quantity);
+  const basis = parseCurrencyMinor(newHolding.value.basis);
+  const symbol = newHolding.value.symbol.trim().toUpperCase();
+  if (!symbol || !Number.isFinite(quantity) || quantity < 0 || basis === null)
+    return;
+  holdingMutationPending.value = true;
+  try {
+    await createInvestmentPosition(accountId.value, {
+      effective_date: localCalendarDate(),
+      symbol,
+      quantity_micros: Math.round(quantity * 1_000_000),
+      total_cost_basis_minor: positionCostBasis(quantity, basis),
+    });
+    newHolding.value = { symbol: "", quantity: "", basis: "" };
+    await queryClient.invalidateQueries({ queryKey: ["investment-statement"] });
+    invalidateAccountDetailQueries();
+    notifyMutationSuccess("Holding added");
+  } catch (error) {
+    notifyMutationError(error);
+  } finally {
+    holdingMutationPending.value = false;
+  }
+}
+
+function handleHoldingRowClick(row: object) {
+  const key = holdingSummaryRow(row).key;
+  if (editingHoldingId.value === key) return;
+  const holding = investmentStatement.value?.holdings.find(
+    (candidate) => candidate.position_id === key,
+  );
+  if (holding) editHolding(holding);
+}
+
+function holdingSummaryRow(row: object): HoldingSummaryRow {
+  return row as HoldingSummaryRow;
+}
+
+function handleHoldingKeydown(event: KeyboardEvent) {
+  if (!editingHoldingId.value || event.key !== "Escape") return;
+  event.stopPropagation();
+  editingHoldingId.value = null;
+}
+
+function handleHoldingSubmitKeydown(
+  event: KeyboardEvent,
+  holding: InvestmentStatementHolding,
+) {
+  if (event.key !== "Enter" || event.shiftKey) return;
+  event.preventDefault();
+  void saveHolding(holding);
+}
 const loanProjectionRows = computed(() =>
   (loanProjection.value?.rows ?? []).slice(0, 12).map((row) => ({
     key: row.payment_number,
@@ -1182,25 +1316,6 @@ const migrationContextDetails = computed((): KeyValueItem[] => [
   { label: "Imported on", value: "—" },
   { label: "Import type", value: "Net-worth migration" },
 ]);
-
-const historyConfigDetails = computed((): KeyValueItem[] => {
-  const items: KeyValueItem[] = [];
-  items.push({
-    label: "Created",
-    value: account.value?.created_at
-      ? formatDateShort(new Date(account.value.created_at))
-      : "—",
-  });
-  const latestDate = account.value?.latest_valuation_date;
-  if (latestDate) {
-    items.push({
-      label: "Last snapshot",
-      value: formatDateShort(new Date(latestDate + "T00:00:00")),
-    });
-  }
-  items.push({ label: "Configuration", value: "" });
-  return items;
-});
 
 const accountInstitution = computed(() => {
   if (!account.value) return "—";
@@ -2390,6 +2505,17 @@ function openConfigurationModal() {
   showConfigurationModal.value = true;
 }
 
+function editConfigurationFromDrawer() {
+  accountDrawer.value = null;
+  openConfigurationModal();
+}
+
+function selectAccountDrawer(key: string) {
+  if (key === "config" || key === "history") {
+    accountDrawer.value = key;
+  }
+}
+
 function saveConfiguration() {
   if (!account.value) return;
   const linkBehavior = isInvestmentAccount.value
@@ -2766,13 +2892,6 @@ function formatTaxTreatment(value: string | null | undefined): string {
             >
               Reconcile
             </Button>
-            <Button
-              variant="secondary"
-              data-cy="account-detail-edit-configuration"
-              @click="openConfigurationModal"
-            >
-              Edit configuration
-            </Button>
             <DropdownButton
               v-if="moreActions.length > 0"
               label="More actions"
@@ -2787,16 +2906,16 @@ function formatTaxTreatment(value: string | null | undefined): string {
             >
               {{ moreActions[0].label }}
             </Button>
-            <Button
+            <DropdownButton
+              label="⋮"
+              :items="[
+                { key: 'config', label: 'Config' },
+                { key: 'history', label: 'History' },
+              ]"
               variant="secondary"
-              aria-label="More account options"
-              @click="
-                actionMessage =
-                  'No additional account actions are available yet.'
-              "
-            >
-              ⋮
-            </Button>
+              @primary-click="accountDrawer = 'config'"
+              @select="selectAccountDrawer"
+            />
           </template>
         </PageHeader>
 
@@ -2810,109 +2929,169 @@ function formatTaxTreatment(value: string | null | undefined): string {
           class="account-detail-page__metrics"
         />
 
-        <section
-          class="account-detail-page__section account-detail-page__reconciliation-history"
-          data-cy="reconciliation-history-section"
-          aria-labelledby="reconciliation-history-title"
+        <div
+          v-if="accountDrawer"
+          class="account-detail-page__history-drawer-backdrop"
+          :data-cy="`${accountDrawer}-drawer-backdrop`"
+          @click.self="accountDrawer = null"
         >
-          <div class="account-detail-page__section-header">
-            <h2
-              id="reconciliation-history-title"
-              class="account-detail-page__section-title"
-            >
-              Reconciliation history
-            </h2>
-            <StateBadge
-              v-if="reconciliationHistory?.items.some((item) => !item.undone)"
-              variant="positive"
-              size="sm"
-              >On record</StateBadge
-            >
-            <StateBadge v-else variant="warning" size="sm"
-              >Not reconciled</StateBadge
-            >
-          </div>
-          <p
-            v-if="reconciliationHistoryLoading"
-            class="account-detail-page__history-state"
-            role="status"
+          <section
+            class="account-detail-page__history-drawer"
+            :data-cy="
+              accountDrawer === 'history'
+                ? 'reconciliation-history-section'
+                : 'account-config-drawer'
+            "
+            :aria-labelledby="
+              accountDrawer === 'history'
+                ? 'reconciliation-history-title'
+                : 'account-config-title'
+            "
+            role="dialog"
+            aria-modal="true"
           >
-            Loading reconciliation history…
-          </p>
-          <p
-            v-else-if="reconciliationHistoryError"
-            class="account-detail-page__history-state"
-            role="alert"
-          >
-            Reconciliation history could not be loaded.
-          </p>
-          <template v-else-if="reconciliationHistory?.items.length">
-            <p
-              v-if="reconciliationAttention?.changes_since"
-              class="account-detail-page__history-state"
-              data-cy="reconciliation-attention"
-            >
-              {{ reconciliationAttention.changes_since }} changes since last
-              reconciliation
-              <template v-if="reconciliationAttention.carried_pending">
-                · {{ reconciliationAttention.carried_pending }} carried pending
-              </template>
-            </p>
-            <p
-              v-if="reconciliationAttention?.reconciled_history_changed"
-              class="account-detail-page__history-warning"
-              role="status"
-              data-cy="reconciled-history-warning"
-            >
-              Historical transaction records changed after reconciliation. Those
-              edits are already saved and are not reverted by Undo.
-            </p>
-            <div
-              v-for="item in reconciliationHistory.items"
-              :key="item.reconciliation_id"
-              class="account-detail-page__history-row"
-              data-cy="reconciliation-history-row"
-            >
-              <div class="account-detail-page__history-copy">
-                <strong>{{
-                  reconciliationEvidenceSummary(item.reconciliation_id)
-                }}</strong>
-                <span v-if="item.undone"
-                  >Undone · canonical changes remain in place</span
+            <template v-if="accountDrawer === 'config'">
+              <div class="account-detail-page__section-header">
+                <h2
+                  id="account-config-title"
+                  class="account-detail-page__section-title"
                 >
-                <span>
-                  Source as of
-                  {{
-                    formatReconciliationDate(
-                      reconciliationCommitById.get(item.reconciliation_id)
-                        ?.source_as_of ?? item.committed_at,
-                    )
-                  }}
-                  · Committed
-                  {{ formatReconciliationDate(item.committed_at) }}
-                </span>
+                  Config
+                </h2>
+                <Button
+                  variant="secondary"
+                  @click="editConfigurationFromDrawer"
+                >
+                  Edit
+                </Button>
               </div>
-              <Button
+              <KeyValueList :items="accountDetails" />
+              <section
                 v-if="
-                  latestUndoableReconciliation?.reconciliation_id ===
-                  item.reconciliation_id
+                  isTrackingAccount && account?.tracking_source === 'import'
                 "
-                variant="tertiary"
-                data-cy="undo-last-reconciliation"
-                @click="showUndoReconciliationConfirmation = true"
+                class="account-detail-page__sidebar-section"
+                data-cy="migration-context-section"
               >
-                Undo last reconciliation
+                <h3 class="account-detail-page__sidebar-title">
+                  Migration / import context
+                </h3>
+                <KeyValueList :items="migrationContextDetails" />
+              </section>
+              <Button variant="tertiary" @click="accountDrawer = null">
+                Close
               </Button>
-            </div>
-          </template>
-          <p
-            v-else
-            class="account-detail-page__history-state"
-            data-cy="never-reconciled"
-          >
-            Never reconciled
-          </p>
-        </section>
+            </template>
+            <template v-else>
+              <div class="account-detail-page__section-header">
+                <h2
+                  id="reconciliation-history-title"
+                  class="account-detail-page__section-title"
+                >
+                  Reconciliation history
+                </h2>
+                <StateBadge
+                  v-if="
+                    reconciliationHistory?.items.some((item) => !item.undone)
+                  "
+                  variant="positive"
+                  size="sm"
+                  >On record</StateBadge
+                >
+                <StateBadge v-else variant="warning" size="sm"
+                  >Not reconciled</StateBadge
+                >
+              </div>
+              <p
+                v-if="reconciliationHistoryLoading"
+                class="account-detail-page__history-state"
+                role="status"
+              >
+                Loading reconciliation history…
+              </p>
+              <p
+                v-else-if="reconciliationHistoryError"
+                class="account-detail-page__history-state"
+                role="alert"
+              >
+                Reconciliation history could not be loaded.
+              </p>
+              <template v-else-if="reconciliationHistory?.items.length">
+                <p
+                  v-if="reconciliationAttention?.changes_since"
+                  class="account-detail-page__history-state"
+                  data-cy="reconciliation-attention"
+                >
+                  {{ reconciliationAttention.changes_since }} changes since last
+                  reconciliation
+                  <template v-if="reconciliationAttention.carried_pending">
+                    · {{ reconciliationAttention.carried_pending }} carried
+                    pending
+                  </template>
+                </p>
+                <p
+                  v-if="reconciliationAttention?.reconciled_history_changed"
+                  class="account-detail-page__history-warning"
+                  role="status"
+                  data-cy="reconciled-history-warning"
+                >
+                  Historical transaction records changed after reconciliation.
+                  Those edits are already saved and are not reverted by Undo.
+                </p>
+                <div
+                  v-for="item in reconciliationHistory.items"
+                  :key="item.reconciliation_id"
+                  class="account-detail-page__history-row"
+                  data-cy="reconciliation-history-row"
+                >
+                  <div class="account-detail-page__history-copy">
+                    <strong>{{
+                      reconciliationEvidenceSummary(item.reconciliation_id)
+                    }}</strong>
+                    <span v-if="item.undone"
+                      >Undone · canonical changes remain in place</span
+                    >
+                    <span>
+                      Source as of
+                      {{
+                        formatReconciliationDate(
+                          reconciliationCommitById.get(item.reconciliation_id)
+                            ?.source_as_of ?? item.committed_at,
+                        )
+                      }}
+                      · Committed
+                      {{ formatReconciliationDate(item.committed_at) }}
+                    </span>
+                  </div>
+                  <Button
+                    v-if="
+                      latestUndoableReconciliation?.reconciliation_id ===
+                      item.reconciliation_id
+                    "
+                    variant="tertiary"
+                    data-cy="undo-last-reconciliation"
+                    @click="showUndoReconciliationConfirmation = true"
+                  >
+                    Undo last reconciliation
+                  </Button>
+                </div>
+              </template>
+              <p
+                v-else
+                class="account-detail-page__history-state"
+                data-cy="never-reconciled"
+              >
+                Never reconciled
+              </p>
+              <Button
+                variant="tertiary"
+                aria-label="Close reconciliation history"
+                @click="accountDrawer = null"
+                >Close</Button
+              >
+            </template>
+          </section>
+        </div>
 
         <div
           v-if="investigatingReconciliation && budgetAttempt"
@@ -2934,6 +3113,7 @@ function formatTaxTreatment(value: string | null | undefined): string {
         </div>
 
         <section
+          v-if="isBudgetAccount"
           class="account-detail-page__budget-entry"
           aria-label="Add transaction or transfer"
         >
@@ -3288,6 +3468,152 @@ function formatTaxTreatment(value: string | null | undefined): string {
                 </div>
               </section>
               <section
+                v-if="isInvestmentAccount"
+                class="account-detail-page__section account-detail-page__summary"
+                data-cy="holdings-summary-section"
+                @keydown="handleHoldingKeydown"
+              >
+                <h2 class="account-detail-page__section-title">
+                  Holdings summary
+                </h2>
+                <p class="account-detail-page__summary-sub">
+                  {{ valueAsOfLabel }}
+                </p>
+                <form
+                  class="account-detail-page__holding-form"
+                  @submit.prevent="addHolding"
+                >
+                  <TextField
+                    v-model="newHolding.symbol"
+                    label="Symbol"
+                    required
+                  />
+                  <TextField
+                    v-model="newHolding.quantity"
+                    label="Quantity"
+                    type="number"
+                    min="0"
+                    step="any"
+                    required
+                  />
+                  <BinaryToggle
+                    v-model="holdingBasisMode"
+                    label="Basis input"
+                    kind="status"
+                    data-name="holding-basis-mode"
+                    :options="holdingBasisOptions"
+                  />
+                  <TextField
+                    v-model="newHolding.basis"
+                    :label="
+                      holdingBasisMode === 'average'
+                        ? 'Average basis'
+                        : 'Total basis'
+                    "
+                    inputmode="decimal"
+                    required
+                  />
+                  <Button type="submit" :disabled="holdingMutationPending">
+                    Add position
+                  </Button>
+                </form>
+                <div
+                  v-if="investmentStatement?.holdings.length"
+                  data-cy="holdings-summary-table"
+                >
+                  <TableShell
+                    :columns="holdingSummaryColumns"
+                    :rows="holdingSummaryRows"
+                    row-key="key"
+                    empty-text="No holdings in latest statement."
+                    row-clickable
+                    @row-click="handleHoldingRowClick"
+                  >
+                    <template #row="{ row }">
+                      <template
+                        v-if="editingHoldingId === holdingSummaryRow(row).key"
+                      >
+                        <td class="table-shell__cell">
+                          {{ holdingSummaryRow(row).symbol }}
+                        </td>
+                        <td class="table-shell__cell table-shell__cell--end">
+                          <TextField
+                            v-model="holdingDraft.quantity"
+                            label="Quantity"
+                            type="number"
+                            min="0"
+                            step="any"
+                            :disabled="holdingMutationPending"
+                            @keydown="
+                              handleHoldingSubmitKeydown(
+                                $event,
+                                investmentStatement!.holdings.find(
+                                  (holding) =>
+                                    holding.position_id ===
+                                    holdingSummaryRow(row).key,
+                                )!,
+                              )
+                            "
+                          />
+                        </td>
+                        <td class="table-shell__cell table-shell__cell--end">
+                          <TextField
+                            v-model="holdingDraft.basis"
+                            :label="
+                              holdingBasisMode === 'average'
+                                ? 'Average basis'
+                                : 'Total basis'
+                            "
+                            inputmode="decimal"
+                            :disabled="holdingMutationPending"
+                            @keydown="
+                              handleHoldingSubmitKeydown(
+                                $event,
+                                investmentStatement!.holdings.find(
+                                  (holding) =>
+                                    holding.position_id ===
+                                    holdingSummaryRow(row).key,
+                                )!,
+                              )
+                            "
+                          />
+                        </td>
+                        <td class="table-shell__cell table-shell__cell--end">
+                          {{ holdingSummaryRow(row).value }}
+                        </td>
+                        <td class="table-shell__cell table-shell__cell--end">
+                          {{ holdingSummaryRow(row).gain }}
+                        </td>
+                      </template>
+                      <template v-else>
+                        <td class="table-shell__cell">
+                          {{ holdingSummaryRow(row).symbol }}
+                        </td>
+                        <td class="table-shell__cell table-shell__cell--end">
+                          {{ holdingSummaryRow(row).quantity }}
+                        </td>
+                        <td class="table-shell__cell table-shell__cell--end">
+                          {{ holdingSummaryRow(row).basis }}
+                        </td>
+                        <td class="table-shell__cell table-shell__cell--end">
+                          {{ holdingSummaryRow(row).value }}
+                        </td>
+                        <td class="table-shell__cell table-shell__cell--end">
+                          {{ holdingSummaryRow(row).gain }}
+                        </td>
+                      </template>
+                    </template>
+                  </TableShell>
+                </div>
+                <p v-else class="account-detail-page__empty">
+                  {{
+                    investmentStatement?.effective_date
+                      ? "No holdings in latest statement."
+                      : "No statement recorded."
+                  }}
+                </p>
+              </section>
+              <section
                 class="account-detail-page__section"
                 data-cy="transactions-section"
               >
@@ -3410,121 +3736,9 @@ function formatTaxTreatment(value: string | null | undefined): string {
                   Summary & notes
                 </h2>
                 <KeyValueList :items="summaryDetails" />
-                <h3 class="account-detail-page__section-title">
-                  Account details
-                </h3>
-                <KeyValueList :items="accountDetails" />
-                <Button variant="tertiary" @click="openConfigurationModal"
-                  >Edit configuration</Button
-                >
-              </section>
-              <section
-                v-if="isInvestmentAccount"
-                class="account-detail-page__section account-detail-page__summary"
-                data-cy="holdings-summary-section"
-              >
-                <h2 class="account-detail-page__section-title">
-                  Holdings summary
-                </h2>
-                <p class="account-detail-page__summary-sub">
-                  {{ valueAsOfLabel }}
-                </p>
-                <div
-                  v-if="investmentStatement?.holdings.length"
-                  class="account-detail-page__snapshot-table"
-                >
-                  <div class="account-detail-page__snapshot-header">
-                    <span class="account-detail-page__snapshot-th">Symbol</span>
-                    <span
-                      class="account-detail-page__snapshot-th account-detail-page__snapshot-th--end"
-                      >Value</span
-                    >
-                  </div>
-                  <div
-                    v-for="holding in investmentStatement.holdings"
-                    :key="holding.position_id"
-                    class="account-detail-page__snapshot-row"
-                  >
-                    <span class="account-detail-page__snapshot-td">
-                      {{ holding.ticker }}
-                      <span class="account-detail-page__summary-sub">
-                        Basis {{ formatCurrency(holding.cost_basis_minor) }} ·
-                        Gain {{ formatCurrency(holding.unrealized_gain_minor) }}
-                      </span>
-                    </span>
-                    <span
-                      class="account-detail-page__snapshot-td account-detail-page__snapshot-td--end"
-                    >
-                      {{ formatCurrency(holding.value_minor) }}
-                    </span>
-                  </div>
-                </div>
-                <p v-else class="account-detail-page__empty">
-                  {{
-                    investmentStatement?.effective_date
-                      ? "No holdings in latest statement."
-                      : "No statement recorded."
-                  }}
-                </p>
               </section>
             </template>
           </div>
-
-          <aside v-if="!isBudgetAccount" class="account-detail-page__sidebar">
-            <section
-              class="account-detail-page__sidebar-section"
-              data-cy="account-details-section"
-            >
-              <div class="account-detail-page__sidebar-header">
-                <h3 class="account-detail-page__sidebar-title">
-                  Account details
-                </h3>
-                <svg
-                  class="account-detail-page__sidebar-icon"
-                  viewBox="0 0 16 16"
-                  fill="none"
-                >
-                  <rect
-                    x="2"
-                    y="2"
-                    width="12"
-                    height="12"
-                    rx="2"
-                    stroke="currentColor"
-                    stroke-width="1.5"
-                  />
-                  <path
-                    d="M5 8h6M8 5v6"
-                    stroke="currentColor"
-                    stroke-width="1.5"
-                    stroke-linecap="round"
-                  />
-                </svg>
-              </div>
-              <KeyValueList :items="accountDetails" />
-            </section>
-
-            <section
-              v-if="isTrackingAccount && account?.tracking_source === 'import'"
-              class="account-detail-page__sidebar-section"
-              data-cy="migration-context-section"
-            >
-              <h3 class="account-detail-page__sidebar-title">
-                Migration / import context
-              </h3>
-              <KeyValueList :items="migrationContextDetails" />
-            </section>
-
-            <section
-              class="account-detail-page__sidebar-section"
-              data-cy="history-config-section"
-            >
-              <h3 class="account-detail-page__sidebar-title">
-                History / configuration
-              </h3>
-              <KeyValueList :items="historyConfigDetails" />
-            </section>
-          </aside>
         </div>
 
         <FormModal
@@ -4492,13 +4706,8 @@ function formatTaxTreatment(value: string | null | undefined): string {
 .account-detail-page__content {
   order: 4;
 }
-.account-detail-page--budget .account-detail-page__content {
-  grid-template-columns: minmax(0, 1fr);
-}
-.account-detail-page--budget .account-detail-page__left {
-  grid-template-columns: minmax(0, 1fr);
-}
 .account-detail-page__investigation {
+  grid-column: 1 / -1;
   display: grid;
   gap: var(--space-md);
   padding: var(--space-md) var(--space-lg);
@@ -4567,7 +4776,7 @@ function formatTaxTreatment(value: string | null | undefined): string {
 
 .account-detail-page__content {
   display: grid;
-  grid-template-columns: 1fr 280px;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-lg);
   min-width: 0;
 }
@@ -4583,7 +4792,17 @@ function formatTaxTreatment(value: string | null | undefined): string {
   grid-column: 1 / -1;
 }
 
+.account-detail-page__left > [data-cy="transactions-section"] {
+  grid-column: 1 / -1;
+}
+
+.account-detail-page__left:has([data-cy="holdings-summary-section"])
+  > [data-cy="holdings-summary-section"] {
+  grid-column: auto;
+}
+
 .account-detail-page__chart-section {
+  grid-column: 1 / -1;
   min-width: 0;
 }
 
@@ -4628,6 +4847,24 @@ function formatTaxTreatment(value: string | null | undefined): string {
 
 .account-detail-page__reconciliation-history {
   padding: var(--space-lg);
+}
+
+.account-detail-page__history-drawer-backdrop {
+  position: fixed;
+  z-index: 20;
+  inset: 0;
+  display: flex;
+  justify-content: flex-end;
+  background: color-mix(in srgb, var(--color-on-surface) 32%, transparent);
+}
+
+.account-detail-page__history-drawer {
+  width: min(480px, 100%);
+  height: 100%;
+  overflow-y: auto;
+  padding: var(--space-lg);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-lg);
 }
 
 .account-detail-page__history-row {
@@ -5026,11 +5263,16 @@ function formatTaxTreatment(value: string | null | undefined): string {
 
 .account-detail-page__snapshot-header {
   display: grid;
-  grid-template-columns: 1fr 120px;
+  grid-template-columns: minmax(0, 1fr) 120px;
   gap: var(--space-sm);
   padding: var(--space-sm) var(--space-lg);
   border-bottom: 1px solid var(--color-outline);
   background: var(--color-surface-muted);
+}
+
+.account-detail-page__snapshot-header--holdings,
+.account-detail-page__snapshot-row--holdings {
+  grid-template-columns: minmax(0, 1fr) repeat(4, minmax(88px, 120px));
 }
 
 .account-detail-page__snapshot-th {
@@ -5049,7 +5291,7 @@ function formatTaxTreatment(value: string | null | undefined): string {
 
 .account-detail-page__snapshot-row {
   display: grid;
-  grid-template-columns: 1fr 120px;
+  grid-template-columns: minmax(0, 1fr) 120px;
   gap: var(--space-sm);
   padding: var(--space-md) var(--space-lg);
   border-bottom: 1px solid var(--color-outline);
@@ -5233,6 +5475,27 @@ function formatTaxTreatment(value: string | null | undefined): string {
 @media (max-width: 900px) {
   .account-detail-page__cutover-row {
     grid-template-columns: 1fr;
+  }
+}
+
+.account-detail-page__holding-form {
+  display: grid;
+  grid-template-columns:
+    minmax(100px, 1fr) minmax(100px, 0.8fr) minmax(150px, 1.2fr)
+    minmax(110px, 1fr) auto;
+  gap: var(--space-md);
+  align-items: end;
+  margin-bottom: var(--space-md);
+}
+
+.account-detail-page__holding-form :deep(.field),
+.account-detail-page__holding-form :deep(.binary-toggle) {
+  min-width: 0;
+}
+
+@media (max-width: 720px) {
+  .account-detail-page__holding-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
