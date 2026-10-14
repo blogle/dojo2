@@ -10,6 +10,8 @@ ALTER TABLE loan_balance_snapshots ADD COLUMN IF NOT EXISTS ytd_principal_paid_m
 ALTER TABLE loan_balance_snapshots ADD COLUMN IF NOT EXISTS ytd_interest_paid_minor BIGINT;
 ALTER TABLE loan_balance_snapshots ALTER COLUMN unapplied_credit_minor DROP NOT NULL;
 ALTER TABLE loan_balance_snapshots ALTER COLUMN unapplied_credit_minor DROP DEFAULT;
+ALTER TABLE loan_balance_snapshots ALTER COLUMN escrow_balance_minor DROP NOT NULL;
+ALTER TABLE loan_balance_snapshots ALTER COLUMN escrow_balance_minor DROP DEFAULT;
 
 ALTER TABLE investment_cash_snapshots ADD COLUMN IF NOT EXISTS record_order BIGINT;
 ALTER TABLE transactions ADD COLUMN IF NOT EXISTS record_order BIGINT;

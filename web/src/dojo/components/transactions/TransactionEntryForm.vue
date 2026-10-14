@@ -449,6 +449,9 @@ function setMode(nextMode: "transaction" | "transfer") {
 
 <style scoped>
 .entry-form {
+  container-name: transaction-entry;
+  container-type: inline-size;
+  min-width: 0;
   background: var(--color-surface);
   border: 1px solid var(--color-outline);
   border-radius: var(--radius-md);
@@ -470,31 +473,111 @@ function setMode(nextMode: "transaction" | "transfer") {
 
 .entry-form__row {
   display: grid;
-  grid-template-columns:
-    minmax(95px, 0.85fr) minmax(120px, 1.15fr) minmax(120px, 1.15fr)
-    minmax(90px, 0.8fr) minmax(95px, 0.8fr) minmax(130px, 1.2fr) minmax(
-      100px,
-      0.8fr
-    )
-    auto;
   gap: var(--space-md);
   align-items: end;
+  min-width: 0;
 }
 
 .entry-form__row--transaction {
   grid-template-columns:
-    minmax(95px, 0.8fr) minmax(120px, 1.1fr) minmax(130px, 1.2fr)
-    minmax(90px, 0.75fr) minmax(95px, 0.8fr) minmax(130px, 1.2fr) minmax(
-      100px,
-      0.8fr
-    )
-    auto;
+    minmax(120px, 0.9fr) minmax(0, 1.1fr) minmax(0, 1.1fr)
+    minmax(112px, 0.8fr) minmax(100px, 0.8fr) minmax(0, 1.3fr)
+    minmax(100px, 0.8fr) max-content;
 }
 
 .entry-form__row--transfer {
   grid-template-columns:
-    minmax(95px, 0.8fr) minmax(120px, 1.1fr) minmax(120px, 1.1fr)
-    minmax(90px, 0.75fr) minmax(130px, 1.2fr) minmax(110px, 0.9fr) auto;
+    minmax(120px, 0.9fr) minmax(0, 1.1fr) minmax(0, 1.1fr)
+    minmax(112px, 0.8fr) minmax(0, 1.3fr) minmax(100px, 0.8fr) max-content;
+}
+
+@container transaction-entry (max-width: 85rem) {
+  .entry-form__row--transaction {
+    grid-template-columns:
+      minmax(120px, 0.9fr) minmax(0, 1.1fr) minmax(0, 1.1fr)
+      minmax(112px, 0.8fr);
+  }
+
+  .entry-form__row--transaction > :nth-child(n + 5) {
+    grid-row: 2;
+  }
+
+  .entry-form__row--transaction > :nth-child(5) {
+    grid-column: 1;
+  }
+
+  .entry-form__row--transaction > :nth-child(6) {
+    grid-column: 2;
+  }
+
+  .entry-form__row--transaction > :nth-child(7) {
+    grid-column: 3;
+  }
+
+  .entry-form__row--transaction > :nth-child(8) {
+    grid-column: 4;
+  }
+
+  .entry-form__row--transfer {
+    grid-template-columns:
+      minmax(120px, 0.9fr) minmax(0, 1.1fr) minmax(0, 1.1fr)
+      minmax(112px, 0.8fr);
+  }
+
+  .entry-form__row--transfer > :nth-child(n + 5) {
+    grid-row: 2;
+  }
+
+  .entry-form__row--transfer > :nth-child(5) {
+    grid-column: 1 / span 2;
+  }
+
+  .entry-form__row--transfer > :nth-child(6) {
+    grid-column: 3;
+  }
+
+  .entry-form__row--transfer > :nth-child(7) {
+    grid-column: 4;
+  }
+}
+
+@container transaction-entry (max-width: 40rem) {
+  .entry-form__row--transaction,
+  .entry-form__row--transfer {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .entry-form__row--transaction > *,
+  .entry-form__row--transfer > * {
+    grid-column: 1;
+    grid-row: auto;
+  }
+}
+
+.entry-form__row > * {
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.entry-form__row :deep(.field),
+.entry-form__row :deep(.field__control-shell),
+.entry-form__row :deep(.combobox-field),
+.entry-form__row :deep(.memo-autocomplete),
+.entry-form__row :deep(.binary-toggle) {
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.entry-form__row :deep(.field__control),
+.entry-form__row :deep(.combobox-field__trigger),
+.entry-form__row :deep(.memo-autocomplete__input),
+.entry-form__row :deep(.binary-toggle__button) {
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.entry-form__row :deep(input[type="date"]) {
+  min-width: 0;
 }
 
 .entry-form__to-account-disclosure {
@@ -551,39 +634,23 @@ function setMode(nextMode: "transaction" | "transfer") {
 }
 
 .entry-form__to-account-row {
-  grid-template-columns: minmax(130px, 1fr) minmax(130px, 1fr) minmax(
-      180px,
-      2fr
-    );
   display: grid;
+  grid-template-columns: minmax(120px, 0.85fr) minmax(120px, 0.85fr) minmax(
+      0,
+      1.3fr
+    );
   gap: var(--space-md);
   align-items: end;
+}
+
+@container transaction-entry (max-width: 40rem) {
+  .entry-form__to-account-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .entry-form__actions {
   display: flex;
   gap: var(--space-sm);
-}
-
-@media (max-width: 1200px) {
-  .entry-form__row--transaction {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-
-  .entry-form__row--transfer {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-
-  .entry-form__to-account-row {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 720px) {
-  .entry-form__row--transaction,
-  .entry-form__row--transfer,
-  .entry-form__to-account-row {
-    grid-template-columns: 1fr;
-  }
 }
 </style>

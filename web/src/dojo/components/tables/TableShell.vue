@@ -13,13 +13,17 @@ withDefaults(
     rowKey?: string;
     stickyHeader?: boolean;
     emptyText?: string;
+    rowClickable?: boolean;
   }>(),
   {
     rowKey: "key",
     stickyHeader: false,
     emptyText: "No rows to display.",
+    rowClickable: false,
   },
 );
+
+const emit = defineEmits<{ rowClick: [row: object] }>();
 
 function cellValue(row: object, columnKey: string): unknown {
   return (row as Record<string, unknown>)[columnKey];
@@ -29,6 +33,13 @@ function cellValue(row: object, columnKey: string): unknown {
 <template>
   <div class="table-shell" data-cy="table-shell-root">
     <table class="table-shell__table">
+      <colgroup>
+        <col
+          v-for="column in columns"
+          :key="column.key"
+          :style="column.width ? { width: column.width } : undefined"
+        />
+      </colgroup>
       <thead>
         <tr>
           <th
@@ -39,7 +50,6 @@ function cellValue(row: object, columnKey: string): unknown {
               'table-shell__head--sticky': stickyHeader,
               'table-shell__head--end': column.align === 'end',
             }"
-            :style="column.width ? { width: column.width } : undefined"
           >
             {{ column.label }}
           </th>
@@ -55,17 +65,21 @@ function cellValue(row: object, columnKey: string): unknown {
           v-for="row in rows"
           :key="String((row as Record<string, unknown>)[rowKey] ?? '')"
           class="table-shell__row"
+          :class="{ 'table-shell__row--clickable': rowClickable }"
+          :tabindex="rowClickable ? 0 : undefined"
+          @click="rowClickable && emit('rowClick', row)"
+          @keydown.enter.prevent="rowClickable && emit('rowClick', row)"
         >
-          <slot name="row" :row="row" :columns="columns">
-            <template v-for="column in columns" :key="column.key">
-              <td
-                class="table-shell__cell"
-                :class="{ 'table-shell__cell--end': column.align === 'end' }"
-              >
+          <template v-for="column in columns" :key="column.key">
+            <td
+              class="table-shell__cell"
+              :class="{ 'table-shell__cell--end': column.align === 'end' }"
+            >
+              <slot name="cell" :row="row" :column="column">
                 {{ cellValue(row, column.key) }}
-              </td>
-            </template>
-          </slot>
+              </slot>
+            </td>
+          </template>
         </tr>
       </tbody>
     </table>
@@ -80,12 +94,14 @@ function cellValue(row: object, columnKey: string): unknown {
 
 .table-shell__table {
   width: 100%;
+  min-width: max-content;
   border-collapse: collapse;
+  table-layout: fixed;
 }
 
 .table-shell__head {
-  padding: 0 12px;
   height: 34px;
+  padding: 0 var(--space-md);
   background: var(--color-surface-muted);
   color: var(--color-on-surface-muted);
   text-align: left;
@@ -115,7 +131,7 @@ function cellValue(row: object, columnKey: string): unknown {
 .table-shell__cell,
 .table-shell__empty {
   height: var(--space-row-height-default, 42px);
-  padding: 0 12px;
+  padding: 0 var(--space-md);
   color: var(--color-on-surface);
   font-family: var(--text-body-md-font-family);
   font-size: var(--text-body-md-font-size);
@@ -128,8 +144,18 @@ function cellValue(row: object, columnKey: string): unknown {
   background: var(--color-surface-selected);
 }
 
+.table-shell__row--clickable {
+  cursor: pointer;
+}
+
+.table-shell__row--clickable:focus-visible {
+  background: var(--color-surface-selected);
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
 .table-shell__empty {
-  padding: var(--space-lg) 12px;
+  padding: var(--space-lg) var(--space-md);
   color: var(--color-on-surface-muted);
 }
 </style>
