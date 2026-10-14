@@ -20,6 +20,9 @@ describe("TransactionEntryForm responsive layout", () => {
       it(`contains every ${mode.toLowerCase()} control at ${width}px`, () => {
         cy.viewport(width, 900);
         mountEntryForm();
+        cy.get("[data-cy=transaction-entry-form]").then(($form) => {
+          $form[0]!.style.width = `${width}px`;
+        });
         if (mode === "Transfer") cy.contains("button", "Transfer").click();
 
         cy.get("[data-cy=transaction-entry-form]").should("be.visible");
