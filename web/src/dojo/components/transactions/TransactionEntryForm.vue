@@ -491,7 +491,7 @@ function setMode(nextMode: "transaction" | "transfer") {
     minmax(112px, 0.8fr) minmax(0, 1.3fr) minmax(100px, 0.8fr) max-content;
 }
 
-@container transaction-entry (max-width: 75rem) {
+@container transaction-entry (max-width: 77rem) {
   .entry-form__row--transaction {
     grid-template-columns:
       minmax(120px, 0.9fr) minmax(0, 1.1fr) minmax(0, 1.1fr)
