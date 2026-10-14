@@ -104,6 +104,17 @@ describe("TransactionEntryForm responsive layout", () => {
             expect(control, "labeled field has a control").not.to.equal(null);
             const labelBounds = label.getBoundingClientRect();
             const controlBounds = control!.getBoundingClientRect();
+            const minimumWidths: Record<string, number> = {
+              Date: 112,
+              Account: 120,
+              "From account": 120,
+              "To account": 120,
+              Category: 120,
+              Amount: 112,
+              Direction: 100,
+              Memo: 120,
+              Status: 100,
+            };
             expect(labelBounds.left).to.be.at.least(
               item.getBoundingClientRect().left - 1,
             );
@@ -114,6 +125,9 @@ describe("TransactionEntryForm responsive layout", () => {
               item.getBoundingClientRect().right + 1,
             );
             expect(controlBounds.top).to.be.at.least(labelBounds.bottom - 1);
+            expect(controlBounds.width).to.be.at.least(
+              minimumWidths[label.textContent?.trim() ?? ""] ?? 0,
+            );
           }
         });
         cy.get("[data-cy=binary-toggle-status]")
