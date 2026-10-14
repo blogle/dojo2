@@ -90,7 +90,7 @@ describe("TransactionEntryForm responsive layout", () => {
 
           const expectedRows = width <= 1152 ? 2 : 1;
           expect(
-            new Set(itemBounds.map((bounds) => Math.round(bounds.top))).size,
+            new Set(itemBounds.map((bounds) => Math.round(bounds.bottom))).size,
           ).to.equal(expectedRows);
 
           for (const item of items) {
